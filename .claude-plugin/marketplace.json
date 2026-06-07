@@ -1,0 +1,19 @@
+{
+  "name": "development-workflow-marketplace",
+  "description": "JocuperDARY's skill marketplace",
+  "owner": {
+    "name": "JocuperDARY"
+  },
+  "plugins": [
+    {
+      "name": "development-workflow",
+      "description": "全流程开发准则：操作指引先行、可量化验证、三C验证闭环——从方案设计到验证同步的完整工作方法论",
+      "version": "1.4.0",
+      "source": "./",
+      "featured": true,
+      "author": {
+        "name": "JocuperDARY"
+      }
+    }
+  ]
+}
