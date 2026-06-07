@@ -18,25 +18,25 @@
 
 ## 安装
 
-### Claude Code
+### Claude Code（推荐：插件安装）
 
-将本仓库克隆到本地后，将 `SKILL.md` 放入你的 skills 目录：
+在 Claude Code 中直接安装本仓库：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/JocuperDARY/development-workflow-skill.git
-
-# 复制到 Claude Code skills 目录
-cp development-workflow-skill/SKILL.md ~/.claude/skills/development-workflow.md
+/plugin install github:JocuperDARY/development-workflow-skill
 ```
 
-或者直接作为插件目录使用。
+Claude Code 会自动识别 `.claude-plugin/plugin.json` 和 `skills/` 目录，安装后 skill 即刻生效。
 
 ### 手动安装
 
-1. 下载 `SKILL.md`
-2. 放入你使用的 AI 编程助手的 skills 目录
-3. 确保 skill 文件头部包含正确的 YAML frontmatter（name、description）
+克隆仓库并复制 skill 文件：
+
+```bash
+git clone https://github.com/JocuperDARY/development-workflow-skill.git
+mkdir -p ~/.claude/skills/development-workflow
+cp development-workflow-skill/skills/development-workflow/SKILL.md ~/.claude/skills/development-workflow/
+```
 
 ## Skill 触发
 
