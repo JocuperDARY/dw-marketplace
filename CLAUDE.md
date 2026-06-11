@@ -6,7 +6,7 @@ This is a standalone skill repository. The SKILL.md at the root is the deliverab
 
 Before proposing changes:
 
-1. **Understand the skill's purpose** — it defines a structured development workflow methodology (操作指引先行 → 实现 → 三C验证 → 同步)
+1. **Understand the skill's purpose** — it defines a structured development workflow methodology (诊断 → 方案 → TDD → 数据完整性 → 测试闸门 → 验证 → 收尾)
 2. **Skill changes require evidence** — if modifying behavioral content (铁律, 反模式, 检查清单), show before/after examples of how the change affects agent behavior
 3. **Version the skill** — update the version number and version records table in SKILL.md
 4. **Don't add project-specific content** — this skill is designed to be通用 (universal). If adding project-specific adaptations, those belong in the project's own synopsis directory, not here
