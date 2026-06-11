@@ -66,7 +66,7 @@ brainstorming → development-workflow → systematic-debugging / code-review / 
 
 ## 版本
 
-当前版本：2.0（2026-06-12）
+当前版本：2.1（2026-06-12）
 
 ## 许可
 
