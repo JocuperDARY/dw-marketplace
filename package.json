@@ -1,7 +1,7 @@
 {
   "name": "development-workflow-skill",
-  "version": "1.4.0",
-  "description": "全流程开发准则 Skill — 操作指引先行、可量化验证、三C验证闭环、实现优先推定、自动化守则。适用于任何代码改动前的方案设计、实现、验证与同步。",
+  "version": "3.0.0",
+  "description": "全流程开发准则 Plugin — 1个总纲 + 9个子Skill，按流程阶段和领域自动选择。操作指引先行、三C验证闭环、TDD实现、优化方法论、工具编排。",
   "license": "MIT",
   "keywords": [
     "claude-code",
@@ -19,6 +19,15 @@
     "url": "git+https://github.com/JocuperDARY/development-workflow-skill.git"
   },
   "files": [
-    "skills/development-workflow/"
+    "skills/development-workflow/",
+    "skills/dw-diagnosis/",
+    "skills/dw-planning/",
+    "skills/dw-implementation/",
+    "skills/dw-verification/",
+    "skills/dw-wrapup/",
+    "skills/dw-optimization/",
+    "skills/dw-debugging/",
+    "skills/dw-tooling/",
+    "skills/dw-reference/"
   ]
 }

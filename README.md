@@ -1,64 +1,52 @@
-# Development Workflow Skill
+# Development Workflow Skill（Plugin v3.0）
 
-全流程开发准则 Skill —— 为 AI 编程助手提供结构化的开发工作方法论。
+全流程开发准则 Plugin —— 为 AI 编程助手提供结构化的开发工作方法论。
 
-## 核心内容
+**v3.0 架构重构**：从单一 1900 行 SKILL.md 拆分为 **1 个总纲 + 9 个子 Skill**，按流程阶段和领域自动选择，减少上下文占用。
 
-本 Skill 定义了从诊断到收尾的完整 7 阶段开发流程：
+## 架构总览
 
-- **阶段一：诊断与根因定位** — 多维度证据收集、假设交叉验证、根因层级分类，在找到根因前绝不修复
-- **阶段二：操作指引先行** — 写代码前先编写 5 部分操作指引（背景、方案探索、选定理由、实现计划、回退计划）
-- **阶段三：TDD 实现** — RED→GREEN→REFACTOR 循环，纯函数测试优先，合成数据优于真实数据
-- **阶段四：数据完整性防护** — 哨兵值与真实值区分、运行时元数据落盘、FAIL/WARN 两级自检哨兵
-- **阶段五：分层测试闸门** — 单元→集成→风格→类型→代码审查→安全扫描，全绿方进入验证
-- **阶段六：三 C 验证闭环** — 一致性（Consistency）、完整性（Completeness）、正确性（Correctness）+ P0-P3 偏差分级修复
-- **阶段七：收尾与知识持久化** — 文档更新、基线对比记录、memory 知识库落盘
+```
+development-workflow (总纲: 铁律 + 阶段门控 + 生态)
+    ├── dw-diagnosis      → 阶段一：诊断与根因定位
+    ├── dw-planning       → 阶段二：方案设计与操作指引先行
+    ├── dw-implementation → 阶段三~五：TDD + 数据完整性 + 测试闸门
+    ├── dw-verification   → 阶段六：三C验证与偏差修复
+    ├── dw-wrapup         → 阶段七：收尾与知识持久化
+    ├── dw-optimization   → 领域：优化方法论（六类优化 + 库选型）
+    ├── dw-debugging      → 领域：诊断与调试方法论
+    ├── dw-tooling        → 领域：工具普查与编排
+    └── dw-reference      → 领域：检查清单 + 反模式 + 附录
+```
 
-**9 条铁律**分为两类：
-- **工具使用铁律 A1-A4**：Edit 工具强制、敏感信息保护、Agent 不自行 commit、最大化利用工具
-- **流程铁律 B1-B5**：计划先行、TODO 对照、偏差分级修复、过测试闸门、数据完整性保护
+## 子 Skill 速查
 
-## 适用范围
+| Skill | 触发场景 | 典型触发词 |
+|-------|---------|-----------|
+| `development-workflow` | 总纲入口：铁律体系、门控模型 | 工作流准则、开发规范、iron rules |
+| `dw-diagnosis` | Bug 调查、异常排查、根因分析 | 诊断、根因、bug分析、问题排查 |
+| `dw-planning` | 方案设计、编写操作指引 | 方案设计、操作指引、技术方案 |
+| `dw-implementation` | 写代码、TDD、数据完整性 | TDD、实现、哨兵值、测试闸门 |
+| `dw-verification` | 验证正确性、三C检查 | 验证、三C、偏差、正确性 |
+| `dw-wrapup` | 文档更新、知识落盘 | 收尾、提交、知识持久化、基线对比 |
+| `dw-optimization` | 性能分析与优化 | 优化、性能、profiling、加速 |
+| `dw-debugging` | 深入调试管道/信号 | 调试、信号诊断、管道 |
+| `dw-tooling` | 工具选型、并行编排 | 工具、MCP、编排、普查 |
+| `dw-reference` | 查阅检查清单、反模式 | 检查清单、反模式、快速参考 |
 
-适用于**任何**代码改动：新功能、Bug 修复、性能优化、代码重构、参数调整、配置变更。
+## 核心流程（7 阶段）
+
+**诊断 → 方案 → 实现 → 数据完整性 → 测试闸门 → 验证 → 收尾**
+
+9 条铁律（A1-A4 工具使用 + B1-B5 流程纪律）贯穿全流程。
 
 ## 安装
-
-### Claude Code（推荐：插件安装）
-
-在 Claude Code 中直接安装本仓库：
 
 ```bash
 /plugin install github:JocuperDARY/development-workflow-skill
 ```
 
-Claude Code 会自动识别 `.claude-plugin/plugin.json` 和 `skills/` 目录，安装后 skill 即刻生效。
-
-### 手动安装
-
-克隆仓库并复制 skill 文件：
-
-```bash
-git clone https://github.com/JocuperDARY/development-workflow-skill.git
-mkdir -p ~/.claude/skills/development-workflow
-cp development-workflow-skill/skills/development-workflow/SKILL.md ~/.claude/skills/development-workflow/
-```
-
-## Skill 触发
-
-当你的 AI 助手收到以下类型的请求时，本 Skill 会指导它按结构化流程工作：
-
-- 新功能/新模块添加
-- Bug 修复
-- 性能优化
-- 代码重构
-- 参数调整
-
-触发词：工作流准则、开发规范、操作指引、三C验证、闭环流程、量化验证、工作指引、development workflow、operational guideline、iron rules、开发方法论
-
 ## 生态衔接
-
-本 Skill 与其他 Skill 组成完整工作链：
 
 ```
 brainstorming → development-workflow → systematic-debugging / code-review / verify
@@ -66,7 +54,7 @@ brainstorming → development-workflow → systematic-debugging / code-review / 
 
 ## 版本
 
-当前版本：2.1（2026-06-12）
+当前版本：**3.0**（2026-06-15）
 
 ## 许可
 
