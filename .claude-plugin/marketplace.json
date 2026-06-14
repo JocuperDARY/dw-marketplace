@@ -1,0 +1,28 @@
+{
+  "name": "development-workflow-skill-marketplace",
+  "description": "全流程开发准则插件 — 铁律体系、七阶段门控、三C验证闭环，含10个开发工作流子Skill",
+  "owner": {
+    "name": "JocuperDARY"
+  },
+  "plugins": [
+    {
+      "name": "development-workflow-skill",
+      "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排等10个子Skill，按领域自动选择。",
+      "author": {
+        "name": "JocuperDARY"
+      },
+      "category": "development",
+      "source": {
+        "source": "github",
+        "url": "https://github.com/JocuperDARY/development-workflow-skill.git",
+        "ref": "v3.0.0"
+      },
+      "homepage": "https://github.com/JocuperDARY/development-workflow-skill",
+      "license": "Apache-2.0",
+      "keywords": [
+        "workflow", "development", "tdd", "verification", "diagnosis",
+        "planning", "optimization", "debugging", "tool-orchestration"
+      ]
+    }
+  ]
+}
