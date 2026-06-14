@@ -15,7 +15,6 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/JocuperDARY/development-workflow-skill.git",
-        "path": ".",
         "ref": "v3.0.0"
       },
       "homepage": "https://github.com/JocuperDARY/development-workflow-skill",
