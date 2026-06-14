@@ -2,7 +2,7 @@
   "name": "development-workflow-skill",
   "version": "3.0.0",
   "description": "全流程开发准则 Plugin（1总纲+9子Skill）：铁律体系、诊断与根因定位(dw-diagnosis)、方案设计与操作指引(dw-planning)、TDD与数据完整性(dw-implementation)、三C验证与偏差修复(dw-verification)、收尾与知识持久化(dw-wrapup)、优化方法论含6类优化与库选型(dw-optimization)、信号诊断与闭环验证(dw-debugging)、工具普查与编排(dw-tooling)、检查清单与反模式快速参考(dw-reference)。按对话领域自动选择对应子Skill。",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "claude-code",
     "skill",
