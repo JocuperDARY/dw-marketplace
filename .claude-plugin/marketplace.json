@@ -13,8 +13,8 @@
       },
       "category": "development",
       "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/JocuperDARY/development-workflow-skill.git",
+        "source": "github",
+        "url": "https://github.com/JocuperDARY/development-workflow-skill",
         "ref": "v3.0.0"
       },
       "homepage": "https://github.com/JocuperDARY/development-workflow-skill",
