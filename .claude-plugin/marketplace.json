@@ -12,11 +12,7 @@
         "name": "JocuperDARY"
       },
       "category": "development",
-      "source": {
-        "source": "github",
-        "url": "https://github.com/JocuperDARY/development-workflow-skill",
-        "ref": "v3.0.0"
-      },
+      "source": "./",
       "homepage": "https://github.com/JocuperDARY/development-workflow-skill",
       "license": "Apache-2.0",
       "keywords": [
