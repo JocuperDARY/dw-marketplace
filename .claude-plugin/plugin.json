@@ -6,10 +6,7 @@
     "name": "JocuperDARY"
   },
   "homepage": "https://github.com/JocuperDARY/development-workflow-skill",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/JocuperDARY/development-workflow-skill.git"
-  },
+  "repository": "https://github.com/JocuperDARY/development-workflow-skill",
   "license": "Apache-2.0",
   "keywords": [
     "skill",
