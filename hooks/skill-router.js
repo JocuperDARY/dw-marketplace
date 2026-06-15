@@ -233,6 +233,17 @@ const LIB_PATTERNS = [
     }
     }
 
+    // ── Layer 2.5: Review Reminder (from post-code-check marker) ──
+    const HOME=process.env.HOME||process.env.USERPROFILE||'';
+    const reviewMarker=path.join(HOME,'.claude','.cache','dw-review-needed.json');
+    try{if(fs.existsSync(reviewMarker)){const rm=JSON.parse(fs.readFileSync(reviewMarker,'utf-8'));if(Date.now()-rm.ts<3e5){injections.push(`## ⛔ 代码审查待办 — ${rm.count} 个文件已修改未审查\n文件: ${rm.files.join(', ')} (${rm.lastLines} 行)\n**请立即调用** Skill:requesting-code-review 或 /code-review`);try{fs.unlinkSync(reviewMarker)}catch{}}}}catch{}
+
+    // ── Standing orders fallback ──
+    if (injections.length === 0) {
+      const hasCJK=/[一-鿿]/.test(userMessage);const minLen=hasCJK?2:3;
+      if(userMessage.length>=minLen)injections.push('## ⚡ 主动工具协议\n- 代码理解 → mcp__codegraph__codegraph_explore\n- 库/API → mcp__context7__resolve-library-id + mcp__context7__query-docs\n- 复杂推理 → mcp__sequential-thinking__sequentialthinking\n- 最新信息 → mcp__tavily__tavily_search');
+    }
+
     if (injections.length > 0) {
       const context = `<dw-skill-router>\n${injections.join('\n\n---\n\n')}\n</dw-skill-router>`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEvent: { 'UserPromptSubmit': { context, position: 'append' } } }, decision: 'allow' }, null, 2));
