@@ -1,0 +1,34 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js"},
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/prune-rules.js"}
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/skill-router.js"},
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/workflow-state.js"}
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Write|Edit",
+      "hooks": [
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/tool-routing.js"}
+      ]
+    },
+    {
+      "matcher": "Bash|Agent",
+      "hooks": [
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-context.js"}
+      ]
+    }
+  ]
+}

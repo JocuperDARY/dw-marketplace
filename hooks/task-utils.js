@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+'use strict';
+const fs=require('fs'),path=require('path');
+function findProjectRoot(d){for(let i=0;i<20;i++){if(fs.existsSync(path.join(d,'.git')))return d;const p=path.dirname(d);if(p===d)break;d=p}return null}
+function getActiveTask(root){const t=path.join(root,'.tool-proact','tasks');if(!fs.existsSync(t))return null;try{for(const d of fs.readdirSync(t).filter(x=>x!=='archive').sort().reverse()){const j=path.join(t,d,'task.json');if(fs.existsSync(j)){const o=JSON.parse(fs.readFileSync(j,'utf-8'));if(o.status!=='completed')return{dir:path.join(t,d),...o}}}}catch(e){}return null}
+function outputHook(e,c,x){const o={hookEventName:e};if(c)o.additionalContext=c;if(x&&typeof x==='object')Object.assign(o,x);console.log(JSON.stringify({hookSpecificOutput:o}))}
+function trackTurn(d,p,n){const f=path.join(d,'.turns.json');let t=[];try{t=JSON.parse(fs.readFileSync(f,'utf-8'))}catch{}t.push({phase:p||'',next:n||'',ts:Date.now()});if(t.length>10)t=t.slice(-10);try{fs.writeFileSync(f,JSON.stringify(t),'utf-8')}catch{}return t}
+function detectLoop(t,n=3){if(t.length<n)return null;const r=t.slice(-n),k=r[0].phase+'|'+r[0].next;if(!r.every(x=>x.phase+'|'+x.next===k))return null;return{phase:r[0].phase,nextAction:r[0].next,count:n,elapsedSec:Math.round((r[n-1].ts-r[0].ts)/1000)}}
+function detectTechStack(r){const m=[['package.json','Node.js'],['go.mod','Go'],['pyproject.toml','Python'],['Cargo.toml','Rust'],['pom.xml','Java']];return m.filter(([f])=>fs.existsSync(path.join(r,f))).map(([,s])=>s).join('+')||'Unknown'}
+function getGitInfo(r){try{const e=require('child_process').execSync;return{branch:e('git rev-parse --abbrev-ref HEAD',{cwd:r,stdio:'pipe'}).toString().trim(),dirtyCount:e('git status --porcelain',{cwd:r,stdio:'pipe'}).toString().trim().split('\n').filter(Boolean).length}}catch{return{branch:'unknown',dirtyCount:0}}}
+module.exports={findProjectRoot,getActiveTask,outputHook,trackTurn,detectLoop,detectTechStack,getGitInfo};
