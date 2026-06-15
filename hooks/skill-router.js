@@ -228,6 +228,10 @@ const LIB_PATTERNS = [
       const libList = [...detectedLibs].slice(0, 5).join(', ');
       injections.push(`## 📚 检测到库/框架: ${libList}\n写代码前先查询最新文档: \`mcp__context7__resolve-library-id\` + \`mcp__context7__query-docs\``);
     }
+    if (/(?:搜索|查一下|查找|最新|recent|current|news|search|find out|look up|what is|how to|who is|when did)/i.test(userMessage)) {
+      injections.push('## 🔍 检测到搜索/查询意图\n需要最新信息时使用: \`mcp__tavily__tavily_search\` (普通搜索) / \`mcp__tavily__tavily_research\` (深度研究)');
+    }
+    }
 
     if (injections.length > 0) {
       const context = `<dw-skill-router>\n${injections.join('\n\n---\n\n')}\n</dw-skill-router>`;
