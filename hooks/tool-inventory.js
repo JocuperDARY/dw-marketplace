@@ -854,7 +854,7 @@ async function main() {
 
 try {
   verifyHookScripts();
-  main();
+  (async()=>{try{await main()}catch(e){}})().catch(()=>{});
 } catch (e) {
   console.error(`[TOOL-PROACT:tool-inventory] ERROR: ${e.message}`);
   outputHook('UserPromptSubmit', `<tool-proact-tool-inventory>\n<!-- tool-inventory error: ${e.message} -->\n</tool-proact-tool-inventory>`);

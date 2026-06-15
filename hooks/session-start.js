@@ -2,7 +2,7 @@
 'use strict';
 const path=require('path'),fs=require('fs');
 const{findProjectRoot,getActiveTask,readFileSafe,detectTechStack,getGitInfo,outputHook}=require('./task-utils.js');
-readFileSafe:function(f){try{return fs.readFileSync(f,'utf-8')}catch{return null}};
+const{findProjectRoot,getActiveTask,detectTechStack,getGitInfo,outputHook}=require("./task-utils.js");
 const HOME=process.env.HOME||process.env.USERPROFILE||'';
 const MARKER_FILE=path.join(HOME,'.claude','.cache','dw-session-done.txt');
 const SESSION_TTL_MS=5*60*1000;
