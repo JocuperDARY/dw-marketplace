@@ -26,5 +26,5 @@ sections.push(`<proactive-tool-protocol>\nCORE RULES:\n1. Code understanding →
 sections.push(`<memory-auto-load>\nIMPORTANT: Call mcp__memory__read_graph at session start. Apply stored tool-usage-discipline and work_rule entities.\n</memory-auto-load>`);
 if(!fs.existsSync(path.dirname(MARKER_FILE)))fs.mkdirSync(path.dirname(MARKER_FILE),{recursive:true});
 fs.writeFileSync(MARKER_FILE,String(Date.now()),'utf-8');
-outputHook('UserPromptSubmit',`<dw-session>\n${sections.join('\n\n')}\n</dw-session>`);
+outputHook('SessionStart',`<dw-session>\n${sections.join('\n\n')}\n</dw-session>`);
 }catch(e){process.exit(0)}

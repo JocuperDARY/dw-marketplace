@@ -782,7 +782,7 @@ async function main() {
       const ageOk = Date.now() - cache.generated_at < TTL_MS;
       const mtimeOk = pluginMtime <= cache.generated_at;
       if (ageOk && mtimeOk) {
-        outputHook('UserPromptSubmit', formatInventoryCompact(cache.categories));
+        outputHook('SessionStart', formatInventoryCompact(cache.categories));
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
         fs.writeFileSync(path.join(CACHE_DIR, 'tool-inventory-formatted.md'), formatInventoryFull(cache.categories), 'utf-8');
         return;
@@ -848,7 +848,7 @@ async function main() {
   fs.writeFileSync(MARKER_FILE, String(Date.now()), 'utf-8');
 
   // Compact for context injection, full for file
-  outputHook('UserPromptSubmit', formatInventoryCompact(categories));
+  outputHook('SessionStart', formatInventoryCompact(categories));
   fs.writeFileSync(path.join(CACHE_DIR, 'tool-inventory-formatted.md'), formatInventoryFull(categories), 'utf-8');
 }
 
@@ -857,6 +857,6 @@ try {
   (async()=>{try{await main()}catch(e){}})().catch(()=>{});
 } catch (e) {
   console.error(`[TOOL-PROACT:tool-inventory] ERROR: ${e.message}`);
-  outputHook('UserPromptSubmit', `<tool-proact-tool-inventory>\n<!-- tool-inventory error: ${e.message} -->\n</tool-proact-tool-inventory>`);
+  outputHook('SessionStart', `<tool-proact-tool-inventory>\n<!-- tool-inventory error: ${e.message} -->\n</tool-proact-tool-inventory>`);
   process.exit(0);
 }
