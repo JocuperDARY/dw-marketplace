@@ -1,0 +1,7 @@
+{
+  "id": "test-task-1",
+  "title": "Validate hook output format",
+  "status": "in_progress",
+  "currentPhase": "implementation",
+  "nextAction": "run validation tests"
+}

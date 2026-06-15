@@ -22,7 +22,7 @@ sections.push(['╔════════════════════�
 if(root){sections.push(`<project>\n  Tech: ${detectTechStack(root)}\n  Branch: ${getGitInfo(root).branch}\n  Dirty files: ${getGitInfo(root).dirtyCount}\n  Root: ${root}\n  </project>`);
 const task=getActiveTask(root);if(task)sections.push(`<active-task>\nTask: ${task.title||task.id} (${task.status})\nStrategy: ${task.strategy}\nPhase: ${task.currentPhase}\nNext: ${task.nextAction||'Continue'}\n</active-task>`);
 }else{sections.push('<project>No project root detected.</project>');}
-sections.push(`<proactive-tool-protocol>\nCORE RULES:\n1. Code understanding → mcp__codegraph__codegraph_explore FIRST\n2. Library/API → mcp__context7__resolve-library-id + mcp__context7__query-docs BEFORE code\n3. Complex reasoning → mcp__sequential-thinking__sequentialthinking\nFull: tool-scanning.md + tool-proact-skills.md\n</proactive-tool-protocol>`);
+sections.push(`<proactive-tool-protocol>\nCORE RULES:\n1. Code understanding → mcp__codegraph__codegraph_explore FIRST\n2. Library/API → mcp__context7__resolve-library-id + mcp__context7__query-docs BEFORE code\n3. Complex reasoning → mcp__sequential-thinking__sequentialthinking\nFull: DW plugin hooks (skill-router.js, tool-routing.js, subagent-context.js)\n</proactive-tool-protocol>`);
 sections.push(`<memory-auto-load>\nIMPORTANT: Call mcp__memory__read_graph at session start. Apply stored tool-usage-discipline and work_rule entities.\n</memory-auto-load>`);
 if(!fs.existsSync(path.dirname(MARKER_FILE)))fs.mkdirSync(path.dirname(MARKER_FILE),{recursive:true});
 fs.writeFileSync(MARKER_FILE,String(Date.now()),'utf-8');
