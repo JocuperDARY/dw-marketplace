@@ -245,7 +245,7 @@ const LIB_PATTERNS = [
 
     if (injections.length > 0) {
       const context = `<dw-skill-router>\n${injections.join('\n\n---\n\n')}\n</dw-skill-router>`;
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', hookEvent: { 'UserPromptSubmit': { context, position: 'append' } } }, decision: 'allow' }, null, 2));
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } }));
     }
     process.exit(0);
   } catch (e) { process.exit(0); }
