@@ -3,6 +3,7 @@
     {
       "matcher": "",
       "hooks": [
+        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/tool-inventory.js"},
         {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js"},
         {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/prune-rules.js"}
       ]
