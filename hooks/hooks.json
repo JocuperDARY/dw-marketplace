@@ -1,43 +1,46 @@
 {
-  "SessionStart": [
-    {
-      "matcher": "",
-      "hooks": [
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/tool-inventory.js"},
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js"},
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/prune-rules.js"}
-      ]
-    }
-  ],
-  "UserPromptSubmit": [
-    {
-      "matcher": "",
-      "hooks": [
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/skill-router.js"},
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/workflow-state.js"}
-      ]
-    }
-  ],
-  "PreToolUse": [
-    {
-      "matcher": "Write|Edit",
-      "hooks": [
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/tool-routing.js"}
-      ]
-    },
-    {
-      "matcher": "Bash|Agent",
-      "hooks": [
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-context.js"}
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "matcher": "Write|Edit",
-      "hooks": [
-        {"type": "script", "script": "${CLAUDE_PLUGIN_ROOT}/hooks/post-code-check.js"}
-      ]
-    }
-  ]
+  "description": "DW Plugin hooks: session init, skill routing, workflow state tracking, tool checks, subagent context, post-code review, rules pruning",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-inventory.js\"", "timeout": 30},
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"", "timeout": 10},
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prune-rules.js\"", "timeout": 15}
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-router.js\"", "timeout": 15},
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/workflow-state.js\"", "timeout": 10}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-routing.js\"", "timeout": 10}
+        ]
+      },
+      {
+        "matcher": "Bash|Agent",
+        "hooks": [
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-context.js\"", "timeout": 10}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-code-check.js\"", "timeout": 10}
+        ]
+      }
+    ]
+  }
 }

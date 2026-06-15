@@ -35,6 +35,8 @@
     "url": "git+https://github.com/JocuperDARY/development-workflow-skill.git"
   },
   "files": [
+    ".claude-plugin/",
+    "hooks/",
     "skills/development-workflow/",
     "skills/dw-diagnosis/",
     "skills/dw-planning/",
