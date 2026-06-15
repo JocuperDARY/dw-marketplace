@@ -2,7 +2,6 @@
 'use strict';
 const path=require('path'),fs=require('fs');
 const{findProjectRoot,getActiveTask,readFileSafe,detectTechStack,getGitInfo,outputHook}=require('./task-utils.js');
-const{findProjectRoot,getActiveTask,detectTechStack,getGitInfo,outputHook}=require("./task-utils.js");
 const HOME=process.env.HOME||process.env.USERPROFILE||'';
 const MARKER_FILE=path.join(HOME,'.claude','.cache','dw-session-done.txt');
 const SESSION_TTL_MS=5*60*1000;
