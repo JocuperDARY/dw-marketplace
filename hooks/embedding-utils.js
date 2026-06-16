@@ -5,6 +5,9 @@
 
 'use strict';
 
+process.env.ORT_DISABLE_LOGGING = '1';
+process.env.ORT_DISABLE_TELEMETRY = '1';
+
 let pipeline = null;
 let modelLoaded = false;
 let loadError = null;
