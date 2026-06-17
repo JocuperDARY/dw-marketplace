@@ -44,7 +44,7 @@ const TOOL_DEF = {
       },
       model: {
         type: 'string',
-        description: 'OpenAI model. Default: gpt-5.4',
+        description: 'OpenAI model. Default: gpt-5.4-mini',
       },
       mode: {
         type: 'string',
@@ -170,7 +170,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     proc.on('close', async (code) => {
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
       if (code === 0) {
-        resolve({ success: true, result: stdout.trim(), model: model || 'gpt-5.4' });
+        resolve({ success: true, result: stdout.trim(), model: model || 'gpt-5.4-mini' });
       } else {
         const stderrClean = stderr
           .split('\n')
