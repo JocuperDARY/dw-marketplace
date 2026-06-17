@@ -154,6 +154,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: effectiveCwd,
       timeout: (timeout || 300) * 1000,
+      shell: process.platform === 'win32',
     });
 
     let stdout = '';
