@@ -1,0 +1,31 @@
+{
+  "name": "dw-marketplace",
+  "description": "Development Workflow 工具集：全流程开发准则 + GPT 模型桥接",
+  "owner": { "name": "JocuperDARY" },
+  "plugins": [
+    {
+      "name": "development-workflow",
+      "source": "./plugins/development-workflow",
+      "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排等10个子Skill，及hooks、rules资产。",
+      "version": "4.0.0",
+      "author": { "name": "JocuperDARY" },
+      "homepage": "https://github.com/JocuperDARY/dw-marketplace",
+      "repository": "https://github.com/JocuperDARY/dw-marketplace",
+      "license": "Apache-2.0",
+      "keywords": ["workflow", "development", "tdd", "verification"],
+      "category": "development"
+    },
+    {
+      "name": "gpt-bridge",
+      "source": "./plugins/gpt-bridge",
+      "description": "在 Claude Code 对话中直接调用 GPT 模型执行子任务。通过 Codex CLI 桥接，支持文件注入、结构化JSON输出、图片输入。",
+      "version": "1.0.0",
+      "author": { "name": "JocuperDARY" },
+      "homepage": "https://github.com/JocuperDARY/dw-marketplace",
+      "repository": "https://github.com/JocuperDARY/dw-marketplace",
+      "license": "Apache-2.0",
+      "keywords": ["gpt", "codex", "mcp", "bridge", "openai"],
+      "category": "ai-integration"
+    }
+  ]
+}
