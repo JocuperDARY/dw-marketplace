@@ -1,7 +1,7 @@
 {
   "name": "gpt-bridge",
-  "description": "在 Claude Code 对话中直接调用 GPT 模型执行子任务。通过 Codex CLI 桥接，支持文件注入、结构化输出、图片输入。",
-  "version": "1.0.0",
+  "description": "在 Claude Code 对话中直接调用 GPT 模型执行子任务。v2: 新增 reasoning effort 控制、glob 文件注入、超时配置。通过 Codex CLI 桥接，支持文件注入、结构化输出、图片输入。",
+  "version": "2.0.0",
   "author": { "name": "JocuperDARY" },
   "homepage": "https://github.com/JocuperDARY/dw-marketplace",
   "repository": "https://github.com/JocuperDARY/dw-marketplace",
