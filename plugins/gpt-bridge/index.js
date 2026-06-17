@@ -265,10 +265,16 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
       if (code === 0) {
         const output = stdout.trim();
-        const sessionMatch = output.match(/session id:\s*([a-f0-9-]+)/i);
+        // session id is on stderr (codex header output)
+        const sessionMatch = stderr.match(/session id:\s*([a-f0-9-]+)/i);
+        // Strip codex header from stderr and prepend to result if useful
+        const stderrClean = stderr
+          .split('\n')
+          .filter(l => l.trim() && !l.includes('---') && !l.includes('OpenAI Codex'))
+          .join('\n');
         resolve({
           success: true,
-          result: sessionMatch ? output.replace(/^.*?\n/, '') : output,
+          result: output,
           model: model || 'gpt-5.5',
           sessionId: sessionMatch ? sessionMatch[1] : null,
         });
