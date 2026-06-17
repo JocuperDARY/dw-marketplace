@@ -18,7 +18,7 @@ function resolveCodexPath() {
     return process.env.CODEX_PATH;
   }
   const npmGlobalBin = process.platform === 'win32'
-    ? join(process.env.APPDATA || join(process.env.HOME, 'AppData', 'Roaming'), 'npm', 'codex')
+    ? join(process.env.APPDATA || join(process.env.HOME, 'AppData', 'Roaming'), 'npm', 'codex.cmd')
     : join(process.env.HOME || '/', '.npm-global', 'bin', 'codex');
   if (existsSync(npmGlobalBin)) {
     return npmGlobalBin;
@@ -27,7 +27,7 @@ function resolveCodexPath() {
   if (existsSync(localBin)) {
     return localBin;
   }
-  return 'codex'; // fallback to PATH
+  return process.platform === 'win32' ? 'codex.cmd' : 'codex';
 }
 
 const CODEX_BIN = resolveCodexPath();
