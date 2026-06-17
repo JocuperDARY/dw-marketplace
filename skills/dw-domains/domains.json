@@ -1,0 +1,70 @@
+{
+  "description": "Domain knowledge config for skill-router.js Layer 3. Each entry maps keywords to inline context blocks. Max 1 domain injected per message.",
+  "domains": [
+    {
+      "keywords": ["渗透","红队","pentest","exploit","c2","lateral","提权","bypass","evasion","red team","后渗透"],
+      "name": "红队渗透",
+      "text": "## 红队安全\n原则: 最小权限、纵深防御、假定被入侵。敏感操作需审计日志。参考: `Skill:ecc:security-review`\n深入参考: `Read skills/dw-domains/security/pentest.md`"
+    },
+    {
+      "keywords": ["蓝队","告警","ioc","应急","取证","siem","edr","blue team","incident","containment","防御","检测"],
+      "name": "蓝队防御",
+      "text": "## 蓝队防御\n原则: 监控先行、告警可操作、应急有预案。日志集中管理，IOC自动阻断。"
+    },
+    {
+      "keywords": ["sqli","xss","ssrf","rce","injection","owasp","web渗透","api安全","sql注入","csrf","xxe","idor","安全漏洞"],
+      "name": "Web渗透",
+      "text": "## Web渗透\n核心原则: 所有用户输入验证清理、参数化查询防SQL注入、CSRF保护、错误信息不泄露。参考: OWASP Top 10\n深入参考: `Read skills/dw-domains/security/pentest.md`"
+    },
+    {
+      "keywords": ["代码审计","污点分析","sink","source","危险函数","code audit","静态分析","eval(","exec(","innerhtml","dangerous function","恶意输入","taint"],
+      "name": "代码审计",
+      "text": "## 代码安全审计\n追踪数据流: source→sink; 标记不可信数据。危险函数: eval/exec/innerHTML。参考: `Skill:ecc:security-review`\n深入参考: `Read skills/dw-domains/security/code-audit.md`"
+    },
+    {
+      "keywords": ["逆向","pwn","fuzzing","栈溢出","堆溢出","rop","binary","reversing","缓冲区"],
+      "name": "漏洞研究",
+      "text": "## 漏洞研究\n原则: 隔离环境测试、记录完整利用链、负责任披露。"
+    },
+    {
+      "keywords": ["osint","威胁情报","威胁建模","threat model","att&ck","threat hunting","情报收集"],
+      "name": "威胁情报",
+      "text": "## 威胁情报\n原则: 来源交叉验证、时效性评估、可操作告警。"
+    },
+    {
+      "keywords": ["api设计","rest","graphql","grpc","endpoint","versioning","api design","接口设计","openapi"],
+      "name": "API设计",
+      "text": "## API设计\n原则: RESTful命名、版本化(/v1/)、一致错误格式、分页支持、限流保护。\n深入参考: `Read skills/dw-domains/architecture/api-design.md`"
+    },
+    {
+      "keywords": ["缓存","redis","memcached","cache","cdn","invalidation","cache aside"],
+      "name": "缓存架构",
+      "text": "## 缓存架构\n原则: 读多写少用Cache-Aside、注意缓存穿透/击穿/雪崩、设置合理TTL。"
+    },
+    {
+      "keywords": ["kubernetes","k8s","docker","container","微服务","microservice","service mesh","云原生","cloud native"],
+      "name": "云原生",
+      "text": "## 云原生\n原则: 无状态容器、声明式配置、健康检查+就绪探针、优雅关闭。"
+    },
+    {
+      "keywords": ["kafka","rabbitmq","消息队列","event driven","pub/sub","message queue","事件驱动","异步","streaming"],
+      "name": "消息队列",
+      "text": "## 消息队列\n原则: 幂等消费、死信队列、消息持久化、消费者组负载均衡。"
+    },
+    {
+      "keywords": ["rag","retrieval","向量","embedding","chunking","vector","知识库","语义搜索","检索增强"],
+      "name": "RAG系统",
+      "text": "## RAG系统\n原则: 文档分块策略、向量数据库选型(<1M pgvector/Chroma，>1M Pinecone/Weaviate)、检索+重排序、引用溯源。\n深入参考: `Read skills/dw-domains/ai/rag-system.md`"
+    },
+    {
+      "keywords": ["ai agent","tool use","function calling","agent框架","orchestration","multi agent","agentic","智能体"],
+      "name": "Agent开发",
+      "text": "## Agent开发\n原则: 工具定义清晰(name+description+schema)、错误处理完善、上下文窗口管理、安全沙箱。\n深入参考: `Read skills/dw-domains/ai/agent-dev.md`"
+    },
+    {
+      "keywords": ["prompt injection","jailbreak","guardrail","llm安全","提示词注入","模型安全","ai safety"],
+      "name": "LLM安全",
+      "text": "## LLM安全\n原则: 防prompt注入、输出过滤、敏感数据脱敏、用户确认高危操作。"
+    }
+  ]
+}

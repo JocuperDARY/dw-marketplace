@@ -77,9 +77,9 @@ function semanticSearch(query, index, topN, minScore) {
 // ═══ Layer 1: DW Intent Routes ═══
 const INTENT_ROUTES = [
   { id:'diagnosis',skill:'development-workflow-skill:dw-diagnosis',name:'诊断与根因定位',
-    groups:[['诊断','根因','bug','出错','报错','异常','不工作','有问题','故障','崩溃','全零','空','排查','原因','debug','diagnose','troubleshoot','root cause','defect','broken','failing','wrong','incorrect','malfunction','error','crash','issue','症状','证据','假设','归因']]},
+    groups:[['诊断','根因','bug','出错','报错','异常','不工作','有问题','故障','崩溃','全零','空','排查','原因','debug','diagnose','troubleshoot','root cause','defect','broken','failing','wrong','incorrect','malfunction','error','crash','issue','症状','证据','假设','归因','输出','数据','结果','为零','空值','缺数据','无输出','不输出','没结果','没数据','返回空','全为空']]},
   { id:'planning',skill:'development-workflow-skill:dw-planning',name:'方案设计与操作指引',
-    groups:[['方案','设计','操作指引','计划','技术方案','设计文档','回退','实现','如何设计','架构','选型','plan','design','architecture','solution','guideline','blueprint','模板','示例']]},
+    groups:[['方案','设计','操作指引','计划','技术方案','设计文档','回退','实现','如何设计','架构','选型','plan','design','architecture','solution','guideline','blueprint','模板','示例','策略','编写','编写方案','需求文档','详细设计']]},
   { id:'implementation',skill:'development-workflow-skill:dw-implementation',name:'TDD实现',
     groups:[['tdd','单元测试','测试驱动','写代码','编码','哨兵','数据完整性','sentinel','red-green','refactor','implement','code','develop','测试闸门','覆盖率']]},
   { id:'verification',skill:'development-workflow-skill:dw-verification',name:'三C验证',
@@ -93,7 +93,7 @@ const INTENT_ROUTES = [
   { id:'tooling',skill:'development-workflow-skill:dw-tooling',name:'工具普查与编排',
     groups:[['工具','mcp','skill','agent','编排','并行','普查','选型','插件','orchestration','parallel','tool','plugin','codegraph','context7']]},
   { id:'reference',skill:'development-workflow-skill:dw-reference',name:'检查清单与快速参考',
-    groups:[['检查清单','反模式','快速参考','cheatsheet','附录','appendix','checklist','anti-pattern','reference','场景']]},
+    groups:[['检查清单','反模式','快速参考','cheatsheet','附录','appendix','checklist','anti-pattern','reference','场景','清单','部署前','发布前','上线前','审查表','评审表']]},
   { id:'hub',skill:'development-workflow-skill:development-workflow',name:'开发工作流总纲',
     groups:[['工作流','流程','规范','准则','铁律','开发方法','方法论','全流程','阶段','门控','workflow','methodology','process','standard','iron rule','best practice']]},
 ];
@@ -127,8 +127,19 @@ const TASK_TYPE_ROUTES = [
     chain:'`dw-wrapup` (收尾) → commit → push' },
 ];
 
-// ═══ Layer 3: Domain Knowledge Inline (from tool-proact) ═══
-const DOMAIN_KNOWLEDGE = [
+// ═══ Layer 3: Domain Knowledge (loaded from domains.json, inline fallback) ═══
+function loadDomainKnowledge() {
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
+    const domainsPath = path.join(pluginRoot, 'skills', 'dw-domains', 'domains.json');
+    if (fs.existsSync(domainsPath)) {
+      return JSON.parse(fs.readFileSync(domainsPath, 'utf-8')).domains || [];
+    }
+  } catch (e) { /* fall through to inline */ }
+  return [];
+}
+const loadedDomains = loadDomainKnowledge();
+const DOMAIN_KNOWLEDGE = loadedDomains.length > 0 ? loadedDomains : [
   { keywords:['渗透','红队','pentest','exploit','c2','lateral','提权','bypass','evasion','red team','后渗透'],
     name:'红队渗透', text: '## 红队安全\n原则: 最小权限、纵深防御、假定被入侵。敏感操作需审计日志。参考: `Skill:ecc:security-review`' },
   { keywords:['蓝队','告警','ioc','应急','取证','siem','edr','blue team','incident','containment','防御','检测'],
@@ -173,8 +184,11 @@ const LIB_PATTERNS = [
     if (!userMessage || userMessage.length < 3) process.exit(0);
 
     const msgLower = userMessage.toLowerCase();
+    var hasCJK = /[4E00-9FFF3400-4DBF]/.test(userMessage);
     const injections = [];
 
+    var isShortEnglish = !hasCJK && userMessage.length < 8;
+    if (!isShortEnglish) {
     // ── Layer 1: DW Intent Routing ──
     const docs = INTENT_ROUTES.map(r => ({ id: r.id, text: r.groups.flat().join(' ') }));
     const index = buildTfidfIndex(docs);
@@ -237,6 +251,7 @@ const LIB_PATTERNS = [
     const reviewMarker=path.join(HOME,'.claude','.cache','dw-review-needed.json');
     try{if(fs.existsSync(reviewMarker)){const rm=JSON.parse(fs.readFileSync(reviewMarker,'utf-8'));if(Date.now()-rm.ts<3e5){injections.push(`## ⛔ 代码审查待办 — ${rm.count} 个文件已修改未审查\n文件: ${rm.files.join(', ')} (${rm.lastLines} 行)\n**请立即调用** Skill:requesting-code-review 或 /code-review`);try{fs.unlinkSync(reviewMarker)}catch{}}}}catch{}
 
+    } // close isShortEnglish guard
     // ── Standing orders fallback ──
     if (injections.length === 0) {
       const hasCJK=/[一-鿿]/.test(userMessage);const minLen=hasCJK?2:3;

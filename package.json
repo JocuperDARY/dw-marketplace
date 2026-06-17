@@ -46,6 +46,7 @@
     "skills/dw-optimization/",
     "skills/dw-debugging/",
     "skills/dw-tooling/",
-    "skills/dw-reference/"
+    "skills/dw-reference/",
+    "skills/dw-domains/"
   ]
 }
