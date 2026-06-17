@@ -41,7 +41,7 @@ const PROFILES = {
 
 const TOOL_DEF = {
   name: 'gpt',
-  description: `Delegate a task to GPT via Codex CLI. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response when done.`,
+  description: `Delegate a task to GPT via Codex CLI. v2: session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response when done.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -287,7 +287,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 }
 
 const server = new Server(
-  { name: 'gpt-bridge', version: '1.0.0' },
+  { name: 'gpt-bridge', version: '2.0.0' },
   { capabilities: { tools: {} } }
 );
 
