@@ -1,0 +1,11 @@
+{
+  "name": "gpt-bridge",
+  "description": "在 Claude Code 对话中直接调用 GPT 模型执行子任务。通过 Codex CLI 桥接，支持文件注入、结构化输出、图片输入。",
+  "version": "1.0.0",
+  "author": { "name": "JocuperDARY" },
+  "homepage": "https://github.com/JocuperDARY/dw-marketplace",
+  "repository": "https://github.com/JocuperDARY/dw-marketplace",
+  "license": "Apache-2.0",
+  "keywords": ["gpt", "codex", "mcp", "bridge", "openai"],
+  "setupHint": "安装后需注册MCP Server: claude mcp add gpt-bridge -- node <plugin-path>/index.js"
+}

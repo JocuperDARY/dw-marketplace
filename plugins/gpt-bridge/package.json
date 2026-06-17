@@ -1,0 +1,18 @@
+{
+  "name": "gpt-bridge",
+  "version": "1.0.0",
+  "description": "MCP Server bridging Claude Code to GPT via Codex CLI",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js",
+  "bin": { "gpt-bridge": "./index.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "keywords": ["gpt", "codex", "mcp", "bridge", "openai"],
+  "author": { "name": "JocuperDARY" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JocuperDARY/dw-marketplace.git"
+  }
+}
