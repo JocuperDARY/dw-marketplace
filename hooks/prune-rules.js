@@ -305,7 +305,22 @@ function ensureLazyRulesMd(keepLangs) {
     }
   }
 
-  const content = `# 按需加载规则库
+  const preloaded = [...keepLangs].filter(l => l !== 'common')
+    .map(l => `- ${l.charAt(0).toUpperCase() + l.slice(1)}`).join('\n')
+    || '- 无（仅保留通用规则）';
+
+  // Load template from DW plugin file, fall back to inline
+  let template = null;
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || '';
+    if (pluginRoot) {
+      const tplPath = path.join(pluginRoot, 'skills', 'dw-domains', 'rules-lazy-load.md');
+      if (fs.existsSync(tplPath)) template = fs.readFileSync(tplPath, 'utf-8');
+    }
+  } catch {}
+
+  if (!template) {
+    template = `# 按需加载规则库
 
 ## 概述
 
@@ -324,7 +339,7 @@ function ensureLazyRulesMd(keepLangs) {
 
 | 语言/框架 | 存储位置 | 包含文件 |
 |-----------|----------|----------|
-${langLinks.join('\n')}
+{{LANG_LINKS}}
 
 ## 使用方法
 
@@ -338,11 +353,42 @@ ${langLinks.join('\n')}
 ## 已预加载的语言
 
 以下语言的规则已直接加载，无需手动读取：
-${[...keepLangs].filter(l => l !== 'common').map(l => `- ${l.charAt(0).toUpperCase() + l.slice(1)}`).join('\n') || '- 无（仅保留通用规则）'}
+{{PRELOADED_LANGS}}
 `;
+  }
+
+  const content = template
+    .replace('{{LANG_LINKS}}', langLinks.join('\n'))
+    .replace('{{PRELOADED_LANGS}}', preloaded);
 
   writeFileSafe(lazyRulesPath, content);
   console.error('[prune-rules] Updated lazy-rules.md');
+}
+
+// Deploy DW plugin's own rules to ~/.claude/rules/dw/
+function deployDwRules() {
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || '';
+    if (!pluginRoot) return;
+    const srcRulesDir = path.join(pluginRoot, 'rules');
+    if (!fs.existsSync(srcRulesDir)) return;
+    const dwRulesDir = path.join(RULES_DIR, 'dw');
+    if (!fs.existsSync(dwRulesDir)) fs.mkdirSync(dwRulesDir, { recursive: true });
+
+    const srcFiles = fs.readdirSync(srcRulesDir).filter(f => f.endsWith('.md'));
+    for (const f of srcFiles) {
+      const src = path.join(srcRulesDir, f);
+      const dst = path.join(dwRulesDir, f);
+      try {
+        const srcStat = fs.statSync(src);
+        const dstExists = fs.existsSync(dst);
+        if (!dstExists || srcStat.mtimeMs > fs.statSync(dst).mtimeMs) {
+          fs.copyFileSync(src, dst);
+        }
+      } catch { try { fs.copyFileSync(src, dst); } catch {} }
+    }
+    if (srcFiles.length > 0) console.error(`[prune-rules] Deployed ${srcFiles.length} DW rules to rules/dw/`);
+  } catch {}
 }
 
 function saveState(keepLangs, pruned, restored) {
@@ -382,7 +428,8 @@ function main() {
     console.error(`[prune-rules] Restored ${restored.length} rule dirs from store: ${restored.join(', ')}`);
   }
 
-  // Step 4: Ensure lazy-rules.md exists
+  // Step 4: Deploy DW plugin rules + ensure lazy-rules.md exists
+  deployDwRules();
   ensureLazyRulesMd(keepLangs);
 
   // Step 5: Save state
