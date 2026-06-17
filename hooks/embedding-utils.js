@@ -7,6 +7,7 @@
 
 process.env.ORT_DISABLE_LOGGING = '1';
 process.env.ORT_DISABLE_TELEMETRY = '1';
+process.env.ORT_LOG_SEVERITY_LEVEL = '3'; // ERROR only — suppress "Tracing initialized"
 
 let pipeline = null;
 let modelLoaded = false;
