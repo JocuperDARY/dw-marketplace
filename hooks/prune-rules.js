@@ -314,7 +314,7 @@ function ensureLazyRulesMd(keepLangs) {
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || '';
     if (pluginRoot) {
-      const tplPath = path.join(pluginRoot, 'skills', 'dw-domains', 'rules-lazy-load.md');
+      const tplPath = path.join(pluginRoot, 'rules', 'rules-lazy-load.md');
       if (fs.existsSync(tplPath)) template = fs.readFileSync(tplPath, 'utf-8');
     }
   } catch {}
