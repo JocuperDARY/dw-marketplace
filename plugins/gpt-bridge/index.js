@@ -10,6 +10,27 @@ import { randomUUID } from 'crypto';
 import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { existsSync } from 'fs';
+
+// Resolve codex binary: prefer CODEX_PATH env, then PATH, then common locations
+function resolveCodexPath() {
+  if (process.env.CODEX_PATH && existsSync(process.env.CODEX_PATH)) {
+    return process.env.CODEX_PATH;
+  }
+  const npmGlobalBin = process.platform === 'win32'
+    ? join(process.env.APPDATA || join(process.env.HOME, 'AppData', 'Roaming'), 'npm', 'codex')
+    : join(process.env.HOME || '/', '.npm-global', 'bin', 'codex');
+  if (existsSync(npmGlobalBin)) {
+    return npmGlobalBin;
+  }
+  const localBin = join(process.env.HOME || '/', '.local', 'bin', 'codex');
+  if (existsSync(localBin)) {
+    return localBin;
+  }
+  return 'codex'; // fallback to PATH
+}
+
+const CODEX_BIN = resolveCodexPath();
 
 const TOOL_DEF = {
   name: 'gpt',
@@ -129,7 +150,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   const stdin = buildStdin({ prompt, systemPrompt, files, fileContents });
 
   return new Promise((resolve) => {
-    const proc = spawn('codex', args, {
+    const proc = spawn(CODEX_BIN, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: effectiveCwd,
       timeout: (timeout || 300) * 1000,
