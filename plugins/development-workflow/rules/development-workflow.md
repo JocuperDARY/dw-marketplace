@@ -2,7 +2,7 @@
 
 > **Authoritative source**: The `development-workflow` skill (installed via `development-workflow` plugin) defines the canonical methodology. This file summarizes the key phases for quick reference. For the full methodology including 操作指引 templates, 三C validation details, quantified verification methods, and anti-patterns, invoke `Skill:development-workflow:development-workflow`.
 
-> This file extends [common/git-workflow.md](./git-workflow.md) with the full feature development process that happens before git operations.
+> This file extends [common/git-workflow.md](~/.claude/rules/common/git-workflow.md) with the full feature development process that happens before git operations.
 
 ## Iron Rules (铁律)
 
@@ -73,7 +73,7 @@ From the `development-workflow` skill — all three must pass:
 - Document: what changed, why, quantified results, affected files
 - Use baseline comparison template for quantified verification results
 - Commit with conventional commits format
-- See [git-workflow.md](./git-workflow.md) for commit message format and PR process
+- See [git-workflow.md](~/.claude/rules/common/git-workflow.md) for commit message format and PR process
 
 ### Phase 6: Pre-Review Checks
 
