@@ -81,6 +81,11 @@ const TOOL_DEF = {
         type: 'number',
         description: 'Timeout in seconds. Default: 300',
       },
+      effort: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'xhigh'],
+        description: 'Reasoning effort. Default: codex config default',
+      },
     },
     required: ['prompt'],
   },
@@ -120,7 +125,7 @@ async function readFiles(filePaths, cwd) {
   return { contents, missing };
 }
 
-async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout }) {
+async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort }) {
   const effectiveCwd = cwd || process.cwd();
   const args = ['exec', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
 
@@ -135,6 +140,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   }
 
   if (outputFile) args.push('-o', outputFile);
+  if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
   args.push('-C', effectiveCwd);
   args.push('-');
 
@@ -211,6 +217,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     systemPrompt: args.systemPrompt,
     cwd: args.cwd,
     timeout: args.timeout,
+    effort: args.effort,
   });
 
   if (result.success) {
