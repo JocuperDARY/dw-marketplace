@@ -122,7 +122,7 @@ async function readFiles(filePaths, cwd) {
 
 async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout }) {
   const effectiveCwd = cwd || process.cwd();
-  const args = ['exec', '-p', mode || 'yolo', '--color', 'never'];
+  const args = ['exec', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
 
   if (model) args.push('-m', model);
   if (images) for (const img of images) args.push('-i', img);
