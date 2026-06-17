@@ -1,6 +1,6 @@
 # Development Workflow
 
-> **Authoritative source**: The `development-workflow` skill (v1.4, installed via `development-workflow-skill` plugin) defines the canonical methodology. This file summarizes the key phases for quick reference. For the full methodology including 操作指引 templates, 三C validation details, quantified verification methods, and anti-patterns, invoke `Skill:development-workflow`.
+> **Authoritative source**: The `development-workflow` skill (installed via `development-workflow` plugin) defines the canonical methodology. This file summarizes the key phases for quick reference. For the full methodology including 操作指引 templates, 三C validation details, quantified verification methods, and anti-patterns, invoke `Skill:development-workflow:development-workflow`.
 
 > This file extends [common/git-workflow.md](./git-workflow.md) with the full feature development process that happens before git operations.
 
