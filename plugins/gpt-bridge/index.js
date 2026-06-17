@@ -11,6 +11,7 @@ import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
+import { glob } from 'glob';
 
 // Resolve codex binary: prefer CODEX_PATH env, then PATH, then common locations
 function resolveCodexPath() {
@@ -96,6 +97,26 @@ const TOOL_DEF = {
         enum: ['low', 'medium', 'high', 'xhigh'],
         description: 'Reasoning effort. Default: codex config default',
       },
+      autoContext: {
+        type: 'object',
+        properties: {
+          patterns: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Glob patterns to auto-collect files (e.g. ["src/**/*.ts"])',
+          },
+          maxFiles: {
+            type: 'number',
+            description: 'Max files to collect. Default: 10',
+          },
+          maxSizeKB: {
+            type: 'number',
+            description: 'Max size per file in KB. Default: 50',
+          },
+        },
+        required: ['patterns'],
+        description: 'Auto-collect matching files as GPT context (Layer 2)',
+      },
       profile: {
         type: 'string',
         enum: ['fast', 'balanced', 'max'],
@@ -106,7 +127,7 @@ const TOOL_DEF = {
   },
 };
 
-function buildStdin({ prompt, systemPrompt, files, fileContents }) {
+function buildStdin({ prompt, systemPrompt, files, fileContents, autoCollected }) {
   const parts = [];
   if (systemPrompt) {
     parts.push(systemPrompt);
@@ -120,6 +141,12 @@ function buildStdin({ prompt, systemPrompt, files, fileContents }) {
       const path = files[i];
       const content = fileContents[i] || '(file not readable)';
       parts.push(`\n### File: ${path}\n\`\`\`\n${content}\n\`\`\`\n`);
+    }
+  }
+  if (autoCollected && autoCollected.length > 0) {
+    parts.push('\n\n## Auto-Collected Context\n');
+    for (const file of autoCollected) {
+      parts.push(`\n### File: ${file.path} (matched)\n\`\`\`\n${file.content}\n\`\`\`\n`);
     }
   }
   return parts.join('');
@@ -140,7 +167,37 @@ async function readFiles(filePaths, cwd) {
   return { contents, missing };
 }
 
-async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId }) {
+async function autoCollectFiles({ patterns, cwd, maxFiles, maxSizeKB, explicitFiles }) {
+  const maxF = maxFiles || 10;
+  const maxSize = (maxSizeKB || 50) * 1024;
+  const explicitSet = new Set(explicitFiles || []);
+  const collected = [];
+
+  for (const pattern of patterns) {
+    if (collected.length >= maxF) break;
+    try {
+      const matches = await glob(pattern, {
+        cwd, nodir: true, absolute: false,
+        windowsPathsNoEscape: process.platform === 'win32',
+      });
+      for (const relPath of matches) {
+        if (collected.length >= maxF) break;
+        if (explicitSet.has(relPath)) continue;
+        try {
+          const absPath = join(cwd, relPath);
+          const { stat } = await import('fs/promises');
+          const fileStat = await stat(absPath).catch(() => null);
+          if (!fileStat || fileStat.size > maxSize) continue;
+          const content = await readFile(absPath, 'utf-8');
+          collected.push({ path: relPath, content });
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* skip invalid glob */ }
+  }
+  return collected;
+}
+
+async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext }) {
   const effectiveCwd = cwd || process.cwd();
   let args;
   if (sessionId) {
@@ -172,7 +229,19 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     }
   }
 
-  const stdin = buildStdin({ prompt, systemPrompt, files, fileContents });
+  // Auto-context collection
+  let autoCollected = [];
+  if (autoContext && autoContext.patterns && autoContext.patterns.length > 0) {
+    autoCollected = await autoCollectFiles({
+      patterns: autoContext.patterns,
+      cwd: effectiveCwd,
+      maxFiles: autoContext.maxFiles,
+      maxSizeKB: autoContext.maxSizeKB,
+      explicitFiles: files || [],
+    });
+  }
+
+  const stdin = buildStdin({ prompt, systemPrompt, files, fileContents, autoCollected });
 
   return new Promise((resolve) => {
     const proc = spawn(CODEX_BIN, args, {
@@ -260,6 +329,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     timeout: args.timeout,
     effort: args.effort,
     sessionId: args.sessionId,
+    autoContext: args.autoContext,
   });
 
   if (result.success) {
