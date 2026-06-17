@@ -1,7 +1,7 @@
 # 按需加载规则库
 
 > 此文件由 DW 插件 `prune-rules.js` (SessionStart hook) 根据当前项目语言自动生成。
-> 模板位于 `skills/dw-domains/rules-lazy-load.md`，运行时填充 `{{PLACEHOLDER}}`。
+> 模板位于 DW 插件 `rules/rules-lazy-load.md`，运行时填充 `{{PLACEHOLDER}}`。
 
 ## 概述
 
