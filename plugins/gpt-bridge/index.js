@@ -32,6 +32,12 @@ function resolveCodexPath() {
 
 const CODEX_BIN = resolveCodexPath();
 
+const PROFILES = {
+  fast:     { model: 'gpt-5.4-mini', mode: 'strict'  },
+  balanced: { model: 'gpt-5.4',      mode: 'yolo'    },
+  max:      { model: 'gpt-5.5',      mode: 'yolo'    },
+};
+
 const TOOL_DEF = {
   name: 'gpt',
   description: `Delegate a task to GPT via Codex CLI. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response when done.`,
@@ -44,12 +50,12 @@ const TOOL_DEF = {
       },
       model: {
         type: 'string',
-        description: 'OpenAI model. Default: gpt-5.5',
+        description: 'OpenAI model. Default: gpt-5.5. Mutually exclusive with profile.',
       },
       mode: {
         type: 'string',
         enum: ['yolo', 'strict'],
-        description: 'Sandbox mode. yolo = full access, strict = read-only. Default: yolo',
+        description: 'Sandbox mode. yolo = full access, strict = read-only. Default: yolo. Mutually exclusive with profile.',
       },
       files: {
         type: 'array',
@@ -85,6 +91,11 @@ const TOOL_DEF = {
         type: 'string',
         enum: ['low', 'medium', 'high', 'xhigh'],
         description: 'Reasoning effort. Default: codex config default',
+      },
+      profile: {
+        type: 'string',
+        enum: ['fast', 'balanced', 'max'],
+        description: 'Preset model+mode combo. Mutually exclusive with model/mode.',
       },
     },
     required: ['prompt'],
@@ -206,10 +217,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   const args = request.params.arguments;
+
+  // Profile conflicts with model/mode
+  if (args.profile && (args.model || args.mode)) {
+    return { content: [{ type: 'text', text: 'profile is mutually exclusive with model and mode' }], isError: true };
+  }
+
+  // Resolve profile
+  let model = args.model;
+  let mode = args.mode;
+  if (args.profile) {
+    const p = PROFILES[args.profile];
+    model = p.model;
+    mode = p.mode;
+  }
+
   const result = await runCodex({
     prompt: args.prompt,
-    model: args.model,
-    mode: args.mode,
+    model,
+    mode,
     files: args.files,
     images: args.images,
     outputSchema: args.outputSchema,
