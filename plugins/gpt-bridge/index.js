@@ -48,6 +48,10 @@ const TOOL_DEF = {
         type: 'string',
         description: 'Task description sent to GPT. Be specific about expected output.',
       },
+      sessionId: {
+        type: 'string',
+        description: 'Resume a previous GPT session by id. Omit to start a new session.',
+      },
       model: {
         type: 'string',
         description: 'OpenAI model. Default: gpt-5.5. Mutually exclusive with profile.',
@@ -136,11 +140,15 @@ async function readFiles(filePaths, cwd) {
   return { contents, missing };
 }
 
-async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort }) {
+async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId }) {
   const effectiveCwd = cwd || process.cwd();
-  const args = ['exec', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
-
-  if (model) args.push('-m', model);
+  let args;
+  if (sessionId) {
+    args = ['exec', 'resume', sessionId, '--ephemeral', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
+  } else {
+    args = ['exec', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
+    if (model) args.push('-m', model);
+  }
   if (images) for (const img of images) args.push('-i', img);
 
   let schemaFile = null;
@@ -187,7 +195,14 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     proc.on('close', async (code) => {
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
       if (code === 0) {
-        resolve({ success: true, result: stdout.trim(), model: model || 'gpt-5.5' });
+        const output = stdout.trim();
+        const sessionMatch = output.match(/session id:\s*([a-f0-9-]+)/i);
+        resolve({
+          success: true,
+          result: sessionMatch ? output.replace(/^.*?\n/, '') : output,
+          model: model || 'gpt-5.5',
+          sessionId: sessionMatch ? sessionMatch[1] : null,
+        });
       } else {
         const stderrClean = stderr
           .split('\n')
@@ -244,6 +259,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     cwd: args.cwd,
     timeout: args.timeout,
     effort: args.effort,
+    sessionId: args.sessionId,
   });
 
   if (result.success) {
