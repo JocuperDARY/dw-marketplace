@@ -1,38 +1,18 @@
 {
-  "name": "development-workflow-skill",
-  "version": "3.0.0",
-  "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排等10个子Skill，按领域自动选择。",
+  "name": "development-workflow",
+  "version": "4.0.0",
+  "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排等10个子Skill，及hooks、rules资产。",
   "license": "Apache-2.0",
   "keywords": [
-    "claude-code",
-    "skill",
-    "workflow",
-    "development",
-    "verification",
-    "tdd",
-    "diagnosis",
-    "root-cause",
-    "planning",
-    "operational-guideline",
-    "implementation",
-    "data-integrity",
-    "test-gates",
-    "optimization",
-    "profiling",
-    "debugging",
-    "signal-diagnosis",
-    "closed-loop",
-    "tool-orchestration",
-    "checklist",
-    "anti-pattern",
-    "best-practices"
+    "claude-code", "workflow", "development", "verification",
+    "tdd", "diagnosis", "planning", "implementation",
+    "optimization", "debugging", "tool-orchestration",
+    "hooks", "rules"
   ],
-  "author": {
-    "name": "JocuperDARY"
-  },
+  "author": { "name": "JocuperDARY" },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JocuperDARY/development-workflow-skill.git"
+    "url": "git+https://github.com/JocuperDARY/dw-marketplace.git"
   },
   "files": [
     ".claude-plugin/",
