@@ -215,7 +215,9 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     args.push('--output-schema', schemaFile);
   }
 
-  if (outputFile) args.push('-o', outputFile);
+  // Always route output through a file (-o) to avoid stdout buffer truncation on large responses
+  const finalOutputFile = outputFile || join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
+  args.push('-o', finalOutputFile);
   if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
   args.push('-C', effectiveCwd);
   args.push('-');
@@ -245,17 +247,17 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 
   return new Promise((resolve) => {
     const proc = spawn(CODEX_BIN, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'ignore', 'pipe'],  // stdout ignored — output goes to -o file
       cwd: effectiveCwd,
       timeout: (timeout || 300) * 1000,
       shell: process.platform === 'win32',
     });
 
-    let stdout = '';
     let stderr = '';
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      // Cap stderr at 8KB to prevent unbounded memory use from codex header noise
+      if (stderr.length < 8192) stderr += d.toString();
+    });
 
     proc.on('error', (err) => {
       resolve({ success: false, error: `Failed to start codex: ${err.message}. Is Codex CLI installed?` });
@@ -263,18 +265,27 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 
     proc.on('close', async (code) => {
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
+
+      // Read output from the -o file (bypasses stdout buffer truncation)
+      let output = '';
+      try {
+        output = await readFile(finalOutputFile, 'utf-8');
+      } catch {
+        // File may not exist on crash/timeout — that's ok
+      }
+
+      // Clean up temp file (only if we created it, not caller-provided)
+      if (!outputFile) {
+        try { await unlink(finalOutputFile); } catch {}
+      }
+
+      // Parse session id from stderr
+      const sessionMatch = stderr.match(/session id:\s*([a-f0-9-]+)/i);
+
       if (code === 0) {
-        const output = stdout.trim();
-        // session id is on stderr (codex header output)
-        const sessionMatch = stderr.match(/session id:\s*([a-f0-9-]+)/i);
-        // Strip codex header from stderr and prepend to result if useful
-        const stderrClean = stderr
-          .split('\n')
-          .filter(l => l.trim() && !l.includes('---') && !l.includes('OpenAI Codex'))
-          .join('\n');
         resolve({
           success: true,
-          result: output,
+          result: output.trim(),
           model: model || 'gpt-5.5',
           sessionId: sessionMatch ? sessionMatch[1] : null,
         });
@@ -284,7 +295,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
           .filter(l => !l.includes('Tracing initialized') && !l.includes('OpenAI Codex') && !l.includes('---') && !l.includes('workdir:') && !l.includes('model:') && !l.includes('provider:') && !l.includes('approval:') && !l.includes('sandbox:') && !l.includes('reasoning') && !l.includes('session id:'))
           .join('\n').trim();
         if (code === null) {
-          const msg = stdout.trim() || stderrClean || 'Process terminated (possibly timeout, signal, or output size limit)';
+          const msg = output.trim() || stderrClean || 'Process terminated (possibly timeout, signal, or output size limit)';
           resolve({ success: true, result: msg, model: model || 'gpt-5.5' });
         } else {
           resolve({ success: false, error: stderrClean || `codex exited with code ${code}` });
