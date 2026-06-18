@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, createWriteStream } from 'fs';
 import { glob } from 'glob';
 
 // Resolve codex binary: prefer CODEX_PATH env, then PATH, then common locations
@@ -215,9 +215,16 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     args.push('--output-schema', schemaFile);
   }
 
-  // Always route output through a file (-o) to avoid stdout buffer truncation on large responses
+  // --json: stream JSONL events to stdout for real-time progress + work log
+  args.push('--json');
+
+  // Always route final output through a file (-o) to avoid stdout buffer truncation
   const finalOutputFile = outputFile || join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
   args.push('-o', finalOutputFile);
+
+  // Progress file for real-time tailing (JSONL events written as they arrive)
+  const progressFile = join(tmpdir(), `gpt-bridge-progress-${randomUUID()}.log`);
+
   if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
   args.push('-C', effectiveCwd);
   args.push('-');
@@ -247,45 +254,91 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 
   return new Promise((resolve) => {
     const proc = spawn(CODEX_BIN, args, {
-      stdio: ['pipe', 'ignore', 'pipe'],  // stdout ignored — output goes to -o file
+      stdio: ['pipe', 'pipe', 'pipe'],  // stdin + stdout (JSONL) + stderr
       cwd: effectiveCwd,
       timeout: (timeout || 300) * 1000,
       shell: process.platform === 'win32',
     });
 
     let stderr = '';
+    const progressStream = createWriteStream(progressFile);
+
+    // Stream JSONL events to progress file in real-time for `tail -f`
+    proc.stdout.on('data', (d) => { progressStream.write(d); });
     proc.stderr.on('data', (d) => {
-      // Cap stderr at 8KB to prevent unbounded memory use from codex header noise
       if (stderr.length < 8192) stderr += d.toString();
     });
 
     proc.on('error', (err) => {
+      progressStream.end();
       resolve({ success: false, error: `Failed to start codex: ${err.message}. Is Codex CLI installed?` });
     });
 
     proc.on('close', async (code) => {
+      progressStream.end();
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
 
-      // Read output from the -o file (bypasses stdout buffer truncation)
+      // Read final answer from -o file (bypasses stdout buffer truncation)
       let output = '';
       try {
         output = await readFile(finalOutputFile, 'utf-8');
       } catch {
-        // File may not exist on crash/timeout — that's ok
+        // File may not exist on crash/timeout
       }
 
-      // Clean up temp file (only if we created it, not caller-provided)
+      // Clean up temp output file (only if we created it, not caller-provided)
       if (!outputFile) {
         try { await unlink(finalOutputFile); } catch {}
       }
+
+      // Parse JSONL progress file for work log summary
+      let workLog = '';
+      try {
+        const raw = await readFile(progressFile, 'utf-8');
+        const lines = raw.trim().split('\n').filter(Boolean);
+        const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+        // Summarize: count tool calls, file reads, errors, timing
+        const toolCalls = parsed.filter(e => e.type === 'tool_use' || e.type === 'tool_call');
+        const toolResults = parsed.filter(e => e.type === 'tool_result');
+        const errors = parsed.filter(e => e.type === 'error');
+        const assistantMsgs = parsed.filter(e => e.type === 'assistant');
+
+        const uniqueTools = [...new Set(toolCalls.map(t => t.name || t.tool_name || 'unknown'))];
+        const filesRead = toolResults.filter(t => (t.content || '').length > 0).length;
+
+        const lines_parts = [`### GPT Work Log · ${toolCalls.length} tool calls · ${assistantMsgs.length} thinking steps`];
+        if (uniqueTools.length) lines_parts.push(`Tools used: ${uniqueTools.join(', ')}`);
+        if (filesRead) lines_parts.push(`Tool results: ${filesRead} (files read, command outputs, etc.)`);
+        if (errors.length) lines_parts.push(`Errors: ${errors.length}`);
+
+        // Show last few tool calls for context
+        const recent = toolCalls.slice(-5);
+        if (recent.length) {
+          lines_parts.push('Recent actions:');
+          for (const t of recent) {
+            const name = t.name || t.tool_name || 'unknown';
+            const input = typeof t.input === 'string' ? t.input.slice(0, 80) : JSON.stringify(t.input || {}).slice(0, 80);
+            lines_parts.push(`  - ${name}: ${input}${input.length >= 80 ? '...' : ''}`);
+          }
+        }
+
+        workLog = lines_parts.join('\n');
+      } catch {
+        workLog = '(work log unavailable)';
+      }
+
+      // Clean up progress file
+      try { await unlink(progressFile); } catch {}
 
       // Parse session id from stderr
       const sessionMatch = stderr.match(/session id:\s*([a-f0-9-]+)/i);
 
       if (code === 0) {
+        const resultText = output.trim() + (workLog ? '\n\n' + workLog : '');
         resolve({
           success: true,
-          result: output.trim(),
+          result: resultText,
           model: model || 'gpt-5.5',
           sessionId: sessionMatch ? sessionMatch[1] : null,
         });
