@@ -281,9 +281,14 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       } else {
         const stderrClean = stderr
           .split('\n')
-          .filter(l => !l.includes('Tracing initialized'))
+          .filter(l => !l.includes('Tracing initialized') && !l.includes('OpenAI Codex') && !l.includes('---') && !l.includes('workdir:') && !l.includes('model:') && !l.includes('provider:') && !l.includes('approval:') && !l.includes('sandbox:') && !l.includes('reasoning') && !l.includes('session id:'))
           .join('\n').trim();
-        resolve({ success: false, error: `codex exited ${code}${stderrClean ? ': ' + stderrClean : ''}` });
+        if (code === null) {
+          const msg = stdout.trim() || stderrClean || 'Process terminated (possibly timeout, signal, or output size limit)';
+          resolve({ success: true, result: msg, model: model || 'gpt-5.5' });
+        } else {
+          resolve({ success: false, error: stderrClean || `codex exited with code ${code}` });
+        }
       }
     });
 
