@@ -292,38 +292,45 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       }
 
       // Parse JSONL progress file for work log summary
+      // codex --json events: thread.started, item.started, item.completed, assistant.message, error
       let workLog = '';
       try {
         const raw = await readFile(progressFile, 'utf-8');
         const lines = raw.trim().split('\n').filter(Boolean);
         const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 
-        // Summarize: count tool calls, file reads, errors, timing
-        const toolCalls = parsed.filter(e => e.type === 'tool_use' || e.type === 'tool_call');
-        const toolResults = parsed.filter(e => e.type === 'tool_result');
+        const itemStarts = parsed.filter(e => e.type === 'item.started');
+        const itemCompletes = parsed.filter(e => e.type === 'item.completed');
         const errors = parsed.filter(e => e.type === 'error');
-        const assistantMsgs = parsed.filter(e => e.type === 'assistant');
+        const turns = parsed.filter(e => e.type === 'turn.started');
+        const assistantMsgs = parsed.filter(e => e.type === 'assistant.message');
 
-        const uniqueTools = [...new Set(toolCalls.map(t => t.name || t.tool_name || 'unknown'))];
-        const filesRead = toolResults.filter(t => (t.content || '').length > 0).length;
+        // Show item types for detail
+        const itemTypes = {};
+        for (const e of itemStarts) {
+          const it = (e.item && e.item.type) || 'unknown';
+          itemTypes[it] = (itemTypes[it] || 0) + 1;
+        }
 
-        const lines_parts = [`### GPT Work Log · ${toolCalls.length} tool calls · ${assistantMsgs.length} thinking steps`];
-        if (uniqueTools.length) lines_parts.push(`Tools used: ${uniqueTools.join(', ')}`);
-        if (filesRead) lines_parts.push(`Tool results: ${filesRead} (files read, command outputs, etc.)`);
-        if (errors.length) lines_parts.push(`Errors: ${errors.length}`);
+        const parts = [`### GPT Work Log · ${turns.length} turns · ${itemStarts.length} actions`];
+        parts.push(Object.entries(itemTypes).map(([k,v]) => `${k}×${v}`).join(' | '));
 
-        // Show last few tool calls for context
-        const recent = toolCalls.slice(-5);
+        if (errors.length) parts.push(`Errors: ${errors.length}`);
+
+        // Show recent completed items with status
+        const recent = itemCompletes.slice(-5);
         if (recent.length) {
-          lines_parts.push('Recent actions:');
-          for (const t of recent) {
-            const name = t.name || t.tool_name || 'unknown';
-            const input = typeof t.input === 'string' ? t.input.slice(0, 80) : JSON.stringify(t.input || {}).slice(0, 80);
-            lines_parts.push(`  - ${name}: ${input}${input.length >= 80 ? '...' : ''}`);
+          parts.push('Recent actions:');
+          for (const e of recent) {
+            const it = e.item || {};
+            const status = it.status || '?';
+            const name = it.type || 'action';
+            const cmd = (it.command || '').slice(0, 60);
+            parts.push(`  ${status === 'completed' ? 'OK' : status} ${name}${cmd ? ': ' + cmd : ''}${cmd.length >= 60 ? '...' : ''}`);
           }
         }
 
-        workLog = lines_parts.join('\n');
+        workLog = parts.join('\n');
       } catch {
         workLog = '(work log unavailable)';
       }
