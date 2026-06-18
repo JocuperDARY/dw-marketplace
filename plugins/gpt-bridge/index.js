@@ -291,43 +291,58 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
         try { await unlink(finalOutputFile); } catch {}
       }
 
-      // Parse JSONL progress file for work log summary
-      // codex --json events: thread.started, item.started, item.completed, assistant.message, error
+      // Parse JSONL progress file for detailed work log
+      // codex --json events: item.started, item.completed, assistant.message, error
       let workLog = '';
       try {
         const raw = await readFile(progressFile, 'utf-8');
         const lines = raw.trim().split('\n').filter(Boolean);
         const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 
-        const itemStarts = parsed.filter(e => e.type === 'item.started');
-        const itemCompletes = parsed.filter(e => e.type === 'item.completed');
-        const errors = parsed.filter(e => e.type === 'error');
         const turns = parsed.filter(e => e.type === 'turn.started');
-        const assistantMsgs = parsed.filter(e => e.type === 'assistant.message');
+        const items = parsed.filter(e => e.type === 'item.started' || e.type === 'item.completed');
+        const errors = parsed.filter(e => e.type === 'error');
+        const msgs = parsed.filter(e => e.type === 'assistant.message');
 
-        // Show item types for detail
-        const itemTypes = {};
-        for (const e of itemStarts) {
-          const it = (e.item && e.item.type) || 'unknown';
-          itemTypes[it] = (itemTypes[it] || 0) + 1;
-        }
+        const parts = [`### GPT Work Log · ${turns.length} turns · ${items.length} events`];
+        parts.push('');
 
-        const parts = [`### GPT Work Log · ${turns.length} turns · ${itemStarts.length} actions`];
-        parts.push(Object.entries(itemTypes).map(([k,v]) => `${k}×${v}`).join(' | '));
-
-        if (errors.length) parts.push(`Errors: ${errors.length}`);
-
-        // Show recent completed items with status
-        const recent = itemCompletes.slice(-5);
-        if (recent.length) {
-          parts.push('Recent actions:');
-          for (const e of recent) {
+        // Show each completed item with its command and output
+        for (const e of items) {
+          if (e.type === 'item.started') {
+            const it = e.item || {};
+            const cmd = (it.command || '').trim();
+            if (cmd) {
+              const shortCmd = cmd.length > 120 ? cmd.slice(0, 117) + '...' : cmd;
+              parts.push(`  RUN  ${shortCmd}`);
+            }
+          } else if (e.type === 'item.completed') {
             const it = e.item || {};
             const status = it.status || '?';
-            const name = it.type || 'action';
-            const cmd = (it.command || '').slice(0, 60);
-            parts.push(`  ${status === 'completed' ? 'OK' : status} ${name}${cmd ? ': ' + cmd : ''}${cmd.length >= 60 ? '...' : ''}`);
+            const output = (it.aggregated_output || '').trim();
+            if (output) {
+              const shortOut = output.length > 200 ? output.slice(0, 197) + '...' : output;
+              parts.push(`  OK   ${shortOut.split('\n')[0]}`);
+            } else if (status !== 'completed') {
+              parts.push(`  ${status.toUpperCase()}`);
+            }
           }
+        }
+
+        // Show thinking messages (concise)
+        for (const m of msgs) {
+          const text = (m.message || m.text || '').trim();
+          if (text && text.length < 200) {
+            parts.push(`  💭 ${text}`);
+          } else if (text) {
+            parts.push(`  💭 ${text.slice(0, 197)}...`);
+          }
+        }
+
+        if (errors.length) {
+          parts.push('');
+          parts.push(`Errors: ${errors.length}`);
+          for (const e of errors) parts.push(`  ❌ ${(e.message || JSON.stringify(e)).slice(0, 120)}`);
         }
 
         workLog = parts.join('\n');
