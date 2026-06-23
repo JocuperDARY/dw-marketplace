@@ -8,6 +8,7 @@ import {
   autoCollectFiles,
   codexSandboxArgs,
   extractSessionId,
+  formatToolResult,
   runCodex,
 } from '../index.js';
 
@@ -86,7 +87,7 @@ test('new Codex exec calls use --sandbox instead of old -p profile misuse', asyn
   assert.strictEqual(readFileSync(join(cwd, 'stdin.txt'), 'utf8').includes('## Task'), true);
 });
 
-test('resume Codex exec passes resume subcommand and sandbox flags', async () => {
+test('resume Codex exec puts exec-level flags before the resume subcommand', async () => {
   const cwd = makeDir();
   const bin = makeFakeCodex(cwd);
   process.env.CODEX_PATH = bin;
@@ -99,8 +100,32 @@ test('resume Codex exec passes resume subcommand and sandbox flags', async () =>
   });
   assert.strictEqual(result.success, true, result.error);
   const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
-  assert.deepStrictEqual(argv.slice(0, 5), ['exec', 'resume', 'session-123', '--sandbox', 'read-only']);
+  assert.deepStrictEqual(argv.slice(0, 4), ['exec', '--sandbox', 'read-only', 'resume']);
+  assert(argv.includes('--skip-git-repo-check'));
+  assert(argv.includes('--json'));
+  assert(argv.includes('-o'));
+  assert.strictEqual(argv.at(-2), 'session-123');
+  assert.strictEqual(argv.at(-1), '-');
+  assert(!argv.includes('--ephemeral'), 'resume should persist by default so future calls can continue the Codex thread');
+});
+
+test('ephemeral opt-in is passed to Codex resume', async () => {
+  const cwd = makeDir();
+  const bin = makeFakeCodex(cwd);
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Continue without persistence.',
+    sessionId: 'session-ephemeral',
+    mode: 'workspace',
+    cwd,
+    timeout: 5,
+    ephemeral: true,
+  });
+  assert.strictEqual(result.success, true, result.error);
+  const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
   assert(argv.includes('--ephemeral'));
+  assert.strictEqual(argv.at(-2), 'session-ephemeral');
+  assert.strictEqual(argv.at(-1), '-');
 });
 
 test('relative outputFile is resolved under cwd and preserved', async () => {
@@ -164,6 +189,19 @@ test('timeout returns an error instead of success', async () => {
 test('session id can be extracted from JSONL stdout', () => {
   assert.strictEqual(extractSessionId('', '{"session_id":"sid-1"}'), 'sid-1');
   assert.strictEqual(extractSessionId('session id: sid-2', ''), 'sid-2');
+});
+
+test('tool result exposes continuation metadata when Codex returns a session id', () => {
+  const text = formatToolResult({
+    success: true,
+    result: 'Answer body',
+    sessionId: 'sid-123',
+  });
+  assert.match(text, /<gpt-bridge-session>/);
+  assert.match(text, /sessionId: sid-123/);
+  assert.match(text, /continueWith: \{"sessionId":"sid-123"\}/);
+  assert.match(text, /sync boundary/);
+  assert.match(text, /Answer body/);
 });
 
 test('MCP server exposes gpt tool over stdio', () => {

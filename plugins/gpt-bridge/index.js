@@ -55,7 +55,7 @@ const SANDBOX_BY_MODE = {
 
 const TOOL_DEF = {
   name: 'gpt',
-  description: `Delegate a task to GPT via Codex CLI. v2: session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response when done.`,
+  description: `Delegate a task to GPT via Codex CLI. v2: persistent session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response plus a session header when Codex exposes a session id. Codex sessions cannot be imported as native Claude Code conversation turns; the tool result is the synchronization boundary.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -65,7 +65,7 @@ const TOOL_DEF = {
       },
       sessionId: {
         type: 'string',
-        description: 'Resume a previous GPT session by id. Omit to start a new session.',
+        description: 'Resume a previous Codex/GPT session by id. Omit to start a new session. Successful tool output includes the session id when Codex exposes one.',
       },
       model: {
         type: 'string',
@@ -110,6 +110,10 @@ const TOOL_DEF = {
         type: 'string',
         enum: ['low', 'medium', 'high'],
         description: 'Reasoning effort. Default: codex config default',
+      },
+      ephemeral: {
+        type: 'boolean',
+        description: 'Run without persisting Codex session updates. Default: false so later calls can resume the same Codex thread.',
       },
       autoContext: {
         type: 'object',
@@ -237,40 +241,22 @@ function extractSessionId(stderr, stdout) {
   return null;
 }
 
-async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext }) {
+function formatToolResult(result) {
+  if (!result.sessionId) return result.result || '';
+  return [
+    '<gpt-bridge-session>',
+    `sessionId: ${result.sessionId}`,
+    `continueWith: {"sessionId":"${result.sessionId}"}`,
+    'note: This preserves Codex-side continuity. Claude Code does not import Codex sessions as native Claude conversation turns; this tool result is the sync boundary.',
+    '</gpt-bridge-session>',
+    '',
+    result.result || '',
+  ].join('\n').trim();
+}
+
+async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext, ephemeral }) {
   const effectiveCwd = cwd || process.cwd();
   const sandboxArgs = codexSandboxArgs(mode);
-  let args;
-  if (sessionId) {
-    args = ['exec', 'resume', sessionId, ...sandboxArgs, '--ephemeral', '--skip-git-repo-check'];
-    if (model) args.push('-m', model);
-  } else {
-    args = ['exec', ...sandboxArgs, '--color', 'never', '--skip-git-repo-check'];
-    if (model) args.push('-m', model);
-  }
-  if (images) for (const img of images) args.push('-i', resolveUserPath(img, effectiveCwd));
-
-  let schemaFile = null;
-  if (outputSchema) {
-    schemaFile = join(tmpdir(), `gpt-bridge-schema-${randomUUID()}.json`);
-    await writeFile(schemaFile, JSON.stringify(outputSchema), 'utf-8');
-    args.push('--output-schema', schemaFile);
-  }
-
-  // --json: stream JSONL events to stdout for real-time progress + work log
-  args.push('--json');
-
-  // Always route final output through a file (-o) to avoid stdout buffer truncation
-  const finalOutputFile = outputFile ? resolveUserPath(outputFile, effectiveCwd) : join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
-  await mkdir(dirname(finalOutputFile), { recursive: true });
-  args.push('-o', finalOutputFile);
-
-  // Progress file for real-time tailing (JSONL events written as they arrive)
-  const progressFile = join(tmpdir(), `gpt-bridge-progress-${randomUUID()}.log`);
-
-  if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
-  args.push('-C', effectiveCwd);
-  args.push('-');
 
   let fileContents = [];
   if (files && files.length > 0) {
@@ -291,6 +277,44 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       maxSizeKB: autoContext.maxSizeKB,
       explicitFiles: files || [],
     });
+  }
+
+  let schemaFile = null;
+  if (outputSchema) {
+    schemaFile = join(tmpdir(), `gpt-bridge-schema-${randomUUID()}.json`);
+    await writeFile(schemaFile, JSON.stringify(outputSchema), 'utf-8');
+  }
+
+  // Always route final output through a file (-o) to avoid stdout buffer truncation
+  const finalOutputFile = outputFile ? resolveUserPath(outputFile, effectiveCwd) : join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
+  await mkdir(dirname(finalOutputFile), { recursive: true });
+
+  // Progress file for real-time tailing (JSONL events written as they arrive)
+  const progressFile = join(tmpdir(), `gpt-bridge-progress-${randomUUID()}.log`);
+
+  const resolvedImages = (images || []).map((img) => resolveUserPath(img, effectiveCwd));
+  const args = ['exec', ...sandboxArgs];
+  if (sessionId) {
+    // `codex exec resume` only accepts sandbox and cwd-related options before the
+    // `resume` subcommand. Resume-specific options must precede SESSION_ID.
+    args.push('resume', '--skip-git-repo-check');
+    if (model) args.push('-m', model);
+    if (schemaFile) args.push('--output-schema', schemaFile);
+    args.push('--json', '-o', finalOutputFile);
+    if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
+    for (const img of resolvedImages) args.push('-i', img);
+    if (ephemeral) args.push('--ephemeral');
+    args.push(sessionId, '-');
+  } else {
+    args.push('--color', 'never', '--skip-git-repo-check');
+    if (model) args.push('-m', model);
+    for (const img of resolvedImages) args.push('-i', img);
+    if (schemaFile) args.push('--output-schema', schemaFile);
+    // --json: stream JSONL events to stdout for real-time progress + work log
+    args.push('--json', '-o', finalOutputFile);
+    if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
+    if (ephemeral) args.push('--ephemeral');
+    args.push('-C', effectiveCwd, '-');
   }
 
   const stdin = buildStdin({ prompt, systemPrompt, files, fileContents, autoCollected });
@@ -494,10 +518,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     effort: args.effort,
     sessionId: args.sessionId,
     autoContext: args.autoContext,
+    ephemeral: args.ephemeral,
   });
 
   if (result.success) {
-    return { content: [{ type: 'text', text: result.result }] };
+    return { content: [{ type: 'text', text: formatToolResult(result) }] };
   } else {
     return { content: [{ type: 'text', text: result.error }], isError: true };
   }
@@ -519,6 +544,7 @@ export {
   resolveUserPath,
   codexSandboxArgs,
   extractSessionId,
+  formatToolResult,
   runCodex,
   main,
 };
