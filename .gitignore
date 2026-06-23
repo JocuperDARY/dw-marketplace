@@ -20,3 +20,5 @@ node_modules/
 # Temp files
 *.tmp
 *.log
+.ace-tool/
+.claude/
