@@ -6,10 +6,11 @@ function readFileSafe(f){try{return fs.readFileSync(f,'utf-8')}catch{return null
 function readContextJsonl(taskDir){const p=path.join(taskDir,'context.jsonl');if(!fs.existsSync(p))return[];try{return fs.readFileSync(p,'utf-8').split('\n').filter(l=>l.trim()).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(e=>e&&e.file)}catch{return[]}}
 
 let inputData='';if(!process.stdin.isTTY)inputData=fs.readFileSync(0,'utf-8');
-let toolInput={};try{const p=JSON.parse(inputData);toolInput=p.tool_input||p.input||p}catch{}
-const command=toolInput.command||'',teamName=toolInput.team_name||'',agentName=toolInput.name||'';
-const isCodeagentCall=command.includes('codeagent-wrapper'),isTeamSpawn=!!teamName;
-if(!isCodeagentCall&&!isTeamSpawn)process.exit(0);
+let event={};let toolInput={};try{event=JSON.parse(inputData);toolInput=event.tool_input||event.input||event.parameters||event}catch{}
+const toolName=event.tool_name||event.toolName||'';
+const command=toolInput.command||'',teamName=toolInput.team_name||'',agentName=toolInput.name||toolInput.description||toolInput.subagent_type||'';
+const isCodeagentCall=command.includes('codeagent-wrapper'),isTeamSpawn=!!teamName,isTaskTool=toolName==='Task'||toolName==='Agent'||!!toolInput.subagent_type;
+if(!isCodeagentCall&&!isTeamSpawn&&!isTaskTool)process.exit(0);
 const root=findProjectRoot(process.env.CLAUDE_PROJECT_DIR||process.cwd());if(!root)process.exit(0);
 const task=getActiveTask(root);if(!task)process.exit(0);
 
@@ -18,11 +19,11 @@ const ROLE_FILE_MAP={reviewer:'review',analyzer:'research',debugger:'debug',test
 const AGENT_PATTERNS=[{pattern:/dev|builder|fix|impl/i,role:'implement'},{pattern:/review|check|audit/i,role:'review'},{pattern:/research|scout|explore|analy/i,role:'research'},{pattern:/debug|diagnos/i,role:'debug'}];
 let role='implement';
 if(isCodeagentCall){const m=command.match(/ROLE_FILE:.*\/(\w+)\.md/);if(m)role=ROLE_FILE_MAP[m[1]]||'implement'}
-else if(isTeamSpawn&&agentName){for(const{p,r}of AGENT_PATTERNS){if(p.test(agentName)){role=r;break}}}
+else if((isTeamSpawn||isTaskTool)&&agentName){for(const{pattern,role:matchedRole}of AGENT_PATTERNS){if(pattern.test(agentName)){role=matchedRole;break}}}
 
 const ctx=[];
 // Active task block
-if(isTeamSpawn)ctx.push(`<dw-active-task>\nTask: ${task.title||task.id} (${task.status})\nStrategy: ${task.strategy}\nPhase: ${task.currentPhase}\nAgent role: ${role}\n</dw-active-task>`);
+if(isTeamSpawn||isTaskTool)ctx.push(`<dw-active-task>\nTask: ${task.title||task.id} (${task.status})\nStrategy: ${task.strategy}\nPhase: ${task.currentPhase}\nAgent role: ${role}\n</dw-active-task>`);
 
 // Role-filtered specs from context.jsonl
 const allEntries=readContextJsonl(task.dir);
@@ -38,6 +39,6 @@ if(role==='research'||role==='implement'){const rd=path.join(task.dir,'research'
 
 if(!ctx.length)process.exit(0);
 const injected=`<dw-injected-context>\n${ctx.join('\n\n')}\n</dw-injected-context>`;
-if(isTeamSpawn&&typeof toolInput.prompt==='string')outputHook('PreToolUse',null,{updatedInput:{...toolInput,prompt:`${injected}\n\n---\n\n${toolInput.prompt}`}});
+if((isTeamSpawn||isTaskTool)&&typeof toolInput.prompt==='string')outputHook('PreToolUse',null,{updatedInput:{...toolInput,prompt:`${injected}\n\n---\n\n${toolInput.prompt}`}});
 else outputHook('PreToolUse',injected);
 }catch(e){process.exit(0)}

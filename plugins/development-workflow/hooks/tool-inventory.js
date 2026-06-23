@@ -30,7 +30,7 @@ const CATEGORIES = [
     patterns: [
       /brainstorm/i, /design/i, /plan/i, /architect/i, /prototype/i,
       /spec/i, /prd/i, /blueprint/i, /scaffold/i, /idea/i,
-      /shape/i, /sketch/i, /concept/i
+      /shape/i, /sketch/i, /concept/i, /workflow/i, /methodology/i
     ],
     specifics: []
   },
@@ -256,6 +256,77 @@ function extractKeywords(name, description) {
   return [...words].slice(0, 30);
 }
 
+function compareVersionsDesc(a, b) {
+  const pa = String(a).split(/[.-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+  const pb = String(b).split(/[.-]/).map(part => /^\d+$/.test(part) ? Number(part) : part);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const av = pa[i] ?? 0, bv = pb[i] ?? 0;
+    if (av === bv) continue;
+    if (typeof av === 'number' && typeof bv === 'number') return bv - av;
+    return String(bv).localeCompare(String(av), undefined, { numeric: true });
+  }
+  return 0;
+}
+
+function getActivePluginVersion(pluginDir) {
+  const versions = safeReaddir(pluginDir)
+    .filter(v => v !== 'unknown' && fs.statSync(path.join(pluginDir, v)).isDirectory());
+  const marked = versions.find(v => fs.existsSync(path.join(pluginDir, v, '.in_use')));
+  if (marked) return marked;
+  if (!versions.length) return null;
+  return versions.sort(compareVersionsDesc)[0];
+}
+
+function scanSkillsUnder(rootDir, source) {
+  const skills = [];
+  const seen = new Set();
+  const SKIP_DIRS = new Set(['.cursor', '.kiro', 'docs', '.git', 'node_modules']);
+
+  function walkSkills(dir) {
+    for (const entry of safeReaddir(dir)) {
+      if (SKIP_DIRS.has(entry)) continue;
+      const full = path.join(dir, entry);
+      let stat;
+      try { stat = fs.statSync(full); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+
+      const skillFile = ['SKILL.md', 'skill.md', 'SKILL.MD']
+        .map(f => path.join(full, f))
+        .find(f => fs.existsSync(f));
+      if (skillFile) {
+        const skillName = entry;
+        if (seen.has(skillName)) continue;
+        seen.add(skillName);
+
+        const content = fs.readFileSync(skillFile, 'utf-8');
+        const fm = parseFrontmatter(content) || {};
+        const displayName = fm.name || skillName;
+        const description = fm.description || '';
+
+        skills.push({
+          type: 'skill',
+          name: displayName,
+          dirName: skillName,
+          source,
+          description: description.substring(0, 200),
+          keywords: extractKeywords(displayName, description)
+        });
+      } else {
+        walkSkills(full);
+      }
+    }
+  }
+
+  if (fs.existsSync(rootDir)) walkSkills(rootDir);
+  return skills;
+}
+
+function scanCurrentPluginSkills() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
+  return scanSkillsUnder(path.join(pluginRoot, 'skills'), 'current-plugin');
+}
+
 function scanPluginSkills() {
   const skills = [];
   const pluginsDir = path.join(HOME, '.claude', 'plugins', 'cache');
@@ -272,53 +343,12 @@ function scanPluginSkills() {
       const pluginDir = path.join(mpDir, plugin);
       if (!fs.statSync(pluginDir).isDirectory()) continue;
 
-      const versions = safeReaddir(pluginDir)
-        .filter(v => v !== 'unknown' && fs.statSync(path.join(pluginDir, v)).isDirectory());
-      let activeVersion = versions.find(v =>
-        fs.existsSync(path.join(pluginDir, v, '.in_use'))
-      );
-      if (!activeVersion) activeVersion = versions.sort().pop();
+      let activeVersion = getActivePluginVersion(pluginDir);
       if (!activeVersion) continue;
 
       const versionDir = path.join(pluginDir, activeVersion);
       const source = `${plugin}@${marketplace}`;
-      const seen = new Set();
-
-      // Recursive walk to discover all SKILL.md files
-      function walkSkills(dir) {
-        for (const entry of safeReaddir(dir)) {
-          if (SKIP_DIRS.has(entry)) continue;
-          const full = path.join(dir, entry);
-          if (!fs.statSync(full).isDirectory()) continue;
-
-          const skillFile = ['SKILL.md', 'skill.md', 'SKILL.MD']
-            .map(f => path.join(full, f))
-            .find(f => fs.existsSync(f));
-          if (skillFile) {
-            const skillName = entry;
-            if (seen.has(skillName)) continue;
-            seen.add(skillName);
-
-            const content = fs.readFileSync(skillFile, 'utf-8');
-            const fm = parseFrontmatter(content) || {};
-            const displayName = fm.name || skillName;
-            const description = fm.description || '';
-
-            skills.push({
-              type: 'skill',
-              name: displayName,
-              dirName: skillName,
-              source,
-              description: description.substring(0, 200),
-              keywords: extractKeywords(displayName, description)
-            });
-          } else {
-            walkSkills(full);
-          }
-        }
-      }
-
-      walkSkills(versionDir);
+      skills.push(...scanSkillsUnder(versionDir, source));
     }
   }
   return skills;
@@ -370,12 +400,7 @@ function scanSlashCommands() {
       const pluginDir = path.join(mpDir, plugin);
       if (!fs.statSync(pluginDir).isDirectory()) continue;
 
-      const versions = safeReaddir(pluginDir)
-        .filter(v => v !== 'unknown' && fs.statSync(path.join(pluginDir, v)).isDirectory());
-      let activeVersion = versions.find(v =>
-        fs.existsSync(path.join(pluginDir, v, '.in_use'))
-      );
-      if (!activeVersion) activeVersion = versions.sort().pop();
+      let activeVersion = getActivePluginVersion(pluginDir);
       if (!activeVersion) continue;
 
       const versionDir = path.join(pluginDir, activeVersion);
@@ -431,9 +456,7 @@ function scanMcpTools() {
           for (const plugin of safeReaddir(mpDir)) {
             const pluginDir = path.join(mpDir, plugin);
             if (!fs.statSync(pluginDir).isDirectory()) continue;
-            const pluginJsonPath = path.join(pluginDir, safeReaddir(pluginDir)
-              .filter(v => v !== 'unknown' && fs.statSync(path.join(pluginDir, v)).isDirectory())
-              .sort().pop() || '', '.claude-plugin', 'plugin.json');
+            const pluginJsonPath = path.join(pluginDir, getActivePluginVersion(pluginDir) || '', '.claude-plugin', 'plugin.json');
             if (fs.existsSync(pluginJsonPath)) {
               try {
                 const pj = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8'));
@@ -596,6 +619,14 @@ function categorize(items) {
         source: item.source || '',
         keywords: (item.keywords || []).slice(0, 10)
       });
+    } else if (result.docs) {
+      result.docs.items.push({
+        name: item.name,
+        type: item.type,
+        description: item.description || '',
+        source: item.source || '',
+        keywords: (item.keywords || []).slice(0, 10)
+      });
     }
   }
 
@@ -734,15 +765,6 @@ function safeReaddir(dir) {
 }
 
 async function main() {
-  // ── Session-once guard: only inject tool inventory once per session ──
-  const MARKER_FILE = path.join(CACHE_DIR, 'tool-proact-inventory-done.txt');
-  const SESSION_TTL_MS = 5 * 60 * 1000;
-  let lastInjected = 0;
-  try { lastInjected = parseInt(fs.readFileSync(MARKER_FILE, 'utf-8'), 10); } catch { /* first run */ }
-  if (Date.now() - lastInjected < SESSION_TTL_MS) {
-    return; // already injected this session
-  }
-
   // ── Change detection: check if plugins/skills changed since last scan ──
   function getLatestPluginMtime() {
     let latest = 0;
@@ -792,6 +814,7 @@ async function main() {
   }
 
   const allItems = [
+    ...scanCurrentPluginSkills(),
     ...scanPluginSkills(),
     ...scanLocalSkills(),
     ...scanSlashCommands(),
@@ -844,8 +867,6 @@ async function main() {
     docEmbeddings: docEmbeddings || [],
   };
   fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
-
-  fs.writeFileSync(MARKER_FILE, String(Date.now()), 'utf-8');
 
   // Compact for context injection, full for file
   outputHook('SessionStart', formatInventoryCompact(categories));

@@ -22,13 +22,13 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-routing.js\"", "timeout": 10}
         ]
       },
       {
-        "matcher": "Bash|Agent",
+        "matcher": "Bash|Agent|Task",
         "hooks": [
           {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-context.js\"", "timeout": 10}
         ]
@@ -36,7 +36,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-code-check.js\"", "timeout": 10}
         ]

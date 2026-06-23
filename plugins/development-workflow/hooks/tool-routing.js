@@ -3,9 +3,11 @@
 try{const fs=require('fs'),path=require('path');
 let input='';if(!process.stdin.isTTY)input=fs.readFileSync(0,'utf-8');
 const data=JSON.parse(input),tool=data.tool_name||data.toolName||'';
-if(!['Write','Edit'].includes(tool))process.exit(0);
-const filePath=data.parameters?.file_path||data.parameters?.filePath||'';
-const content=data.parameters?.content||data.parameters?.new_string||'';
+if(!['Write','Edit','MultiEdit','NotebookEdit'].includes(tool))process.exit(0);
+const params=data.tool_input||data.parameters||data.input||{};
+const filePath=params.file_path||params.filePath||params.notebook_path||params.notebookPath||'';
+let content=params.content||params.new_string||params.newString||params.new_source||params.newSource||'';
+if(!content&&Array.isArray(params.edits))content=params.edits.map(e=>e.new_string||e.newString||'').join('\n');
 const CODE_EXT=/\.(js|ts|tsx|jsx|py|go|rs|java|kt|swift|c|cpp|h|hpp|rb|php|sh|bash|zsh|yaml|yml|json|toml|xml|sql|r|m|mm|cs|fs|fsx|scala|dart|ex|exs|clj|cljs|hs|elm|vue|svelte|astro)$/i;
 if(filePath&&!CODE_EXT.test(filePath))process.exit(0);
 const lineCount=content.split('\n').length;if(lineCount<10){process.exit(0)}
