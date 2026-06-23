@@ -5,11 +5,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'child_process';
+import spawn from 'cross-spawn';
 import { randomUUID } from 'crypto';
-import { writeFile, unlink, readFile } from 'fs/promises';
+import { mkdir, writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
+import { pathToFileURL } from 'url';
 import { existsSync, createWriteStream } from 'fs';
 import { glob } from 'glob';
 
@@ -31,12 +32,25 @@ function resolveCodexPath() {
   return process.platform === 'win32' ? 'codex.cmd' : 'codex';
 }
 
-const CODEX_BIN = resolveCodexPath();
+function normalizeProjectPath(filePath) {
+  return String(filePath || '').replace(/\\/g, '/');
+}
 
 const PROFILES = {
   fast:     { model: 'gpt-5.4-mini', mode: 'strict'  },
-  balanced: { model: 'gpt-5.4',      mode: 'yolo'    },
-  max:      { model: 'gpt-5.5',      mode: 'yolo'    },
+  balanced: { model: 'gpt-5.4',      mode: 'workspace' },
+  max:      { model: 'gpt-5.5',      mode: 'full'    },
+};
+
+const SANDBOX_BY_MODE = {
+  strict: 'read-only',
+  readOnly: 'read-only',
+  readonly: 'read-only',
+  workspace: 'workspace-write',
+  workspaceWrite: 'workspace-write',
+  yolo: 'danger-full-access',
+  full: 'danger-full-access',
+  danger: 'danger-full-access',
 };
 
 const TOOL_DEF = {
@@ -59,8 +73,8 @@ const TOOL_DEF = {
       },
       mode: {
         type: 'string',
-        enum: ['yolo', 'strict'],
-        description: 'Sandbox mode. yolo = full access, strict = read-only. Default: yolo. Mutually exclusive with profile.',
+        enum: ['strict', 'workspace', 'yolo', 'full'],
+        description: 'Sandbox mode. strict = read-only, workspace = workspace-write, yolo/full = danger-full-access. Default: workspace. Mutually exclusive with profile.',
       },
       files: {
         type: 'array',
@@ -94,7 +108,7 @@ const TOOL_DEF = {
       },
       effort: {
         type: 'string',
-        enum: ['low', 'medium', 'high', 'xhigh'],
+        enum: ['low', 'medium', 'high'],
         description: 'Reasoning effort. Default: codex config default',
       },
       autoContext: {
@@ -157,7 +171,7 @@ async function readFiles(filePaths, cwd) {
   const missing = [];
   for (const relPath of filePaths) {
     try {
-      const absPath = join(cwd, relPath);
+      const absPath = resolveUserPath(relPath, cwd);
       contents.push(await readFile(absPath, 'utf-8'));
     } catch {
       missing.push(relPath);
@@ -170,7 +184,7 @@ async function readFiles(filePaths, cwd) {
 async function autoCollectFiles({ patterns, cwd, maxFiles, maxSizeKB, explicitFiles }) {
   const maxF = maxFiles || 10;
   const maxSize = (maxSizeKB || 50) * 1024;
-  const explicitSet = new Set(explicitFiles || []);
+  const explicitSet = new Set((explicitFiles || []).map(normalizeProjectPath));
   const collected = [];
 
   for (const pattern of patterns) {
@@ -182,14 +196,14 @@ async function autoCollectFiles({ patterns, cwd, maxFiles, maxSizeKB, explicitFi
       });
       for (const relPath of matches) {
         if (collected.length >= maxF) break;
-        if (explicitSet.has(relPath)) continue;
+        const normalizedRelPath = normalizeProjectPath(relPath);
+        if (explicitSet.has(normalizedRelPath)) continue;
         try {
-          const absPath = join(cwd, relPath);
-          const { stat } = await import('fs/promises');
+          const absPath = resolveUserPath(relPath, cwd);
           const fileStat = await stat(absPath).catch(() => null);
           if (!fileStat || fileStat.size > maxSize) continue;
           const content = await readFile(absPath, 'utf-8');
-          collected.push({ path: relPath, content });
+          collected.push({ path: normalizedRelPath, content });
         } catch { /* skip unreadable */ }
       }
     } catch { /* skip invalid glob */ }
@@ -197,16 +211,44 @@ async function autoCollectFiles({ patterns, cwd, maxFiles, maxSizeKB, explicitFi
   return collected;
 }
 
+function resolveUserPath(filePath, cwd) {
+  if (!filePath) return filePath;
+  return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
+}
+
+function codexSandboxArgs(mode) {
+  const sandbox = SANDBOX_BY_MODE[mode || 'workspace'];
+  if (!sandbox) throw new Error(`Invalid mode: ${mode}`);
+  if (sandbox === 'danger-full-access') return ['--dangerously-bypass-approvals-and-sandbox'];
+  return ['--sandbox', sandbox];
+}
+
+function extractSessionId(stderr, stdout) {
+  const combined = `${stderr || ''}\n${stdout || ''}`;
+  const patterns = [
+    /session id:\s*([^\s]+)/i,
+    /"session_id"\s*:\s*"([^"]+)"/i,
+    /"sessionId"\s*:\s*"([^"]+)"/i,
+  ];
+  for (const pattern of patterns) {
+    const match = combined.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext }) {
   const effectiveCwd = cwd || process.cwd();
+  const sandboxArgs = codexSandboxArgs(mode);
   let args;
   if (sessionId) {
-    args = ['exec', 'resume', sessionId, '--ephemeral', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
+    args = ['exec', 'resume', sessionId, ...sandboxArgs, '--ephemeral', '--skip-git-repo-check'];
+    if (model) args.push('-m', model);
   } else {
-    args = ['exec', '-p', mode || 'yolo', '--color', 'never', '--skip-git-repo-check'];
+    args = ['exec', ...sandboxArgs, '--color', 'never', '--skip-git-repo-check'];
     if (model) args.push('-m', model);
   }
-  if (images) for (const img of images) args.push('-i', img);
+  if (images) for (const img of images) args.push('-i', resolveUserPath(img, effectiveCwd));
 
   let schemaFile = null;
   if (outputSchema) {
@@ -219,7 +261,8 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   args.push('--json');
 
   // Always route final output through a file (-o) to avoid stdout buffer truncation
-  const finalOutputFile = outputFile || join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
+  const finalOutputFile = outputFile ? resolveUserPath(outputFile, effectiveCwd) : join(tmpdir(), `gpt-bridge-out-${randomUUID()}.txt`);
+  await mkdir(dirname(finalOutputFile), { recursive: true });
   args.push('-o', finalOutputFile);
 
   // Progress file for real-time tailing (JSONL events written as they arrive)
@@ -253,28 +296,44 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   const stdin = buildStdin({ prompt, systemPrompt, files, fileContents, autoCollected });
 
   return new Promise((resolve) => {
-    const proc = spawn(CODEX_BIN, args, {
+    let settled = false;
+    let timedOut = false;
+    const proc = spawn(resolveCodexPath(), args, {
       stdio: ['pipe', 'pipe', 'pipe'],  // stdin + stdout (JSONL) + stderr
       cwd: effectiveCwd,
-      timeout: (timeout || 300) * 1000,
-      shell: process.platform === 'win32',
+      shell: false,
     });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { proc.kill('SIGTERM'); } catch {}
+    }, (timeout || 300) * 1000);
 
     let stderr = '';
+    let stdout = '';
     const progressStream = createWriteStream(progressFile);
 
     // Stream JSONL events to progress file in real-time for `tail -f`
-    proc.stdout.on('data', (d) => { progressStream.write(d); });
+    proc.stdout.on('data', (d) => {
+      const chunk = d.toString();
+      if (stdout.length < 65536) stdout += chunk;
+      progressStream.write(d);
+    });
     proc.stderr.on('data', (d) => {
       if (stderr.length < 8192) stderr += d.toString();
     });
 
     proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       progressStream.end();
       resolve({ success: false, error: `Failed to start codex: ${err.message}. Is Codex CLI installed?` });
     });
 
     proc.on('close', async (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       progressStream.end();
       if (schemaFile) { try { await unlink(schemaFile); } catch {} }
 
@@ -354,7 +413,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       try { await unlink(progressFile); } catch {}
 
       // Parse session id from stderr
-      const sessionMatch = stderr.match(/session id:\s*([a-f0-9-]+)/i);
+      const detectedSessionId = extractSessionId(stderr, stdout);
 
       if (code === 0) {
         const resultText = output.trim() + (workLog ? '\n\n' + workLog : '');
@@ -362,16 +421,18 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
           success: true,
           result: resultText,
           model: model || 'gpt-5.5',
-          sessionId: sessionMatch ? sessionMatch[1] : null,
+          sessionId: detectedSessionId,
         });
       } else {
         const stderrClean = stderr
           .split('\n')
           .filter(l => !l.includes('Tracing initialized') && !l.includes('OpenAI Codex') && !l.includes('---') && !l.includes('workdir:') && !l.includes('model:') && !l.includes('provider:') && !l.includes('approval:') && !l.includes('sandbox:') && !l.includes('reasoning') && !l.includes('session id:'))
           .join('\n').trim();
-        if (code === null) {
-          const msg = output.trim() || stderrClean || 'Process terminated (possibly timeout, signal, or output size limit)';
-          resolve({ success: true, result: msg, model: model || 'gpt-5.5' });
+        if (timedOut) {
+          resolve({ success: false, error: `codex timed out after ${timeout || 300}s${stderrClean ? `: ${stderrClean}` : ''}` });
+        } else if (code === null) {
+          const msg = output.trim() || stderrClean || 'Process terminated by signal';
+          resolve({ success: false, error: msg });
         } else {
           resolve({ success: false, error: stderrClean || `codex exited with code ${code}` });
         }
@@ -397,7 +458,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return { content: [{ type: 'text', text: `Unknown tool: ${request.params.name}` }], isError: true };
   }
 
-  const args = request.params.arguments;
+  const args = request.params.arguments || {};
+  if (!args.prompt || typeof args.prompt !== 'string') {
+    return { content: [{ type: 'text', text: 'prompt is required' }], isError: true };
+  }
+  if (args.mode && !SANDBOX_BY_MODE[args.mode]) {
+    return { content: [{ type: 'text', text: `Invalid mode: ${args.mode}` }], isError: true };
+  }
 
   // Profile conflicts with model/mode
   if (args.profile && (args.model || args.mode)) {
@@ -441,7 +508,24 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  console.error('gpt-bridge fatal:', err.message);
-  process.exit(1);
-});
+export {
+  TOOL_DEF,
+  PROFILES,
+  SANDBOX_BY_MODE,
+  buildStdin,
+  readFiles,
+  autoCollectFiles,
+  normalizeProjectPath,
+  resolveUserPath,
+  codexSandboxArgs,
+  extractSessionId,
+  runCodex,
+  main,
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('gpt-bridge fatal:', err.message);
+    process.exit(1);
+  });
+}

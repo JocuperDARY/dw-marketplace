@@ -8,6 +8,7 @@
   "bin": { "gpt-bridge": "./index.js" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "cross-spawn": "^7.0.6",
     "glob": "^11.0.0"
   },
   "keywords": ["gpt", "codex", "mcp", "bridge", "openai"],
