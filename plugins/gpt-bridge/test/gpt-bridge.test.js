@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
   autoCollectFiles,
+  buildToolResponse,
   codexSandboxArgs,
   extractSessionId,
   formatToolResult,
@@ -42,15 +43,16 @@ process.stdin.on('data', d => stdin += d);
 process.stdin.on('end', () => {
   fs.writeFileSync(${JSON.stringify(join(dir, 'argv.json'))}, JSON.stringify(args), 'utf8');
   fs.writeFileSync(${JSON.stringify(join(dir, 'stdin.txt'))}, stdin, 'utf8');
-  if (${JSON.stringify(behavior)} === 'timeout') return setTimeout(() => {}, 10000);
-  if (${JSON.stringify(behavior)} === 'fail') {
+  const behavior = ${JSON.stringify(behavior)};
+  if (behavior === 'timeout') return setTimeout(() => {}, 10000);
+  if (behavior === 'fail') {
     console.error('fake failure');
     process.exit(3);
   }
   const outIndex = args.indexOf('-o');
   if (outIndex >= 0) {
     fs.mkdirSync(require('path').dirname(args[outIndex + 1]), { recursive: true });
-    fs.writeFileSync(args[outIndex + 1], 'FAKE FINAL OUTPUT', 'utf8');
+    fs.writeFileSync(args[outIndex + 1], behavior === 'json' ? '{"ok":true}' : 'FAKE FINAL OUTPUT', 'utf8');
   }
   console.log(JSON.stringify({ type: 'turn.started', session_id: 'abc-session' }));
   console.log(JSON.stringify({ type: 'assistant.message', message: 'done' }));
@@ -158,6 +160,56 @@ test('missing explicit files fail before launching Codex', async () => {
   assert.match(result.error, /Files not found: missing\.txt/);
 });
 
+test('absolute explicit files are rejected before launching Codex', async () => {
+  const cwd = makeDir();
+  const outside = join(makeDir(), 'secret.txt');
+  write(outside, 'secret');
+  const bin = makeFakeCodex(cwd);
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Use absolute file.',
+    mode: 'workspace',
+    files: [outside],
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, false);
+  assert.match(result.error, /Absolute file paths are not allowed/);
+  assert.throws(() => readFileSync(join(cwd, 'argv.json'), 'utf8'));
+});
+
+test('escaping explicit files are rejected before launching Codex', async () => {
+  const cwd = makeDir();
+  const bin = makeFakeCodex(cwd);
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Use parent file.',
+    mode: 'workspace',
+    files: ['../secret.txt'],
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, false);
+  assert.match(result.error, /escapes project root/);
+  assert.throws(() => readFileSync(join(cwd, 'argv.json'), 'utf8'));
+});
+
+test('project-relative files starting with dotdot text are allowed inside cwd', async () => {
+  const cwd = makeDir();
+  write(join(cwd, '..not-parent.txt'), 'local');
+  const bin = makeFakeCodex(cwd);
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Use local file.',
+    mode: 'workspace',
+    files: ['..not-parent.txt'],
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, true, result.error);
+  assert.match(readFileSync(join(cwd, 'stdin.txt'), 'utf8'), /local/);
+});
+
 test('auto context respects max file count and excludes explicit files', async () => {
   const cwd = makeDir();
   write(join(cwd, 'src', 'a.txt'), 'A');
@@ -195,13 +247,39 @@ test('tool result exposes continuation metadata when Codex returns a session id'
   const text = formatToolResult({
     success: true,
     result: 'Answer body',
-    sessionId: 'sid-123',
+    sessionId: 'sid-"123',
   });
   assert.match(text, /<gpt-bridge-session>/);
-  assert.match(text, /sessionId: sid-123/);
-  assert.match(text, /continueWith: \{"sessionId":"sid-123"\}/);
+  assert.match(text, /sessionId: sid-"123/);
+  const continueLine = text.split('\n').find(line => line.startsWith('continueWith: '));
+  assert.strictEqual(JSON.parse(continueLine.replace('continueWith: ', '')).sessionId, 'sid-"123');
   assert.match(text, /sync boundary/);
   assert.match(text, /Answer body/);
+});
+
+test('outputSchema responses preserve raw JSON and move session data to metadata', async () => {
+  const cwd = makeDir();
+  const bin = makeFakeCodex(cwd, 'json');
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Return JSON.',
+    mode: 'workspace',
+    outputSchema: {
+      type: 'object',
+      properties: { ok: { type: 'boolean' } },
+      required: ['ok'],
+    },
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, true, result.error);
+  assert.deepStrictEqual(JSON.parse(result.result), { ok: true });
+
+  const response = buildToolResponse(result, { preserveRawText: true });
+  assert.deepStrictEqual(JSON.parse(response.content[0].text), { ok: true });
+  assert.deepStrictEqual(response.structuredContent, { ok: true });
+  assert.strictEqual(response._meta['gpt-bridge/sessionId'], 'abc-session');
+  assert.deepStrictEqual(response._meta['gpt-bridge/continueWith'], { sessionId: 'abc-session' });
 });
 
 test('MCP server exposes gpt tool over stdio', () => {

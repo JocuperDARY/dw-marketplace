@@ -9,7 +9,7 @@ import spawn from 'cross-spawn';
 import { randomUUID } from 'crypto';
 import { mkdir, writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { pathToFileURL } from 'url';
 import { existsSync, createWriteStream } from 'fs';
 import { glob } from 'glob';
@@ -55,7 +55,7 @@ const SANDBOX_BY_MODE = {
 
 const TOOL_DEF = {
   name: 'gpt',
-  description: `Delegate a task to GPT via Codex CLI. v2: persistent session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response plus a session header when Codex exposes a session id. Codex sessions cannot be imported as native Claude Code conversation turns; the tool result is the synchronization boundary.`,
+  description: `Delegate a task to GPT via Codex CLI. v2: persistent session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response and exposes Codex session data as MCP metadata when available. Codex sessions cannot be imported as native Claude Code conversation turns; the tool result is the synchronization boundary.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -173,16 +173,24 @@ function buildStdin({ prompt, systemPrompt, files, fileContents, autoCollected }
 async function readFiles(filePaths, cwd) {
   const contents = [];
   const missing = [];
+  const invalid = [];
   for (const relPath of filePaths) {
+    let absPath;
     try {
-      const absPath = resolveUserPath(relPath, cwd);
+      absPath = resolveProjectFilePath(relPath, cwd);
+    } catch (error) {
+      invalid.push(error.message);
+      contents.push(null);
+      continue;
+    }
+    try {
       contents.push(await readFile(absPath, 'utf-8'));
     } catch {
       missing.push(relPath);
       contents.push(null);
     }
   }
-  return { contents, missing };
+  return { contents, missing, invalid };
 }
 
 async function autoCollectFiles({ patterns, cwd, maxFiles, maxSizeKB, explicitFiles }) {
@@ -220,6 +228,20 @@ function resolveUserPath(filePath, cwd) {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
 }
 
+function resolveProjectFilePath(filePath, cwd) {
+  if (!filePath) throw new Error('File path is required');
+  if (isAbsolute(filePath)) {
+    throw new Error(`Absolute file paths are not allowed: ${filePath}`);
+  }
+  const root = resolve(cwd);
+  const absPath = resolve(root, filePath);
+  const relPath = relative(root, absPath);
+  if (relPath === '..' || relPath.startsWith(`..${sep}`) || isAbsolute(relPath)) {
+    throw new Error(`File path escapes project root: ${filePath}`);
+  }
+  return absPath;
+}
+
 function codexSandboxArgs(mode) {
   const sandbox = SANDBOX_BY_MODE[mode || 'workspace'];
   if (!sandbox) throw new Error(`Invalid mode: ${mode}`);
@@ -246,12 +268,41 @@ function formatToolResult(result) {
   return [
     '<gpt-bridge-session>',
     `sessionId: ${result.sessionId}`,
-    `continueWith: {"sessionId":"${result.sessionId}"}`,
+    `continueWith: ${JSON.stringify({ sessionId: result.sessionId })}`,
     'note: This preserves Codex-side continuity. Claude Code does not import Codex sessions as native Claude conversation turns; this tool result is the sync boundary.',
     '</gpt-bridge-session>',
     '',
     result.result || '',
   ].join('\n').trim();
+}
+
+function parseStructuredContent(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    return { value: parsed };
+  } catch {
+    return undefined;
+  }
+}
+
+function buildToolResponse(result, { preserveRawText = false } = {}) {
+  const response = {
+    content: [{
+      type: 'text',
+      text: preserveRawText ? (result.result || '') : formatToolResult(result),
+    }],
+  };
+  if (result.structuredContent) {
+    response.structuredContent = result.structuredContent;
+  }
+  if (result.sessionId) {
+    response._meta = {
+      'gpt-bridge/sessionId': result.sessionId,
+      'gpt-bridge/continueWith': { sessionId: result.sessionId },
+    };
+  }
+  return response;
 }
 
 async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext, ephemeral }) {
@@ -262,6 +313,9 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   if (files && files.length > 0) {
     const result = await readFiles(files, effectiveCwd);
     fileContents = result.contents;
+    if (result.invalid.length > 0) {
+      return { success: false, error: result.invalid.join('; ') };
+    }
     if (result.missing.length > 0) {
       return { success: false, error: `Files not found: ${result.missing.join(', ')}` };
     }
@@ -440,12 +494,15 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       const detectedSessionId = extractSessionId(stderr, stdout);
 
       if (code === 0) {
-        const resultText = output.trim() + (workLog ? '\n\n' + workLog : '');
+        const outputText = output.trim();
+        const structuredContent = outputSchema ? parseStructuredContent(outputText) : undefined;
+        const resultText = outputSchema ? outputText : outputText + (workLog ? '\n\n' + workLog : '');
         resolve({
           success: true,
           result: resultText,
           model: model || 'gpt-5.5',
           sessionId: detectedSessionId,
+          structuredContent,
         });
       } else {
         const stderrClean = stderr
@@ -522,7 +579,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   });
 
   if (result.success) {
-    return { content: [{ type: 'text', text: formatToolResult(result) }] };
+    return buildToolResponse(result, { preserveRawText: Boolean(args.outputSchema) });
   } else {
     return { content: [{ type: 'text', text: result.error }], isError: true };
   }
@@ -542,9 +599,11 @@ export {
   autoCollectFiles,
   normalizeProjectPath,
   resolveUserPath,
+  resolveProjectFilePath,
   codexSandboxArgs,
   extractSessionId,
   formatToolResult,
+  buildToolResponse,
   runCodex,
   main,
 };
