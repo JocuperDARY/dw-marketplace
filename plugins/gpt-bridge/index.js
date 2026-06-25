@@ -250,6 +250,18 @@ function codexSandboxArgs(mode) {
 }
 
 function extractSessionId(stderr, stdout) {
+  // 1) Try JSONL stdout (codex --json mode): thread.started event carries thread_id
+  const jsonLines = (stdout || '').split('\n').filter(Boolean);
+  for (const line of jsonLines) {
+    try {
+      const evt = JSON.parse(line);
+      if (evt.type === 'thread.started' && evt.thread_id) {
+        return evt.thread_id;
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+
+  // 2) Fallback text patterns (codex without --json, or stderr preamble)
   const combined = `${stderr || ''}\n${stdout || ''}`;
   const patterns = [
     /session id:\s*([^\s]+)/i,
@@ -284,6 +296,26 @@ function parseStructuredContent(text) {
   } catch {
     return undefined;
   }
+}
+
+function parseJsonlEvents(text) {
+  return (text || '')
+    .split('\n')
+    .filter(Boolean)
+    .map(line => { try { return JSON.parse(line); } catch { return null; } })
+    .filter(Boolean);
+}
+
+function extractJsonlErrors(events) {
+  const messages = [];
+  for (const event of events) {
+    if (event.type === 'error' && event.message) {
+      messages.push(event.message);
+    } else if (event.type === 'turn.failed' && event.error?.message) {
+      messages.push(event.error.message);
+    }
+  }
+  return messages;
 }
 
 function buildToolResponse(result, { preserveRawText = false } = {}) {
@@ -336,7 +368,9 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   let schemaFile = null;
   if (outputSchema) {
     schemaFile = join(tmpdir(), `gpt-bridge-schema-${randomUUID()}.json`);
-    await writeFile(schemaFile, JSON.stringify(outputSchema), 'utf-8');
+    // OpenAI API requires additionalProperties: false at the root level.
+    const safeSchema = { ...outputSchema, additionalProperties: false };
+    await writeFile(schemaFile, JSON.stringify(safeSchema), 'utf-8');
   }
 
   // Always route final output through a file (-o) to avoid stdout buffer truncation
@@ -431,15 +465,15 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
       // Parse JSONL progress file for detailed work log
       // codex --json events: item.started, item.completed, assistant.message, error
       let workLog = '';
+      let progressEvents = [];
       try {
         const raw = await readFile(progressFile, 'utf-8');
-        const lines = raw.trim().split('\n').filter(Boolean);
-        const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        progressEvents = parseJsonlEvents(raw);
 
-        const turns = parsed.filter(e => e.type === 'turn.started');
-        const items = parsed.filter(e => e.type === 'item.started' || e.type === 'item.completed');
-        const errors = parsed.filter(e => e.type === 'error');
-        const msgs = parsed.filter(e => e.type === 'assistant.message');
+        const turns = progressEvents.filter(e => e.type === 'turn.started');
+        const items = progressEvents.filter(e => e.type === 'item.started' || e.type === 'item.completed');
+        const errors = progressEvents.filter(e => e.type === 'error');
+        const msgs = progressEvents.filter(e => e.type === 'assistant.message');
 
         const parts = [`### GPT Work Log · ${turns.length} turns · ${items.length} events`];
         parts.push('');
@@ -505,17 +539,19 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
           structuredContent,
         });
       } else {
+        const jsonErrors = extractJsonlErrors(progressEvents);
         const stderrClean = stderr
           .split('\n')
           .filter(l => !l.includes('Tracing initialized') && !l.includes('OpenAI Codex') && !l.includes('---') && !l.includes('workdir:') && !l.includes('model:') && !l.includes('provider:') && !l.includes('approval:') && !l.includes('sandbox:') && !l.includes('reasoning') && !l.includes('session id:'))
           .join('\n').trim();
+        const combinedError = [stderrClean, ...jsonErrors].filter(Boolean).join('; ');
         if (timedOut) {
-          resolve({ success: false, error: `codex timed out after ${timeout || 300}s${stderrClean ? `: ${stderrClean}` : ''}` });
+          resolve({ success: false, error: `codex timed out after ${timeout || 300}s${combinedError ? `: ${combinedError}` : ''}` });
         } else if (code === null) {
-          const msg = output.trim() || stderrClean || 'Process terminated by signal';
+          const msg = combinedError || output.trim() || 'Process terminated by signal';
           resolve({ success: false, error: msg });
         } else {
-          resolve({ success: false, error: stderrClean || `codex exited with code ${code}` });
+          resolve({ success: false, error: combinedError || `codex exited with code ${code}` });
         }
       }
     });

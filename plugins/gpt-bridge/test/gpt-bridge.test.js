@@ -49,12 +49,21 @@ process.stdin.on('end', () => {
     console.error('fake failure');
     process.exit(3);
   }
+  if (behavior === 'json-error') {
+    console.log(JSON.stringify({ type: 'error', message: 'jsonl schema failure' }));
+    console.log(JSON.stringify({ type: 'turn.failed', error: { message: 'jsonl turn failure' } }));
+    process.exit(1);
+  }
+  const schemaIndex = args.indexOf('--output-schema');
+  if (schemaIndex >= 0) {
+    fs.writeFileSync(${JSON.stringify(join(dir, 'schema.json'))}, fs.readFileSync(args[schemaIndex + 1], 'utf8'), 'utf8');
+  }
   const outIndex = args.indexOf('-o');
   if (outIndex >= 0) {
     fs.mkdirSync(require('path').dirname(args[outIndex + 1]), { recursive: true });
     fs.writeFileSync(args[outIndex + 1], behavior === 'json' ? '{"ok":true}' : 'FAKE FINAL OUTPUT', 'utf8');
   }
-  console.log(JSON.stringify({ type: 'turn.started', session_id: 'abc-session' }));
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'abc-session' }));
   console.log(JSON.stringify({ type: 'assistant.message', message: 'done' }));
 });
 `, 'utf8');
@@ -239,6 +248,7 @@ test('timeout returns an error instead of success', async () => {
 });
 
 test('session id can be extracted from JSONL stdout', () => {
+  assert.strictEqual(extractSessionId('', '{"type":"thread.started","thread_id":"thread-1"}'), 'thread-1');
   assert.strictEqual(extractSessionId('', '{"session_id":"sid-1"}'), 'sid-1');
   assert.strictEqual(extractSessionId('session id: sid-2', ''), 'sid-2');
 });
@@ -274,12 +284,48 @@ test('outputSchema responses preserve raw JSON and move session data to metadata
   });
   assert.strictEqual(result.success, true, result.error);
   assert.deepStrictEqual(JSON.parse(result.result), { ok: true });
+  assert.strictEqual(JSON.parse(readFileSync(join(cwd, 'schema.json'), 'utf8')).additionalProperties, false);
 
   const response = buildToolResponse(result, { preserveRawText: true });
   assert.deepStrictEqual(JSON.parse(response.content[0].text), { ok: true });
   assert.deepStrictEqual(response.structuredContent, { ok: true });
   assert.strictEqual(response._meta['gpt-bridge/sessionId'], 'abc-session');
   assert.deepStrictEqual(response._meta['gpt-bridge/continueWith'], { sessionId: 'abc-session' });
+});
+
+test('outputSchema forces root additionalProperties false for Codex compatibility', async () => {
+  const cwd = makeDir();
+  const bin = makeFakeCodex(cwd, 'json');
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Return JSON.',
+    mode: 'workspace',
+    outputSchema: {
+      type: 'object',
+      additionalProperties: true,
+      properties: { ok: { type: 'boolean' } },
+      required: ['ok'],
+    },
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, true, result.error);
+  assert.strictEqual(JSON.parse(readFileSync(join(cwd, 'schema.json'), 'utf8')).additionalProperties, false);
+});
+
+test('JSONL error and turn.failed events are surfaced on Codex failure', async () => {
+  const cwd = makeDir();
+  const bin = makeFakeCodex(cwd, 'json-error');
+  process.env.CODEX_PATH = bin;
+  const result = await runCodex({
+    prompt: 'Fail with JSONL events.',
+    mode: 'workspace',
+    cwd,
+    timeout: 5,
+  });
+  assert.strictEqual(result.success, false);
+  assert.match(result.error, /jsonl schema failure/);
+  assert.match(result.error, /jsonl turn failure/);
 });
 
 test('MCP server exposes gpt tool over stdio', () => {
