@@ -6,8 +6,8 @@
     {
       "name": "development-workflow",
       "source": "./plugins/development-workflow",
-      "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排等10个子Skill，及hooks、rules资产。",
-      "version": "4.0.0",
+      "description": "全流程开发准则：铁律体系+七阶段门控+三C验证闭环。含诊断、方案设计、TDD、数据完整性、优化方法论、工具编排、环境更新检查等11个子Skill，及hooks、rules资产。",
+      "version": "4.1.0",
       "author": { "name": "JocuperDARY" },
       "homepage": "https://github.com/JocuperDARY/dw-marketplace",
       "repository": "https://github.com/JocuperDARY/dw-marketplace",

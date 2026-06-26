@@ -95,6 +95,8 @@ function keywordMatch(route, msgLower) {
 }
 
 const INTENT_ROUTES = [
+  { id: 'check_updates', skill: 'development-workflow:check-updates', name: '全局环境更新检查',
+    groups: [['检查更新','更新检查','升级检查','全局更新','组件更新','环境更新','哪些组件要升级','需要更新','可更新','版本检查','outdated','check updates','update check','updates available','upgrade check','codex update','codegraph update','openspec update','codex 更新','codegraph 更新','openspec 更新','codex 版本','codegraph 版本','openspec 版本']] },
   { id: 'diagnosis', skill: 'development-workflow:dw-diagnosis', name: '诊断与根因定位',
     groups: [['诊断','根因','修复','bug','出错','报错','异常','不工作','有问题','故障','崩溃','全零','空','排查','原因','症状','证据','假设','归因','输出','数据','结果','为零','空值','缺数据','无输出','不输出','没结果','没数据','返回空','全为空','debug','diagnose','troubleshoot','root cause','defect','broken','failing','wrong','incorrect','malfunction','error','crash','issue','fix']] },
   { id: 'planning', skill: 'development-workflow:dw-planning', name: '方案设计与操作指引',

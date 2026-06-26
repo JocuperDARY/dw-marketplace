@@ -68,6 +68,27 @@ test('skill-router reads official UserPromptSubmit prompt field and routes debug
   assert.match(out.additionalContext, /dw-debugging/);
 });
 
+test('skill-router routes update checks to check-updates skill', () => {
+  const result = runHook('skill-router.js', {
+    hook_event_name: 'UserPromptSubmit',
+    prompt: '帮我检查更新，尤其看一下 codegraph、openspec 和 codex 工具',
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const out = parseHook(result.stdout);
+  assert.match(out.additionalContext, /development-workflow:check-updates/);
+});
+
+test('skill-router does not treat ordinary codegraph usage as update check', () => {
+  const result = runHook('skill-router.js', {
+    hook_event_name: 'UserPromptSubmit',
+    prompt: '帮我理解这个项目，优先用 codegraph 看调用链',
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const out = parseHook(result.stdout);
+  assert.doesNotMatch(out.additionalContext, /development-workflow:check-updates/);
+  assert.match(out.additionalContext, /dw-tooling|codegraph_explore/);
+});
+
 test('skill-router does not inject fallback for short English chatter', () => {
   const result = runHook('skill-router.js', {
     hook_event_name: 'UserPromptSubmit',
@@ -162,6 +183,33 @@ test('tool-inventory includes plugin-local skills when installed cache is empty'
   const out = parseHook(result.stdout);
   assert.match(out.additionalContext, /Skill:development-workflow/);
   assert.match(out.additionalContext, /Skill:dw-diagnosis/);
+  assert.match(out.additionalContext, /Skill:check-updates/);
+});
+
+test('development-workflow package includes check-updates skill assets', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
+  const pluginJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8'));
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  const skillPath = path.join(pluginRoot, 'skills', 'check-updates', 'SKILL.md');
+  const scriptPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1');
+
+  assert(packageJson.files.includes('skills/check-updates/'));
+  assert.match(pluginJson.description, /11个子Skill/);
+  assert.match(hub, /check-updates/);
+  assert(fs.existsSync(skillPath), 'expected check-updates skill');
+  assert(fs.existsSync(scriptPath), 'expected check-updates script');
+});
+
+test('check-updates defaults to remote checking and has explicit local-only opt-out', () => {
+  const skill = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'SKILL.md'), 'utf8');
+  const script = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1'), 'utf8');
+
+  assert.match(skill, /默认.*联网|默认.*远程/);
+  assert.match(skill, /-NoRemote/);
+  assert.doesNotMatch(skill, /默认模式只做本地检查/);
+  assert.match(script, /\[switch\]\$NoRemote/);
+  assert.match(script, /if \(\$NoRemote\)/);
+  assert.doesNotMatch(script, /if \(-not \$CheckRemote\)/);
 });
 
 test('SessionStart hooks emit context on every session start instead of a global 5 minute skip', () => {

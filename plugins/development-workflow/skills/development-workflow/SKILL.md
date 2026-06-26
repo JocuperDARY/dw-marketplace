@@ -1,13 +1,13 @@
 ---
 name: development-workflow
-description: 全流程开发准则总纲：铁律体系(A1-A4/B1-B5)、七阶段门控模型、Skill生态衔接、子Skill导航。这是开发工作流的入口——具体执行请按领域触发对应的子skill（dw-diagnosis/dw-planning/dw-implementation/dw-verification/dw-wrapup/dw-optimization/dw-debugging/dw-tooling/dw-reference）。触发词：工作流准则、开发规范、操作指引、三C验证、闭环流程、量化验证、工作指引、development workflow、operational guideline、iron rules、开发方法论。
+description: 全流程开发准则总纲：铁律体系(A1-A4/B1-B5)、七阶段门控模型、Skill生态衔接、子Skill导航。这是开发工作流的入口——具体执行请按领域触发对应的子skill（dw-diagnosis/dw-planning/dw-implementation/dw-verification/dw-wrapup/dw-optimization/dw-debugging/dw-tooling/dw-reference/check-updates）。触发词：工作流准则、开发规范、操作指引、三C验证、闭环流程、量化验证、工作指引、development workflow、operational guideline、iron rules、开发方法论。
 ---
 
 # 开发工作准则与操作流程（总纲）
 
-**版本**: 3.0 | **适用范围**: 通用（不限于本项目）
+**版本**: 3.1 | **适用范围**: 通用（不限于本项目）
 
-> 本 skill 已拆分为 **1 个总纲 + 9 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
+> 本 skill 已拆分为 **1 个总纲 + 10 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
 
 ---
 
@@ -24,6 +24,7 @@ description: 全流程开发准则总纲：铁律体系(A1-A4/B1-B5)、七阶段
 | 🐛 调试 | [dw-debugging](../dw-debugging/SKILL.md) | 信号诊断、闭环验证、生命周期排查 | 调试、信号诊断、管道排查 |
 | 🛠️ 工具 | [dw-tooling](../dw-tooling/SKILL.md) | 工具普查、能力分层、编排模板 | 工具、MCP、编排、普查 |
 | 📖 参考 | [dw-reference](../dw-reference/SKILL.md) | 检查清单、反模式、快速参考、附录 | 检查清单、反模式、快速参考 |
+| 🔄 更新 | [check-updates](../check-updates/SKILL.md) | Claude/Codex/MCP/CodeGraph/OpenSpec 更新与健康检查 | 检查更新、升级、Codex、CodeGraph、OpenSpec |
 
 ---
 
@@ -214,6 +215,7 @@ description: 全流程开发准则总纲：铁律体系(A1-A4/B1-B5)、七阶段
 | 2.0 | 2026-06-12 | **[重大合并]** 融合 `AI 辅助软件开发方法论`：<br>- 铁律体系重构：工具使用铁律 A1-A4（原铁律 1-4）+ 流程铁律 B1-B5（新增）<br>- 扩展为 7 阶段：新增诊断（阶段 1）、数据完整性防护（阶段 4）、分层测试闸门（阶段 5）<br>- 新增：阶段门控模型、偏差严重度分级 P0-P3、实测驱动调试、测试阈值校准<br>- 新增：哨兵值策略、元数据落盘、自检哨兵<br>- 新增：附录 A（合成测试数据设计原则）、附录 B（GPU 计算开发专项注意事项）<br>- 新增：工具速查目录（MCP/Skills/Agents 完整目录 + 场景速查）<br>- 保留：所有原有内容（优化核心原则×5、决策树×9、能力分层框架×6层、编排模板×3、编排铁律×4、信号诊断、闭环验证、生命周期排查等）<br>- 反模式清单重组织为按阶段分类 + 新增方法论反模式<br>- 检查清单扩充（新增诊断检查清单） |
 | 2.1 | 2026-06-12 | **[合并]** 完整吸收 `OPTIMIZATION_GUIDE`：<br>- 新增：优化方法详解（算法/库/JIT/IO/并发并行/GPU 六类，含代码示例和检查清单）<br>- 新增：JIT 性能对比参考表（Python原生/Numpy/Numba/C DLL）<br>- 新增：性能分析流程（cProfile Hot Path 识别 + Benchmark 方法论）<br>- 新增：附录 C（库选型性能参考：Polars/Pandas/Dask、XGBoost/LightGBM/sklearn、OpenCV/Pillow/imageio、orjson/ujson/json、tqdm/rich、pathlib/os.path）<br>- 新增：优化文档命名规范（OPT_{date}_{desc}.md） |
 | 3.0 | 2026-06-15 | **[架构重构]** 拆分为 1 总纲 + 9 子模块。完整继承 v2.1 全部内容 |
+| 3.1 | 2026-06-26 | **[新增]** `check-updates` 子模块：覆盖 Claude/Codex/MCP/CodeGraph/OpenSpec 环境更新与健康检查 |
 
 ---
 
