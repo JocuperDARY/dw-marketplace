@@ -1,6 +1,6 @@
 ---
 name: check-updates
-description: 全局环境更新与健康检查：默认联网检查 Claude Code、Codex、MCP Servers、Plugins、Skills，以及 CodeGraph、OpenSpec 这类独立 CLI/MCP/项目索引工具的本地版本、注册状态、项目状态和远程 npm 更新状态。用户说“检查更新”“有哪些组件要升级”“看一下 codegraph/openspec/codex 是否需要更新”“check updates”“update check”“outdated”时必须使用。
+description: Use when 用户要求检查、比较或排查 Claude Code、Codex、MCP、Plugins、Skills、CodeGraph 或 OpenSpec 的本地版本、注册状态、项目状态或可用更新。
 ---
 
 # Check Updates - 全局环境更新检查
@@ -15,12 +15,12 @@ description: 全局环境更新与健康检查：默认联网检查 Claude Code�
 
 | 类别 | 检查内容 |
 |------|----------|
-| Claude Code | CLI 版本、启用插件、插件缓存、MCP 配置 |
-| MCP Servers | Claude MCP 配置、安装方式分类、CodeGraph/OpenSpec 注册状态 |
-| CodeGraph | CLI 版本、npm 全局包、Claude/Codex MCP 注册、当前项目 `.codegraph/`、全局索引 |
-| OpenSpec | CLI 版本、npm 全局包、项目 `openspec/` 目录、`openspec-mcp`、MCP 注册 |
-| Codex | CLI 版本、`~/.codex/config.toml`、`version.json`、MCP servers、Codex skills/rules |
-| Skills | CC Switch skills、Claude local skills、Codex skills、plugin-distributed skills |
+| Claude Code | CLI 版本、用户级启用插件数量、插件缓存和 MCP 配置摘要 |
+| MCP Servers | Claude 用户级配置中的注册项与安装方式分类；不探测每个 server 的远程版本 |
+| CodeGraph | CLI/npm 全局包、Claude/Codex MCP 注册、当前项目 `.codegraph/` 和已知全局索引目录 |
+| OpenSpec | CLI/npm 全局包、项目 `openspec/` 目录、`openspec-mcp` 和 MCP 注册 |
+| Codex | CLI/npm 版本、`~/.codex/config.toml`、`version.json`、MCP 名称和 skills/rules 目录 |
+| Skills | CC Switch、Claude local 和 Codex skills 目录计数；不判断每个 Skill 的远程更新 |
 
 ---
 
@@ -31,35 +31,39 @@ description: 全局环境更新与健康检查：默认联网检查 Claude Code�
 在 Claude Code 插件环境中：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:CLAUDE_PLUGIN_ROOT\skills\check-updates\scripts\check-updates.ps1"
+pwsh -NoProfile -File "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.ps1"
 ```
 
 在本仓库开发环境中：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\plugins\development-workflow\skills\check-updates\scripts\check-updates.ps1"
+pwsh -NoProfile -File "./plugins/development-workflow/skills/check-updates/scripts/check-updates.ps1"
 ```
 
-默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出。网络、代理、认证或沙箱导致远程检查失败时，脚本按 `WARN` 汇报，不把整个检查判为失败。
+优先使用 PowerShell 7 (`pwsh`)。只有环境明确缺少 `pwsh` 时才用 Windows PowerShell 兼容执行；不要默认加 `-ExecutionPolicy Bypass`，需要绕过策略时先解释原因并取得授权。
+
+默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出。每个外部命令受 `-CommandTimeoutSec` 限制，超时会终止本脚本启动的进程并按 `WARN` 汇报。脚本只检查，不自动升级或修改配置。
 
 ### 2. 受限环境需要本地-only 时加 `-NoRemote`
 
 只有在用户明确要求不联网、当前环境没有网络权限、或正在做离线排障时，才关闭远程检查：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:CLAUDE_PLUGIN_ROOT\skills\check-updates\scripts\check-updates.ps1" -NoRemote
+pwsh -NoProfile -File "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.ps1" -NoRemote
 ```
 
 `-CheckRemote` 仍可被旧调用传入，但现在只是兼容参数；远程检查已经是默认行为。
+
+不希望写报告文件时加 `-NoReport`。慢速或不稳定环境可设置 `-CommandTimeoutSec 60`；不要使用无限超时。
 
 ### 3. 汇报结果
 
 按以下顺序简要汇报：
 
-1. 是否有 `UPDATE` 项。
-2. 是否有 `ERROR` 或需要手动处理的 `WARN` 项。
+1. 是否有 `ERROR` 或超时/需要手动处理的 `WARN` 项。
+2. 是否有 `UPDATE` 项。
 3. CodeGraph、OpenSpec、Codex 三类新增适配项的状态。
-4. 报告 JSON 保存路径。
+4. 报告 JSON 保存路径，或本次使用了 `-NoReport`。
 
 ---
 

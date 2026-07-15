@@ -1,17 +1,17 @@
 # 测试策略
 
 ## 核心原则
-- TDD: Red → Green → Refactor
-- 测试金字塔: 70% 单元 / 20% 集成 / 10% E2E
-- 覆盖率 >= 80%
+- 行为变更优先使用 TDD: Red → Green → Refactor；文档、配置和元数据使用结构或静态校验
+- 测试层级由风险与契约决定：把大部分可隔离逻辑放在低层，在依赖边界和关键用户路径补充集成/E2E
+- 覆盖率用于发现未测试区域，不设脱离风险和项目门槛的统一百分比；关键分支与故障模式必须有证据
 - AAA 模式: Arrange → Act → Assert
 
 ## 测试类型
 | 类型 | 范围 | 框架 |
 |------|------|------|
-| 单元 | 函数/组件 | Jest/Vitest |
-| 集成 | API/DB | Supertest |
-| E2E | 关键流程 | Playwright |
+| 单元 | 函数/组件 | 仓库已有单元测试框架 |
+| 集成 | API/DB/进程/文件边界 | 仓库已有集成测试能力 |
+| E2E | 关键用户或发布流程 | 当前环境可用的端到端能力 |
 
 ## 禁止模式
 ```javascript
@@ -23,6 +23,7 @@ test('creates user', async () => { await db.users.create(...) })
 beforeEach(async () => { await db.clean() })
 ```
 
-## 工具链
-- TDD: `Skill:test-driven-development`, `Skill:tdd`
-- E2E: `mcp__plugin_ecc_playwright__browser_navigate`
+## 工具选择
+- 先读取仓库脚本、测试配置和 CI，使用项目原生命令
+- 需要额外能力时，从当前运行时已声明的 Skill、MCP 或工具中选择；能力不存在时使用等价的仓库工具，不硬编码外部名称
+- 无法运行某层测试时，记录原因、替代证据和残余风险

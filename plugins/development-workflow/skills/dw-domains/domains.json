@@ -1,30 +1,30 @@
 {
-  "description": "Domain knowledge config for skill-router.js Layer 3. Each entry maps keywords to inline context blocks. Max 1 domain injected per message.",
+  "description": "Domain knowledge config for skill-router.js Layer 3. Each entry maps keywords to inline context blocks. The highest-scoring primary domain is injected, plus at most one complementary security overlay.",
   "domains": [
     {
       "keywords": ["渗透","红队","pentest","exploit","c2","lateral","提权","bypass","evasion","red team","后渗透"],
       "name": "红队渗透",
-      "text": "## 红队安全\n原则: 最小权限、纵深防御、假定被入侵。敏感操作需审计日志。参考: `Skill:ecc:security-review`\n深入参考: `Read skills/dw-domains/security/pentest.md`"
+      "text": "## 红队安全\n仅在明确授权的目标、时间窗和测试范围内行动；隔离环境、最小权限、完整审计，禁止扩大目标或建立未授权持久化。\n深入参考: `Read rules/security-pentest.md`"
     },
     {
       "keywords": ["蓝队","告警","ioc","应急","取证","siem","edr","blue team","incident","containment","防御","检测"],
       "name": "蓝队防御",
-      "text": "## 蓝队防御\n原则: 监控先行、告警可操作、应急有预案。日志集中管理，IOC自动阻断。"
+      "text": "## 蓝队防御\n原则: 监控先行、告警可操作、应急有预案。IOC 先评估来源、置信度和误报影响；高影响阻断需人工确认或预授权，优先可逆隔离并保留审计记录。"
     },
     {
       "keywords": ["sqli","xss","ssrf","rce","injection","owasp","web渗透","api安全","sql注入","csrf","xxe","idor","安全漏洞"],
       "name": "Web渗透",
-      "text": "## Web渗透\n核心原则: 所有用户输入验证清理、参数化查询防SQL注入、CSRF保护、错误信息不泄露。参考: OWASP Top 10\n深入参考: `Read skills/dw-domains/security/pentest.md`"
+      "text": "## Web渗透\n仅测试已授权资产与方法；所有用户输入按上下文验证，查询参数化，状态变更请求防 CSRF，错误信息不泄露。\n深入参考: `Read rules/security-pentest.md`"
     },
     {
       "keywords": ["代码审计","污点分析","sink","source","危险函数","code audit","静态分析","eval(","exec(","innerhtml","dangerous function","恶意输入","taint"],
       "name": "代码审计",
-      "text": "## 代码安全审计\n追踪数据流: source→sink; 标记不可信数据。危险函数: eval/exec/innerHTML。参考: `Skill:ecc:security-review`\n深入参考: `Read skills/dw-domains/security/code-audit.md`"
+      "text": "## 代码安全审计\n追踪不可信数据从 source 到 sink 的完整路径，结合上下文、净化和权限边界判断风险，不凭危险函数名直接定罪。\n深入参考: `Read rules/security-code-audit.md`"
     },
     {
       "keywords": ["逆向","pwn","fuzzing","栈溢出","堆溢出","rop","binary","reversing","缓冲区"],
       "name": "漏洞研究",
-      "text": "## 漏洞研究\n原则: 隔离环境测试、记录完整利用链、负责任披露。"
+      "text": "## 漏洞研究\n仅在拥有或明确授权的目标上研究；隔离环境、限制影响、记录完整证据，遵循协调披露，不生成超出验证所需的持久化或破坏能力。"
     },
     {
       "keywords": ["osint","威胁情报","威胁建模","threat model","att&ck","threat hunting","情报收集"],
@@ -34,7 +34,7 @@
     {
       "keywords": ["api设计","rest","graphql","grpc","endpoint","versioning","api design","接口设计","openapi"],
       "name": "API设计",
-      "text": "## API设计\n原则: RESTful命名、版本化(/v1/)、一致错误格式、分页支持、限流保护。\n深入参考: `Read skills/dw-domains/architecture/api-design.md`"
+      "text": "## API设计\n原则: 契约清晰、兼容演进、一致错误语义、资源上限和可观测性；具体版本、分页与限流方式由场景决定。\n深入参考: `Read rules/architecture-api-design.md`"
     },
     {
       "keywords": ["缓存","redis","memcached","cache","cdn","invalidation","cache aside"],
@@ -54,12 +54,12 @@
     {
       "keywords": ["rag","retrieval","向量","embedding","chunking","vector","知识库","语义搜索","检索增强"],
       "name": "RAG系统",
-      "text": "## RAG系统\n原则: 文档分块策略、向量数据库选型(<1M pgvector/Chroma，>1M Pinecone/Weaviate)、检索+重排序、引用溯源。\n深入参考: `Read skills/dw-domains/ai/rag-system.md`"
+      "text": "## RAG系统\n原则: 用代表性查询评估分块、检索与重排序；向量存储按规模、过滤、延迟、运维和数据边界实测选型；输出保留引用溯源。\n深入参考: `Read rules/ai-rag-system.md`"
     },
     {
       "keywords": ["ai agent","tool use","function calling","agent框架","orchestration","multi agent","agentic","智能体"],
       "name": "Agent开发",
-      "text": "## Agent开发\n原则: 工具定义清晰(name+description+schema)、错误处理完善、上下文窗口管理、安全沙箱。\n深入参考: `Read skills/dw-domains/ai/agent-dev.md`"
+      "text": "## Agent开发\n原则: 工具契约清晰、授权边界明确、错误与重试可观测、上下文受控；后台任务和子进程必须记录所有权并回收。\n深入参考: `Read rules/ai-agent-dev.md`"
     },
     {
       "keywords": ["prompt injection","jailbreak","guardrail","llm安全","提示词注入","模型安全","ai safety"],

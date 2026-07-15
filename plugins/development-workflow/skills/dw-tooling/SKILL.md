@@ -1,30 +1,30 @@
 ---
 name: dw-tooling
-description: 工具普查与编排：普查流程、能力分层框架×6层（规划/实现/并行/验证/记忆/文档）、编排模板×3（轻量/标准/大型）、编排铁律×4、完整工具速查目录（MCP/Skills/Agents/场景速查）、工具使用反模式。触发词：工具、MCP、skill、编排、普查、并行、agent、tool、orchestration、parallel、选型、plugin。
+description: Use when 任务可能受益于 Skills、MCP、子代理或其他工具协作，尤其是需要选择、并行调度、限定权限、管理后台进程或清理资源时。
 ---
 
 # 工具普查与编排
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **工具普查与编排**。遵循铁律 A4（最大化利用工具）。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **工具发现、选择、编排和资源生命周期**。遵循铁律 A4（最小充分工具集）。
 
 ---
 
-## 为什么必须普查
+## 为什么需要发现
 
-- 工具在持续新增/更新，凭记忆选型会遗漏更优解。
-- 同一任务可能被多个工具覆盖（如多个 skill 都能做规划设计），需要根据任务规模和复杂度选配。
-- 多智能体并行场景下，不同 agent 类型有不同专长（如通用审查 vs 语言专项审查 vs 安全审查），错配导致质量下降。
+- 工具和名称会随运行时变化，静态目录很快失真。
+- 专用能力可能提高正确性，但无关调用会增加成本、权限面和上下文噪声。
+- 并行任务、后台服务和测试 worker 会引入进程与资源所有权，必须从启动时管理。
 
 ---
 
 ## 普查流程
 
 ```
-□ 步骤 1：列出现有环境所有可用辅助工具
-   └─ 包括：skill 列表、MCP server 及其 tools、可用的 agent/subagent 类型
-□ 步骤 2：按能力分层归类（见下方分层框架）
-□ 步骤 3：根据任务特征，从每层选配 1-3 个最匹配的工具
-□ 步骤 4：设计编排顺序（串行/并行/流水线）
+□ 步骤 1：读取当前运行时已经声明的 Skills、MCP、agent 和本地工具
+□ 步骤 2：只围绕当前步骤识别能力缺口，不做无目的全量调用
+□ 步骤 3：选择能降低关键不确定性的最小充分工具集
+□ 步骤 4：明确权限、输入数据、串并行依赖、超时和清理责任
+□ 步骤 5：工具不可用时使用仓库原生回退路径，并记录验证限制
 ```
 
 ---
@@ -91,20 +91,20 @@ description: 工具普查与编排：普查流程、能力分层框架×6层（�
 
 ## 编排模板
 
-### 轻量改动（单文件、<30 行）
+### 轻量改动（局部、可逆、无外部副作用）
 
 ```
 规划（可选） → 实现 → 审查 → 运行验证
 ```
 
-### 标准改动（多文件、新功能/模块）
+### 标准改动（行为变更或多个关联文件）
 
 ```
 规划设计 → 计划生成 → 实现 → 审查 → 完成前验证
                        └─ TDD（若新增逻辑）
 ```
 
-### 大型改动（3+ 模块、跨层影响）
+### 高风险改动（跨层、安全/数据敏感或多所有者）
 
 ```
 规划设计 → 计划生成
@@ -129,100 +129,33 @@ description: 工具普查与编排：普查流程、能力分层框架×6层（�
 3. **不确定是否有隐式依赖 → 先探后定**：用代码探索工具追踪数据流。
 4. **审查在实现后立即进行**：每个模块完成后即触发审查。
 
+### 子进程与后台资源协议
+
+启动开发服务器、watcher、浏览器驱动、测试 worker 或其他子进程时：
+
+1. 启动即记录命令、工作目录、进程标识（PID/句柄）、端口、用途和所有者。
+2. 设置有限超时；长任务定期读取输出，不用无界等待或阻塞式 sleep。
+3. 正常完成、失败、取消和异常路径都在 `finally`/等价清理阶段回收资源。
+4. 终止前核验 PID/命令/端口仍属于本任务，只停止自己启动的进程，不碰用户或共享服务。
+5. 先请求优雅退出，超时后再按宿主规则终止进程树；随后确认进程和端口已释放。
+6. 临时文件只清理本任务创建且位于已确认安全目录中的内容。
+
 ---
 
-## 工具速查目录
+## 运行时能力路由
 
-### MCP Server 工具
+静态工具名只可作为示例，不作为安装事实。每次从当前运行时声明的能力中选择：
 
-**Code Intelligence — codegraph**
+| 需要 | 首选能力 | 回退 |
+|------|----------|------|
+| 理解代码和调用链 | 仓库已索引时使用 CodeGraph | `rg` 定位 + 精确文件读取 |
+| 查第三方 API | 与当前版本匹配的官方文档/文档工具 | 项目锁文件、类型定义、依赖源码 |
+| 独立子任务并行 | 当前运行时的子代理能力 | 本地串行执行 |
+| 代码或安全审查 | 可用的专项审查能力 | 按仓库检查清单人工审查 diff |
+| 持久化知识 | 仓库已有文档；获授权且可用时用知识库 | 在最终报告中保留可复用结论 |
+| 外部平台操作 | 对应平台的结构化 API/MCP | 先报告需人工执行的动作 |
 
-| 工具 | 功能 | 场景 |
-|------|------|------|
-| `codegraph_explore` | 自然语言查代码，一次返回完整上下文 | 任何代码理解的第一选择 |
-| `codegraph_search` | 按符号名快速定位 | 已知函数/类名只需位置时 |
-| `codegraph_impact` | 分析修改某符号的影响范围 | 重构前评估风险 |
-| `codegraph_callers` / `codegraph_callees` | 查调用者/被调用者 | 追踪数据流和控制流 |
-
-**Documentation — context7**
-
-| 工具 | 功能 | 场景 |
-|------|------|------|
-| `resolve-library-id` | 将库名解析为 Context7 ID | 使用任何库的第一步 |
-| `query-docs` | 查询最新 API 文档和代码示例 | 写 API 调用前验证 |
-
-**Deep Reasoning — sequential-thinking**
-
-| 工具 | 功能 | 场景 |
-|------|------|------|
-| `sequentialthinking` | 多步骤结构化推理，支持分支/修订/回溯 | 复杂架构决策、多候选根因排查 |
-
-**Web Search — tavily + brightdata**
-
-| 工具 | 功能 | 场景 |
-|------|------|------|
-| `tavily_search` | Web 搜索 | 查最新版本、已知 bug |
-| `tavily_research` | AI 驱动的深度多源研究 | 综合多来源信息 |
-| `tavily_extract` | 提取 URL 为 Markdown | 阅读在线文档 |
-
-**Knowledge Graph — memory**
-
-| 工具 | 功能 | 场景 |
-|------|------|------|
-| `create_entities` | 创建知识图谱节点 | 存储 Bug 根因、项目规则 |
-| `search_nodes` / `read_graph` | 搜索/读取知识图谱 | 会话开始时恢复上下文 |
-
-**GitHub — github**
-
-| 工具 | 功能 |
-|------|------|
-| `create_pull_request` | 创建 PR |
-| `push_files` | 批量推送文件 |
-| `search_code` / `search_issues` | 搜索代码/Issue |
-
-### Plugin Skills
-
-| Skill | 场景 |
-|-------|------|
-| `systematic-debugging` | Bug/异常/测试失败——强制先复现+根因 |
-| `check-updates` | 环境更新检查——Claude/Codex/MCP/CodeGraph/OpenSpec |
-| `brainstorming` | 设计方案前——探索需求、发散方案 |
-| `development-workflow` | 非平凡变更前——操作指引先行 |
-| `test-driven-development` / `tdd` | 新功能/Bug 修复——RED→GREEN→REFACTOR |
-| `requesting-code-review` | 每次代码变更完成后 |
-| `ecc:security-review` | 涉及认证、文件 I/O、外部输入的变更 |
-| `writing-plans` | 编写正式实施计划 |
-| `verification-before-completion` | 完成前——检查所有步骤是否执行 |
-| `finishing-a-development-branch` | 实现完成、测试全绿后——合并/PR/清理 |
-
-### 内置 Agent
-
-| Agent | 场景 |
-|-------|------|
-| `ecc:code-reviewer` | 通用代码质量审查 |
-| `ecc:python-reviewer` | Python 专项审查 |
-| `ecc:security-reviewer` | 安全漏洞扫描 |
-| `ecc:performance-optimizer` | 性能瓶颈分析 |
-| `Explore` | 只读代码库探索 |
-| `tdd-guide` | TDD 循环指导 |
-| `build-error-resolver` | 编译/类型/依赖错误修复 |
-
-### 按场景速查
-
-| 我要做什么 | 调什么 |
-|-----------|--------|
-| 理解代码逻辑 | `codegraph_explore` |
-| 找函数/类定义 | `codegraph_search` |
-| 用第三方库 | 先 `context7 resolve` → `context7 query-docs` |
-| 做架构决策 | `sequential-thinking` |
-| 遇到 Bug | `Skill:systematic-debugging` |
-| 写新功能 | `Skill:tdd` |
-| 代码写完了 | `Skill:requesting-code-review` |
-| 涉及安全 | `Skill:ecc:security-review` |
-| 记住发现 | `memory create_entities` |
-| 开始复杂任务 | `Skill:development-workflow` |
-| 检查环境更新 | `Skill:check-updates` |
-| 设计方案 | `Skill:brainstorming` → `Skill:writing-plans` |
+外部写入、消息、PR、部署和配置变更遵循用户授权边界。工具不可用不是阻塞，除非它是完成任务所必需且没有安全回退路径。
 
 ---
 
@@ -230,13 +163,13 @@ description: 工具普查与编排：普查流程、能力分层框架×6层（�
 
 | 反模式 | 正确做法 |
 |--------|---------|
-| ❌ `grep`/`Read` 循环扫描代码库 | `codegraph_explore` 一次返回完整上下文 |
-| ❌ 凭记忆写 API 调用 | 先 `context7 query-docs` 查最新文档 |
-| ❌ `print()` 调试 | 结构化日志 + 自检哨兵 + 独立复现脚本 |
-| ❌ 重要发现只留在对话上下文 | 立即 `memory create_entities` |
-| ❌ 代码变更后不审查 | `Skill:requesting-code-review` |
-| ❌ 跳过多步骤推理直接动手 | `sequential-thinking` 理清逻辑链 |
-| ❌ 修复多个 Bug 后一次性测试 | 每个 Bug 独立 TDD 循环 |
+| 未检查索引就调用 CodeGraph | 仅当 `.codegraph/` 存在时使用，否则直接回退 `rg`/文件读取 |
+| 为展示工具使用而调用无关能力 | 选择能降低当前关键不确定性的最小工具集 |
+| 凭记忆写版本相关 API | 查当前版本的官方文档、锁文件或类型定义 |
+| 把敏感数据发送给未授权外部工具 | 调用前检查参数、数据分类和授权范围 |
+| 启动后台进程但不记录所有权 | 启动即记录 PID/端口，并在所有退出路径回收 |
+| 并行处理有共享写入的任务 | 先划分所有权或改为串行，避免互相覆盖 |
+| 重要结论只留在临时上下文 | 更新仓库已有文档；外部知识库仅在可用且获授权时使用 |
 
 ---
 
