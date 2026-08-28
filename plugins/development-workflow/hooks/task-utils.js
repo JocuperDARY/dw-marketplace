@@ -1,17 +1,108 @@
 #!/usr/bin/env node
 'use strict';
-const fs=require('fs'),path=require('path');
-function findProjectRoot(d){for(let i=0;i<20;i++){if(fs.existsSync(path.join(d,'.git')))return d;const p=path.dirname(d);if(p===d)break;d=p}return null}
-function getActiveTask(root){const t=path.join(root,'.tool-proact','tasks');if(!fs.existsSync(t))return null;try{for(const d of fs.readdirSync(t).filter(x=>x!=='archive').sort().reverse()){const j=path.join(t,d,'task.json');if(fs.existsSync(j)){const o=JSON.parse(fs.readFileSync(j,'utf-8'));if(o.status!=='completed')return{dir:path.join(t,d),...o}}}}catch(e){}return null}
-function readFileSafe(f){try{return fs.readFileSync(f,'utf-8')}catch{return null}}
-function readJsonSafe(f){try{return JSON.parse(fs.readFileSync(f,'utf-8'))}catch{return null}}
-function readContextJsonl(taskDir){const p=path.join(taskDir,'context.jsonl');if(!fs.existsSync(p))return[];try{return fs.readFileSync(p,'utf-8').split('\n').filter(l=>l.trim()).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(e=>e&&e.file)}catch{return[]}}
-function outputHook(e,c,x){const o={hookEventName:e};if(c)o.additionalContext=c;if(x&&typeof x==='object')Object.assign(o,x);console.log(JSON.stringify({hookSpecificOutput:o}))}
-function trackTurn(d,p,n){const f=path.join(d,'.turns.json');let t=[];try{t=JSON.parse(fs.readFileSync(f,'utf-8'))}catch{}t.push({phase:p||'',next:n||'',ts:Date.now()});if(t.length>10)t=t.slice(-10);try{fs.writeFileSync(f,JSON.stringify(t),'utf-8')}catch{}return t}
-function detectLoop(t,n=3){if(t.length<n)return null;const r=t.slice(-n),k=r[0].phase+'|'+r[0].next;if(!r.every(x=>x.phase+'|'+x.next===k))return null;return{phase:r[0].phase,nextAction:r[0].next,count:n,elapsedSec:Math.round((r[n-1].ts-r[0].ts)/1000)}}
-function detectTechStack(r){const m=[['package.json','Node.js'],['go.mod','Go'],['pyproject.toml','Python'],['Cargo.toml','Rust'],['pom.xml','Java']];return m.filter(([f])=>fs.existsSync(path.join(r,f))).map(([,s])=>s).join('+')||'Unknown'}
-function getGitInfo(r){try{const e=require('child_process').execSync;return{branch:e('git rev-parse --abbrev-ref HEAD',{cwd:r,stdio:'pipe'}).toString().trim(),dirtyCount:e('git status --porcelain',{cwd:r,stdio:'pipe'}).toString().trim().split('\n').filter(Boolean).length}}catch{return{branch:'unknown',dirtyCount:0}}}
-function verifyHookScripts(){const d=__dirname;const req=['task-utils.js','tool-inventory.js','skill-router.js','session-start.js','tool-routing.js','workflow-state.js','subagent-context.js','prune-rules.js','post-code-check.js'];const missing=req.filter(f=>!fs.existsSync(path.join(d,f)));if(missing.length)console.error(`[DW:verify] WARNING: Missing hook scripts: ${missing.join(', ')}`)}
-function archiveTask(taskDir,projectRoot){try{const n=new Date();const m=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;const a=path.join(projectRoot,'.tool-proact','tasks','archive',m);if(!fs.existsSync(a))fs.mkdirSync(a,{recursive:true});const d=path.join(a,path.basename(taskDir));fs.renameSync(taskDir,d);return d}catch{return null}}
-function seedContextJsonl(taskDir,projectRoot){const p=path.join(taskDir,'context.jsonl');if(fs.existsSync(p))return;const l=['{"_example":"Fill with {\\\"file\\\":\\\"path\\\",\\\"reason\\\":\\\"why\\\"}. One per line."}'];try{fs.writeFileSync(p,l.join('\n')+'\n','utf-8')}catch{}}
-module.exports={findProjectRoot,getActiveTask,readFileSafe,readJsonSafe,readContextJsonl,outputHook,trackTurn,detectLoop,detectTechStack,getGitInfo,verifyHookScripts,archiveTask,seedContextJsonl};
+
+const childProcess = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function readFileSafe(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function readJsonSafe(filePath) {
+  const content = readFileSafe(filePath);
+  if (content === null) return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+function isWithin(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function findProjectRoot(startDirectory, options = {}) {
+  const start = path.resolve(startDirectory || process.cwd());
+  const home = path.resolve(options.home || process.env.HOME || process.env.USERPROFILE || os.homedir());
+  let current = start;
+  for (let depth = 0; depth < 20; depth += 1) {
+    if (fs.existsSync(path.join(current, '.git'))) {
+      const capturedHome = current.toLowerCase() === home.toLowerCase()
+        && start.toLowerCase() !== home.toLowerCase();
+      return capturedHome ? start : current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return start;
+}
+
+function outputHook(eventName, additionalContext, extra) {
+  const hookSpecificOutput = { hookEventName: eventName };
+  if (additionalContext) hookSpecificOutput.additionalContext = additionalContext;
+  if (extra && typeof extra === 'object') Object.assign(hookSpecificOutput, extra);
+  process.stdout.write(`${JSON.stringify({ hookSpecificOutput })}\n`);
+}
+
+function detectTechStack(root) {
+  const markers = [
+    ['package.json', 'Node.js'],
+    ['go.mod', 'Go'],
+    ['pyproject.toml', 'Python'],
+    ['requirements.txt', 'Python'],
+    ['Cargo.toml', 'Rust'],
+    ['pom.xml', 'Java'],
+    ['build.gradle', 'Java/Kotlin'],
+    ['build.gradle.kts', 'Kotlin'],
+  ];
+  const values = markers.filter(([file]) => fs.existsSync(path.join(root, file))).map(([, label]) => label);
+  return [...new Set(values)].join(' + ') || 'Unknown';
+}
+
+function getGitInfo(root) {
+  try {
+    const branch = childProcess.execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 1500,
+      windowsHide: true,
+    }).trim();
+    const status = childProcess.execFileSync('git', ['status', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+      windowsHide: true,
+    });
+    return { branch: branch || 'detached', dirtyCount: status.split(/\r?\n/).filter(Boolean).length };
+  } catch {
+    return { branch: 'not-a-repository', dirtyCount: null };
+  }
+}
+
+function verifyHookScripts() {
+  const hooksDirectory = __dirname;
+  const required = ['task-utils.js', 'session-rules.js', 'rules-migrate.js', 'session-start.js', 'skill-router.js', 'tool-inventory.js'];
+  return required.filter(file => !fs.existsSync(path.join(hooksDirectory, file)));
+}
+
+module.exports = {
+  detectTechStack,
+  findProjectRoot,
+  getGitInfo,
+  isWithin,
+  outputHook,
+  readFileSafe,
+  readJsonSafe,
+  verifyHookScripts,
+};
