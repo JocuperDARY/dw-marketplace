@@ -1,6 +1,8 @@
 # Resource lifecycle
 
-This reference defines decision contracts. The helpers do not start, stop, kill, rename, or delete anything. A host adapter must separately prove that it supports an action, obtain any required authorization, execute it, and append the observation to `ResourceLedger1`.
+The 5.2.0 `TaskResourceTracker` applies these existing safety decisions across nested task scopes; see [resource-control.md](resource-control.md). The tracker records and orders decisions, while the host still performs and verifies any real stop or removal.
+
+This reference defines decision contracts. The helpers do not start, stop, kill, rename, or delete anything. A host adapter must separately prove that it supports an action, obtain any required authorization, execute it, and append the real action receipt to `ResourceLedger1`. `TaskResourceTracker.exportLedgerProjection()` returns only history-derived hints and explicitly marks them as not being a ledger. It never creates missing start, stop, reclaim, or retention events. Only a separately built and validated `ResourceLedger1` can feed `ExecutionReceipt1`.
 
 ## Fixed recovery order
 

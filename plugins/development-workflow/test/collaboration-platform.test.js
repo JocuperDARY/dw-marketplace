@@ -187,6 +187,8 @@ async function runMarker() {
   const sandboxRoot = process.env.DW_PLATFORM_SANDBOX_ROOT;
   assert(sandboxRoot, 'DW_PLATFORM_SANDBOX_ROOT is required for the applicable Windows marker test');
   const markerPath = path.join(sandboxRoot, 'marker-observed.json');
+  fs.mkdirSync(sandboxRoot, { recursive: true });
+  fs.rmSync(markerPath, { force: true });
   const script = `const fs=require('fs'),crypto=require('crypto');const h=v=>crypto.createHash('sha256').update(String(v)).digest('hex');fs.writeFileSync(${JSON.stringify(markerPath)},JSON.stringify({pid:process.pid,parent:process.ppid,start_time:new Date().toISOString(),exe_path_hash:h(process.execPath),argv_hash:h(JSON.stringify(process.argv)),parent_identity_hash:h(process.ppid),native_process_manager_run_id:process.env.DW_PLATFORM_NATIVE_RUN_ID||'not_available'}));process.stdin.once('data',()=>process.exit(0));setTimeout(()=>process.exit(23),15000);`;
   const child = spawn(process.execPath, ['-e', script], { cwd: sandboxRoot, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
   const pid = child.pid;

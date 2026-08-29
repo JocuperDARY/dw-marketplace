@@ -334,7 +334,7 @@ test('collaboration integration exposes one canonical discovery path', () => {
   const agentRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'ai-agent-dev.md'), 'utf8');
   const workflowRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
   const hooks = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
-  const expectedScript = 'node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/hooks.test.js';
+  const expectedScript = 'node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/resource-control.test.js && node test/failure-loop-guard-hardening.test.js && node test/resource-aware-queue.test.js && node test/hooks.test.js';
 
   assert(packageJson.files.includes('skills/dw-collaboration/'));
   assert(packageJson.files.includes('test/'));
@@ -739,9 +739,27 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
+  assert.strictEqual(packageJson.version, '5.2.0');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
+  assert(packageJson.scripts.test.includes('resource-control.test.js'));
+  assert(packageJson.scripts.test.includes('failure-loop-guard-hardening.test.js'));
+  assert(packageJson.scripts.test.includes('resource-aware-queue.test.js'));
+  assert(packageJson.scripts.validate.includes('resource-control.test.js'));
+  assert(packageJson.scripts.validate.includes('failure-loop-guard-hardening.test.js'));
+  assert(packageJson.scripts.validate.includes('resource-aware-queue.test.js'));
+  for (const relative of [
+    'skills/dw-collaboration/scripts/lib/task-resource-tracker.js',
+    'skills/dw-collaboration/scripts/lib/failure-loop-guard.js',
+    'skills/dw-collaboration/scripts/lib/resource-aware-queue.js',
+    'skills/dw-collaboration/references/resource-control.md',
+    'test/resource-control.test.js',
+    'test/failure-loop-guard-hardening.test.js',
+    'test/resource-aware-queue.test.js',
+  ]) {
+    assert(fs.existsSync(path.join(pluginRoot, relative)), `expected packaged 5.2.0 asset: ${relative}`);
+  }
   if (!isRepositoryCheckout) {
     skipTest('marketplace and README are not part of the published package');
     return;
@@ -754,6 +772,7 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
+  assert.strictEqual(marketplaceEntry.version, '5.2.0');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));

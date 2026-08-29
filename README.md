@@ -6,7 +6,7 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.1.0 | 风险分级开发闭环，12个 Skill（1个总纲 + 11个子 Skill）+ 2 hooks + 8 rules |
+| [development-workflow](./plugins/development-workflow/) | 5.2.0 | 按任务风险调整计划、实现、验证和资源管理，含 12个 Skill（1个总纲 + 11个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 1.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 
 ## 安装
@@ -39,9 +39,11 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 功能完成安全收敛，当前版本为 5.1.0
+3. 将插件更新到当前的 5.2.0 版本
 
-5.1.0 新增 capability-first 的 `dw-collaboration`：协作方式以当前宿主实际验证的 spawn、collect、消息与资源控制能力为准，而不是以 Claude Code、Codex、Grok Build 等产品名称推断。
+5.1.0 新增 `dw-collaboration`。它先检查当前工具是否真的能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式；不会只根据 Claude Code、Codex、Grok Build 等产品名称猜测能力。
+
+5.2.0 为 `dw-collaboration` 增加三个不依赖第三方包的 CommonJS 模块：逐项登记并核对任务产生的子 agent、进程、终端、端口、临时空间和受限计算；同一失败重复时先总结原因和现状，只允许一次有证据、有明确停止条件的下一步；根据 CPU、内存、I/O、GPU 和预计时间安排并行工作。资源状态和历史记录必须一起成功或一起失败；临时目录检查、失败预算持久化和任务授权都由宿主管理的接口确认；队列只接受已经绑定到真实资源的任务，并在实际启动前重新检查这些资源。GPU 显存占用和实际计算利用率在有界时间窗内分别统计，85% 只是条件允许时的优化目标，不会通过单点尖峰、空转或无用任务追求数值。付费模型询问仍是未来可选方案，不包含在 5.2.0 中。
 
 ### 5.0.0 钩子收敛
 

@@ -34,6 +34,8 @@ When a gate requires a machine-readable decision, emit exactly one token; never 
 
 Stop retries when the immutable failure fingerprint repeats or the injected retry budget is exhausted. Preserve evidence and open the circuit; communication failure changes topology, not model intelligence or permissions.
 
+For executable task-resource tracking, repeated-failure loop exit, work levels, resource-aware queueing, and user progress reports, follow [resource-control.md](references/resource-control.md). Register and bind resources before launch; inject filesystem and observation checks when the tracker is created; use a monotonic compare-and-swap store for failure budgets; bind each queued task to a non-empty list of resources in one exact scope; stop after one summarized bounded exit attempt repeats the same failure family; and do not refill queue capacity until that task's exact tracker close result is consumed.
+
 Before `COMPLETE`, require root acceptance, review, independent verification when specified, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Completion never authorizes staging, commit, push, merge, publication, deployment, paid work, credential changes, or constrained compute.
 
 Read only the reference needed:
@@ -41,5 +43,6 @@ Read only the reference needed:
 - Routing, probes, host fallbacks: [runtime-adapters.md](references/runtime-adapters.md)
 - Run/child/resource transitions: [state-machines.md](references/state-machines.md)
 - Process, storage, progress, retry: [resource-lifecycle.md](references/resource-lifecycle.md)
+- Task tracker, loop exit, queue, work levels: [resource-control.md](references/resource-control.md)
 - Evidence, actual route, authorization, completion: [evidence-and-artifacts.md](references/evidence-and-artifacts.md)
 - Executable schemas: [schemas/](references/schemas/)

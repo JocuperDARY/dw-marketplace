@@ -1,7 +1,7 @@
 {
   "name": "development-workflow",
   "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共12个 Skill（1个总纲 + 11个子 Skill），并含 hooks、rules 及环境健康检查。",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "author": {
     "name": "JocuperDARY"
   },
