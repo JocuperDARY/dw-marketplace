@@ -1,0 +1,15 @@
+{
+  "packet_version": 1,
+  "phase_id": "incomplete",
+  "objective": "demonstrate mandatory packet rejection",
+  "acceptance_criteria": ["must be rejected"],
+  "dependency_artifact_hashes": [],
+  "owned_paths_resources": [],
+  "forbidden_actions": [],
+  "authorization_scope": "test",
+  "allowed_capabilities": [],
+  "expected_output_schema": "RouteDecision1",
+  "validation_commands": [],
+  "timeout_progress_contract": {},
+  "return_channel": "root-collect"
+}

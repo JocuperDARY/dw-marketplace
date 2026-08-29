@@ -206,7 +206,7 @@ test('development-workflow package includes check-updates skill assets', () => {
   const scriptPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1');
 
   assert(packageJson.files.includes('skills/check-updates/'));
-  assert.match(pluginJson.description, /11个 Skill（1个总纲 \+ 10个子 Skill）/);
+  assert.match(pluginJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
   assert.match(hub, /check-updates/);
   assert(fs.existsSync(skillPath), 'expected check-updates skill');
   assert(fs.existsSync(scriptPath), 'expected check-updates script');
@@ -247,12 +247,19 @@ test('published package can run its own npm test without repository-only files',
 
   const home = makeHome();
   const packagedRoot = path.join(home, 'packaged-plugin');
+  const platformSandboxRoot = path.join(home, 'platform-sandbox');
   copyPackagedPlugin(packagedRoot);
+  mkdirp(platformSandboxRoot);
   const npmCommand = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm';
   const npmArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm test'] : ['test'];
   const result = childProcess.spawnSync(npmCommand, npmArgs, {
     cwd: packagedRoot,
-    env: { ...process.env, DW_PACKAGE_TEST: '1' },
+    env: {
+      ...process.env,
+      DW_PACKAGE_TEST: '1',
+      DW_PLATFORM_SANDBOX_ROOT: platformSandboxRoot,
+      DW_PLATFORM_NATIVE_RUN_ID: 'package-copy-test',
+    },
     encoding: 'utf8',
     timeout: 120000,
     windowsHide: true,
@@ -287,7 +294,7 @@ function parseSkillFrontmatter(content, file) {
 
 test('all skills expose concise trigger-only discovery metadata', () => {
   const skills = readSkillDirectories();
-  assert.strictEqual(skills.length, 11, `expected 11 skills, found ${skills.length}`);
+  assert.strictEqual(skills.length, 12, `expected 12 skills, found ${skills.length}`);
 
   for (const skill of skills) {
     const content = fs.readFileSync(skill.file, 'utf8');
@@ -313,6 +320,96 @@ test('skill cross-references resolve to files inside the plugin', () => {
         `${skill.name} link escapes plugin root: ${target}`);
       assert(fs.existsSync(resolved), `${skill.name} has a broken link: ${target}`);
     }
+  }
+});
+
+test('collaboration integration exposes one canonical discovery path', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  const tooling = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-tooling', 'SKILL.md'), 'utf8');
+  const domains = JSON.parse(fs.readFileSync(
+    path.join(pluginRoot, 'skills', 'dw-domains', 'domains.json'),
+    'utf8',
+  ));
+  const agentRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'ai-agent-dev.md'), 'utf8');
+  const workflowRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
+  const hooks = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
+  const expectedScript = 'node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/hooks.test.js';
+
+  assert(packageJson.files.includes('skills/dw-collaboration/'));
+  assert(packageJson.files.includes('test/'));
+  assert.strictEqual(packageJson.scripts.test, expectedScript);
+  assert.strictEqual(packageJson.scripts.validate, expectedScript);
+  assert.match(hub, /\.\.\/dw-collaboration\/SKILL\.md/);
+  assert.match(tooling, /\.\.\/dw-collaboration\/SKILL\.md/);
+  assert.match(tooling, /子代理|child|协作/);
+  assert.match(tooling, /消息|messag|资源.*账本|生命周期|evidence/i);
+
+  const agentDomain = domains.domains.find(domain => domain.name === 'Agent开发');
+  assert(agentDomain, 'expected Agent development domain');
+  assert.match(agentDomain.text, /Read rules\/ai-agent-dev\.md/);
+  assert.match(agentRule, /\.\.\/skills\/dw-collaboration\/SKILL\.md/);
+  assert.match(workflowRule, /\.\.\/skills\/dw-collaboration\/SKILL\.md/);
+  assert.deepStrictEqual(Object.keys(hooks.hooks).sort(), ['SessionStart', 'UserPromptSubmit']);
+  assert(!fs.existsSync(path.join(pluginRoot, 'hooks', 'subagent-context.js')),
+    'deleted subagent-context.js must stay absent');
+
+  if (!isRepositoryCheckout) {
+    skipTest('repository allowlist and contributor guidance are not in the published package');
+    return;
+  }
+
+  const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /SessionStart, UserPromptSubmit/);
+  assert.doesNotMatch(agents, /PreToolUse|PostToolUse/);
+
+  const requiredPaths = [
+    'plugins/development-workflow/skills/dw-collaboration/SKILL.md',
+    'plugins/development-workflow/skills/dw-collaboration/references/evidence-and-artifacts.md',
+    'plugins/development-workflow/skills/dw-collaboration/references/state-machines.md',
+    'plugins/development-workflow/skills/dw-collaboration/references/resource-lifecycle.md',
+    'plugins/development-workflow/skills/dw-collaboration/references/runtime-adapters.md',
+    'plugins/development-workflow/skills/dw-collaboration/references/schemas/CapabilityMatrix1.schema.json',
+    'plugins/development-workflow/skills/dw-collaboration/references/schemas/CollaborationPlan1.schema.json',
+    'plugins/development-workflow/skills/dw-collaboration/references/schemas/ResourceLedger1.schema.json',
+    'plugins/development-workflow/skills/dw-collaboration/references/schemas/ExecutionReceipt1.schema.json',
+    'plugins/development-workflow/skills/dw-collaboration/scripts/validate-artifact.js',
+    'plugins/development-workflow/skills/dw-collaboration/scripts/lib/canonical-json.js',
+    'plugins/development-workflow/skills/dw-collaboration/scripts/lib/contracts.js',
+    'plugins/development-workflow/skills/dw-collaboration/scripts/lib/state-machines.js',
+    'plugins/development-workflow/test/collaboration-contract.test.js',
+    'plugins/development-workflow/test/collaboration-behavior.test.js',
+    'plugins/development-workflow/test/collaboration-platform.test.js',
+    'plugins/development-workflow/test/collaboration-receipt.test.js',
+    'plugins/development-workflow/test/collaboration-state.test.js',
+    'plugins/development-workflow/test/fixtures/collaboration/baseline-observations.json',
+    'plugins/development-workflow/test/fixtures/collaboration/capability-invalid.json',
+    'plugins/development-workflow/test/fixtures/collaboration/capability-valid.json',
+    'plugins/development-workflow/test/fixtures/collaboration/plan-cyclic.json',
+    'plugins/development-workflow/test/fixtures/collaboration/plan-incomplete-packet.json',
+    'plugins/development-workflow/test/fixtures/collaboration/plan-shared-write.json',
+    'plugins/development-workflow/test/fixtures/collaboration/plan-valid.json',
+    'plugins/development-workflow/test/fixtures/collaboration/platform-invalid.json',
+    'plugins/development-workflow/test/fixtures/collaboration/pressure-scenarios.json',
+    'plugins/development-workflow/test/fixtures/collaboration/receipt-invalid.json',
+    'plugins/development-workflow/test/fixtures/collaboration/state-invalid.json',
+  ];
+  for (const relativePath of requiredPaths) {
+    assert(
+      relativePath.startsWith('plugins/development-workflow/skills/dw-collaboration/')
+        || /^plugins\/development-workflow\/test\/collaboration-(?:contract|behavior|platform|receipt|state)\.test\.js$/.test(relativePath)
+        || relativePath.startsWith('plugins/development-workflow/test/fixtures/collaboration/'),
+      `path is outside the explicit Plan B allowlist: ${relativePath}`,
+    );
+    assert(fs.existsSync(path.join(repoRoot, ...relativePath.split('/'))),
+      `required Plan B path is missing: ${relativePath}`);
+    const ignored = childProcess.spawnSync(
+      'git',
+      ['check-ignore', '--no-index', '--quiet', '--', relativePath],
+      { cwd: repoRoot, encoding: 'utf8', windowsHide: true },
+    );
+    assert.strictEqual(ignored.error, undefined, `git check-ignore failed: ${ignored.error}`);
+    assert.strictEqual(ignored.status, 1, `required Plan B path is ignored: ${relativePath}`);
   }
 });
 
@@ -388,7 +485,7 @@ test('contributor and package manifests expose the real skill and test surface',
     return;
   }
   const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /1 core hub \+ 10 sub-skills/);
+  assert.match(agents, /1 core hub \+ 11 sub-skills/);
 });
 
 test('tooling and wrap-up require owned child processes to be reclaimed', () => {
@@ -644,7 +741,7 @@ test('development-workflow manifests and README agree on version and skill count
   ));
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
-  assert.match(packageJson.description, /11个 Skill（1个总纲 \+ 10个子 Skill）/);
+  assert.match(packageJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
   if (!isRepositoryCheckout) {
     skipTest('marketplace and README are not part of the published package');
     return;
@@ -660,7 +757,7 @@ test('development-workflow manifests and README agree on version and skill count
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
-  assert.match(readme, /11个 Skill（1个总纲 \+ 10个子 Skill）/);
+  assert.match(readme, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
 });
 
 const retainedContractTests = new Set([
@@ -671,6 +768,7 @@ const retainedContractTests = new Set([
   'published package can run its own npm test without repository-only files',
   'all skills expose concise trigger-only discovery metadata',
   'skill cross-references resolve to files inside the plugin',
+  'collaboration integration exposes one canonical discovery path',
   'workflow guidance is runtime-neutral and scales gates with change risk',
   'published guidance has no stale fixed lifecycle or unavailable capability mandates',
   'contributor and package manifests expose the real skill and test surface',

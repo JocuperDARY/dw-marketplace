@@ -6,7 +6,7 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.0.0 | 风险分级开发闭环，11个 Skill（1个总纲 + 10个子 Skill）+ 2 hooks + 8 rules |
+| [development-workflow](./plugins/development-workflow/) | 5.1.0 | 风险分级开发闭环，12个 Skill（1个总纲 + 11个子 Skill）+ 2 hooks + 8 rules |
 | [gpt-bridge](./plugins/gpt-bridge/) | 1.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 
 ## 安装
@@ -39,7 +39,9 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 功能完成安全收敛，当前版本为 5.0.0
+3. 功能完成安全收敛，当前版本为 5.1.0
+
+5.1.0 新增 capability-first 的 `dw-collaboration`：协作方式以当前宿主实际验证的 spawn、collect、消息与资源控制能力为准，而不是以 Claude Code、Codex、Grok Build 等产品名称推断。
 
 ### 5.0.0 钩子收敛
 

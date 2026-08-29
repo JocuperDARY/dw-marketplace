@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dw-marketplace.local/schemas/CapabilityMatrix1.schema.json",
+  "title": "CapabilityMatrix1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "artifact_id", "run_id", "session_id", "created_at", "producer", "redaction", "capabilities", "content_sha256"],
+  "properties": {
+    "schema": { "const": "CapabilityMatrix1" },
+    "schema_version": { "const": 1 },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)(?:\\.(\\d+))?Z$" },
+    "producer": { "type": "object", "additionalProperties": false, "required": ["role", "adapter_id"], "properties": { "role": { "enum": ["root", "child", "adapter"] }, "adapter_id": { "type": "string", "minLength": 1 } } },
+    "redaction": { "type": "object", "additionalProperties": false, "required": ["policy"], "properties": { "policy": { "enum": ["metadata_only", "hashed_identifiers", "approved_excerpt"] } } },
+    "capabilities": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/capability" } },
+    "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "extensions": { "type": "object", "propertyNames": { "pattern": "^[a-z][a-z0-9_-]*:[A-Za-z0-9_.-]+$" }, "additionalProperties": true },
+    "scope": { "type": "object", "additionalProperties": false, "required": ["adapter_fingerprint", "auth_fingerprint", "adapter_generation"], "properties": { "adapter_fingerprint": { "type": "string", "minLength": 1 }, "auth_fingerprint": { "type": "string", "minLength": 1 }, "adapter_generation": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 } } },
+    "probe": { "type": "object", "additionalProperties": false, "required": ["session_id", "nonce", "ack_ref"], "properties": { "session_id": { "type": "string", "minLength": 1 }, "nonce": { "type": "string", "minLength": 1 }, "ack_ref": { "type": "string", "minLength": 1 } } },
+    "verification": { "type": "object", "additionalProperties": false, "required": ["verifier_id", "artifact_id", "content_sha256"], "properties": { "verifier_id": { "type": "string", "minLength": 1 }, "artifact_id": { "type": "string", "minLength": 1 }, "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "contradiction": { "type": "object", "additionalProperties": false, "required": ["evidence_ref", "observed_at", "support", "source_kind", "reason_code"], "properties": { "evidence_ref": { "type": "string", "minLength": 1 }, "observed_at": { "type": "string", "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)(?:\\.(\\d+))?Z$" }, "support": { "enum": ["supported", "request_only", "unsupported", "unknown"] }, "source_kind": { "enum": ["config", "inventory", "probe", "runtime_event", "verifier"] }, "reason_code": { "type": "string", "minLength": 1 } } },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "subject", "support", "evidence_level", "source_kind", "scope", "observed_at", "expires_at", "evidence_ref", "contradictions"],
+      "allOf": [
+        { "if": { "required": ["probe"] }, "then": { "properties": { "evidence_level": { "enum": ["PROBED", "VERIFIED"] } } } },
+        { "if": { "properties": { "evidence_level": { "const": "PROBED" } }, "required": ["evidence_level"] }, "then": { "required": ["probe"], "properties": { "source_kind": { "const": "probe" } } } },
+        { "if": { "required": ["verification"] }, "then": { "properties": { "evidence_level": { "const": "VERIFIED" }, "source_kind": { "const": "verifier" } } } },
+        { "if": { "properties": { "evidence_level": { "const": "VERIFIED" } }, "required": ["evidence_level"] }, "then": { "required": ["verification"] } }
+      ],
+      "properties": {
+        "capability_id": { "enum": ["spawn_child", "collect_result", "child_to_root_message", "root_to_child_message", "interrupt_child", "request_shutdown", "verify_child_exit", "shared_task_status", "isolated_workspace", "exclusive_file_ownership", "runtime_liveness", "process_identity", "process_tree_terminate", "terminal_session_control", "temporary_lease", "constrained_compute_lease", "resource_observation", "model_request_control", "reasoning_request_control", "actual_model_metadata", "actual_effort_metadata"] },
+        "subject": { "enum": ["root", "child", "adapter"] },
+        "support": { "enum": ["supported", "request_only", "unsupported", "unknown"] },
+        "evidence_level": { "enum": ["DECLARED", "PROBED", "OBSERVED", "VERIFIED"] },
+        "source_kind": { "enum": ["config", "inventory", "probe", "runtime_event", "verifier"] },
+        "scope": { "$ref": "#/$defs/scope" },
+        "observed_at": { "type": "string", "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)(?:\\.(\\d+))?Z$" },
+        "expires_at": { "type": "string", "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)(?:\\.(\\d+))?Z$" },
+        "evidence_ref": { "type": "string", "minLength": 1 },
+        "contradictions": { "type": "array", "items": { "$ref": "#/$defs/contradiction" } },
+        "supersedes": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1 } },
+        "probe": { "$ref": "#/$defs/probe" },
+        "verification": { "$ref": "#/$defs/verification" },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    }
+  }
+}

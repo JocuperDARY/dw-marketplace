@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-workflow.local/schemas/CollaborationPlan1.schema.json",
+  "title": "CollaborationPlan1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "artifact_id", "run_id", "session_id", "created_at", "producer", "redaction", "status", "topology", "capability_matrix_ref", "phases", "resource_policy", "failure_policy", "telemetry_policy", "gates", "content_sha256"],
+  "properties": {
+    "schema": {"const": "CollaborationPlan1"},
+    "schema_version": {"const": 1},
+    "artifact_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)(?:\\.(\\d+))?Z$"},
+    "producer": {"type": "object", "additionalProperties": false, "required": ["role", "adapter_id"], "properties": {"role": {"enum": ["root", "child", "adapter"]}, "adapter_id": {"type": "string", "minLength": 1}}},
+    "redaction": {"type": "object", "additionalProperties": false, "required": ["policy"], "properties": {"policy": {"enum": ["metadata_only", "hashed_identifiers", "approved_excerpt"]}}},
+    "status": {"enum": ["DRAFT", "VALIDATED", "AUTHORIZED", "SUPERSEDED", "CANCELLED"]},
+    "topology": {"enum": ["single", "assignment_only", "interactive_shared", "serial_fallback"]},
+    "capability_matrix_ref": {"$ref": "#/$defs/artifactRef"},
+    "phases": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/phase"}},
+    "resource_policy": {"type": "object"},
+    "failure_policy": {"type": "object"},
+    "telemetry_policy": {"type": "object"},
+    "gates": {"type": "object", "additionalProperties": false, "required": ["authorization", "pre_dispatch", "root_review", "verification", "cleanup"], "properties": {"authorization": {"type": "object"}, "pre_dispatch": {"type": "object"}, "root_review": {"type": "object"}, "verification": {"type": "object"}, "cleanup": {"type": "object"}}},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "artifactRef": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "content_sha256"], "properties": {"artifact_id": {"type": "string", "minLength": 1}, "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+    "route": {"type": "object", "additionalProperties": false, "required": ["requested_model", "requested_effort", "selected_model", "selected_effort", "selection_evidence", "allowed_fallbacks"], "properties": {"requested_model": {"type": "string", "minLength": 1}, "requested_effort": {"enum": ["unspecified", "low", "medium", "high", "xhigh", "max", "unknown"]}, "selected_model": {"type": "string", "minLength": 1}, "selected_effort": {"enum": ["unspecified", "low", "medium", "high", "xhigh", "max", "unknown"]}, "selection_evidence": {"type": "string", "minLength": 1}, "allowed_fallbacks": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1}}}},
+    "ownership": {"type": "object", "additionalProperties": false, "required": ["exclusive_paths"], "properties": {"exclusive_paths": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "string", "minLength": 1}, "uniqueItems": true}}},
+    "phase": {"type": "object", "additionalProperties": false, "required": ["phase_id", "task_type", "scope", "dependencies", "risk", "reversibility", "phase_kind", "latency_cost", "validation_failure_cost", "task_packet_ref", "ownership", "route"], "properties": {"phase_id": {"type": "string", "minLength": 1}, "task_type": {"enum": ["retrieval", "classification", "planning", "implementation", "debugging", "review", "verification", "mechanical", "unknown"]}, "scope": {"enum": ["single_unit", "bounded_single_module", "cross_module", "cross_system", "unknown"]}, "dependencies": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "risk": {"enum": ["low", "medium", "high", "extreme"]}, "reversibility": {"enum": ["reversible", "unclear", "irreversible"]}, "phase_kind": {"enum": ["diagnosis", "planning", "implementation", "data_integrity", "test_gates", "verification", "wrapup", "unknown"]}, "latency_cost": {"enum": ["interactive", "balanced", "throughput", "offline", "unknown"]}, "validation_failure_cost": {"enum": ["automatic_check", "focused_tests", "independent_verification", "rollback_proof", "full_surface_audit", "unknown"]}, "task_packet_ref": {"$ref": "#/$defs/artifactRef"}, "ownership": {"$ref": "#/$defs/ownership"}, "route": {"$ref": "#/$defs/route"}}}
+  }
+}

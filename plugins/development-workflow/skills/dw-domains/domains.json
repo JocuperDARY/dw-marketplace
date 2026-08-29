@@ -57,9 +57,9 @@
       "text": "## RAG系统\n原则: 用代表性查询评估分块、检索与重排序；向量存储按规模、过滤、延迟、运维和数据边界实测选型；输出保留引用溯源。\n深入参考: `Read rules/ai-rag-system.md`"
     },
     {
-      "keywords": ["ai agent","tool use","function calling","agent框架","orchestration","multi agent","agentic","智能体"],
+      "keywords": ["ai agent","tool use","function calling","agent框架","orchestration","multi agent","multi-agent","subagent","子agent","多智能体","协作","agentic","智能体"],
       "name": "Agent开发",
-      "text": "## Agent开发\n原则: 工具契约清晰、授权边界明确、错误与重试可观测、上下文受控；后台任务和子进程必须记录所有权并回收。\n深入参考: `Read rules/ai-agent-dev.md`"
+      "text": "## Agent开发\n原则: 先验证宿主实际能力，再选择单链、任务指派或互动协作；工具契约、授权、所有权和证据边界必须明确，所有进程与临时空间按精确身份回收。复杂协作统一进入 canonical 协作协议。\n深入参考: `Read rules/ai-agent-dev.md`"
     },
     {
       "keywords": ["prompt injection","jailbreak","guardrail","llm安全","提示词注入","模型安全","ai safety"],

@@ -7,7 +7,7 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 
 **方法论版本**: 3.2 | **适用范围**: 通用（不限于本项目）
 
-> 本 skill 已拆分为 **1 个总纲 + 10 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
+> 本 skill 已拆分为 **1 个总纲 + 11 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
 
 ---
 
@@ -23,6 +23,7 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 | ⚡ 优化 | [dw-optimization](../dw-optimization/SKILL.md) | 优化原则、决策树、六类优化详解 | 优化、性能、profiling、加速 |
 | 🐛 调试 | [dw-debugging](../dw-debugging/SKILL.md) | 信号诊断、闭环验证、生命周期排查 | 调试、信号诊断、管道排查 |
 | 🛠️ 工具 | [dw-tooling](../dw-tooling/SKILL.md) | 工具普查、能力分层、编排模板 | 工具、MCP、编排、普查 |
+| 🤝 协作 | [dw-collaboration](../dw-collaboration/SKILL.md) | capability-first 多智能体协议、状态/资源账本与证据 | 子agent、多智能体、协作、分派、资源回收 |
 | 📖 参考 | [dw-reference](../dw-reference/SKILL.md) | 检查清单、反模式、快速参考、附录 | 检查清单、反模式、快速参考 |
 | 🔄 更新 | [check-updates](../check-updates/SKILL.md) | Claude/Codex/MCP/CodeGraph/OpenSpec 更新与健康检查 | 检查更新、升级、Codex、CodeGraph、OpenSpec |
 
