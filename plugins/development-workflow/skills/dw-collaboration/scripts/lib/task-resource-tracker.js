@@ -600,11 +600,22 @@ class TaskResourceTracker {
       generation,
       identity,
     });
+    let identityValidation = hasV2IdentityIntent(identity)
+      ? this.#validateIdentity(record, identity, generation)
+      : null;
     if (record.bindSignature !== null) {
       if (sameValue(record.bindSignature, signature)) return cloneRecord(record);
+      if (identityValidation !== null) {
+        if (!identityValidation.valid) {
+          return this.#holdInvalidV2Identity(record, scopeId, identityValidation, evidenceRefs);
+        }
+        return this.#holdInvalidV2Identity(record, scopeId, structuredIdentityHold([
+          trackerIdentityError('RESOURCE_IDENTITY_DRIFT', '$.identity', 'version-2 identity must remain unchanged after binding'),
+        ]), evidenceRefs);
+      }
       this.#markIdentityDrift(record, 'BINDING_CHANGED');
     }
-    const identityValidation = this.#validateIdentity(record, identity, generation);
+    if (identityValidation === null) identityValidation = this.#validateIdentity(record, identity, generation);
     if (identityValidation !== null && !identityValidation.valid) {
       return this.#holdInvalidV2Identity(record, scopeId, identityValidation, evidenceRefs);
     }

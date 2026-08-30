@@ -335,28 +335,96 @@ test('tracker binds harness task identity and holds every ambiguous v2 path with
   );
 });
 
-test('tracker detects generation, nonce, and confirmed parent identity drift', () => {
+test('tracker returns replayable structured holds for rejected version-2 rebinds and preserves legacy drift exceptions', () => {
+  const incompleteProcess = windowsProcess();
+  delete incompleteProcess.launch_nonce;
+  const rebindCases = [
+    ['changed valid identity', windowsProcess({ pid: 41004 })],
+    ['incomplete identity', incompleteProcess],
+    ['wrong identity type', harnessSession()],
+    ['wrong identity schema', windowsProcess({ schema: 'ProcessIdentity3' })],
+  ];
+
+  for (const [label, identity] of rebindCases) {
+    const tracker = makeTracker();
+    const scope = tracker.openRootScope({ scopeId: `versioned-rebind-${label.replace(/\s/g, '-')}`, purpose: 'rebind' });
+    const resourceId = `versioned-rebind-${label.replace(/\s/g, '-')}`;
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, { identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`] });
+    const bound = scope.getResource(resourceId);
+
+    const held = scope.bind(resourceId, {
+      identity, generation: 2, evidenceRefs: [`${label}-rebind`],
+    });
+    assert.strictEqual(held.valid, false, label);
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    assert.strictEqual(held.action_authorized, false, label);
+    assert(Array.isArray(held.errors) && held.errors.length > 0, label);
+
+    const after = scope.getResource(resourceId);
+    assert.notStrictEqual(after.state, 'ACTIVE', label);
+    assert.deepStrictEqual(after.identity, bound.identity, label);
+    const history = tracker.exportHistory();
+    const heldEvent = history.at(-1);
+    assert.strictEqual(heldEvent.kind, 'RESOURCE_HELD', label);
+    assert.deepStrictEqual(heldEvent.payload.decision, held, label);
+
+    const replay = TaskResourceTracker.fromHistory({
+      ownerId: 'root-A',
+      runId: 'run-A',
+      generation: 2,
+      trustedObservationResolver: () => true,
+      trustedFilesystemResolver: () => true,
+      trustedHistoryResolver: () => true,
+    }, history);
+    const replayed = replay.snapshot().resources.find((item) => item.resourceId === resourceId);
+    assert.strictEqual(replayed.state, 'HOLD', label);
+    assert.deepStrictEqual(replayed.identity, bound.identity, label);
+    assert.deepStrictEqual(replayed.decision, held, label);
+  }
+
+  const legacy = {
+    pid: 41001,
+    native_handle: 'handle-41001',
+    start_time: '2026-08-29T00:00:00Z',
+    exe_path_hash: hash('node.exe'),
+    argv_hash: hash('legacy-resource-control-test'),
+    parent_identity_hash: hash('legacy-parent'),
+    nonce: 'legacy-launch-nonce',
+    native_process_manager_run_id: 'legacy-native-run',
+  };
+  const legacyTracker = makeTracker();
+  const legacyScope = legacyTracker.openRootScope({ scopeId: 'legacy-rebind', purpose: 'legacy rebind' });
+  legacyScope.register(resource('legacy-rebind', 'process_tree'));
+  legacyScope.bind('legacy-rebind', { identity: legacy, generation: 2, evidenceRefs: ['legacy-initial'] });
+  assert.throws(
+    () => legacyScope.bind('legacy-rebind', {
+      identity: { ...legacy, pid: 41002 }, generation: 2, evidenceRefs: ['legacy-changed'],
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'RESOURCE_IDENTITY_DRIFT',
+  );
+});
+
+test('tracker holds versioned generation, nonce, and confirmed parent identity drift', () => {
   const processTracker = makeTracker();
   const processScope = processTracker.openRootScope({ scopeId: 'process-drift', purpose: 'drift' });
   processScope.register(resource('process-drift', 'process_tree'));
   processScope.bind('process-drift', { identity: windowsProcess(), generation: 2, evidenceRefs: ['process-bind'] });
-  assert.throws(
-    () => processScope.bind('process-drift', {
-      identity: windowsProcess({ adapter_generation: 3 }), generation: 2, evidenceRefs: ['generation-drift'],
-    }),
-    /RESOURCE_IDENTITY_DRIFT/,
-  );
+  const processHold = processScope.bind('process-drift', {
+    identity: windowsProcess({ adapter_generation: 3 }), generation: 2, evidenceRefs: ['generation-drift'],
+  });
+  assert.strictEqual(processHold.disposition, 'HOLD');
+  assert.strictEqual(processHold.action_authorized, false);
 
   const nonceTracker = makeTracker();
   const nonceScope = nonceTracker.openRootScope({ scopeId: 'nonce-drift', purpose: 'drift' });
   nonceScope.register(resource('nonce-drift', 'agent_session'));
   nonceScope.bind('nonce-drift', { identity: harnessSession(), generation: 2, evidenceRefs: ['nonce-bind'] });
-  assert.throws(
-    () => nonceScope.bind('nonce-drift', {
-      identity: harnessSession('agent_session', { launch_nonce: 'changed-nonce' }), generation: 2, evidenceRefs: ['nonce-drift'],
-    }),
-    /RESOURCE_IDENTITY_DRIFT/,
-  );
+  const nonceHold = nonceScope.bind('nonce-drift', {
+    identity: harnessSession('agent_session', { launch_nonce: 'changed-nonce' }), generation: 2, evidenceRefs: ['nonce-drift'],
+  });
+  assert.strictEqual(nonceHold.disposition, 'HOLD');
+  assert.strictEqual(nonceHold.action_authorized, false);
 
   const parentTracker = makeTracker();
   const parentScope = parentTracker.openRootScope({ scopeId: 'parent-drift', purpose: 'drift' });
@@ -364,12 +432,11 @@ test('tracker detects generation, nonce, and confirmed parent identity drift', (
   parentScope.bind('parent-drift', { identity: temporaryAllocation(), generation: 2, evidenceRefs: ['parent-bind'] });
   const changedParent = temporaryAllocation();
   changedParent.confirmed_parent_directory.linux_file_identity.inode += 1;
-  assert.throws(
-    () => parentScope.bind('parent-drift', {
-      identity: changedParent, generation: 2, evidenceRefs: ['parent-drift'],
-    }),
-    /RESOURCE_IDENTITY_DRIFT/,
-  );
+  const parentHold = parentScope.bind('parent-drift', {
+    identity: changedParent, generation: 2, evidenceRefs: ['parent-drift'],
+  });
+  assert.strictEqual(parentHold.disposition, 'HOLD');
+  assert.strictEqual(parentHold.action_authorized, false);
 });
 
 test('recovery records reject prompt, reply, command output, and credential material', () => {
