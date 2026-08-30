@@ -1,0 +1,55 @@
+{
+  "schema": "CapabilityMatrix1",
+  "schema_version": 1,
+  "artifact_id": "capability-run-A-g1",
+  "run_id": "run-A",
+  "session_id": "sess-A",
+  "created_at": "2026-08-26T03:00:00Z",
+  "producer": {
+    "role": "root",
+    "adapter_id": "adapter-A"
+  },
+  "redaction": {
+    "policy": "metadata_only"
+  },
+  "capabilities": [
+    {
+      "capability_id": "spawn_child",
+      "subject": "adapter",
+      "support": "supported",
+      "evidence_level": "PROBED",
+      "source_kind": "probe",
+      "scope": {
+        "adapter_fingerprint": "adapter-fingerprint-A",
+        "auth_fingerprint": "auth-fingerprint-A",
+        "adapter_generation": 1
+      },
+      "observed_at": "2026-08-26T03:00:00Z",
+      "expires_at": "2026-08-26T03:10:00Z",
+      "evidence_ref": "probe-spawn-A",
+      "contradictions": [],
+      "probe": {
+        "session_id": "sess-A",
+        "nonce": "spawn-nonce-A",
+        "ack_ref": "spawn-ack-A"
+      }
+    },
+    {
+      "capability_id": "actual_model_metadata",
+      "subject": "adapter",
+      "support": "supported",
+      "evidence_level": "OBSERVED",
+      "source_kind": "runtime_event",
+      "scope": {
+        "adapter_fingerprint": "adapter-fingerprint-A",
+        "auth_fingerprint": "auth-fingerprint-A",
+        "adapter_generation": 1
+      },
+      "observed_at": "2026-08-26T03:00:01Z",
+      "expires_at": "2026-08-26T03:10:00Z",
+      "evidence_ref": "runtime-metadata-A",
+      "contradictions": []
+    }
+  ],
+  "content_sha256": "ec70595ad391faf2e31c5db709171cf2fbc88df1f22fc849b7a90e59533b5a34"
+}

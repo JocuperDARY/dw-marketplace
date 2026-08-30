@@ -1,0 +1,9 @@
+{
+  "identity_cases": [
+    {"name": "pid-reuse", "field": "start_time", "value": "2026-08-26T03:06:00Z", "expected": "MISMATCH"},
+    {"name": "exe-drift", "field": "exe_path_hash", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "expected": "MISMATCH"},
+    {"name": "argv-drift", "field": "argv_hash", "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "expected": "MISMATCH"},
+    {"name": "parent-drift", "field": "parent_identity_hash", "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "expected": "MISMATCH"},
+    {"name": "partial-argv", "field": "argv_hash", "value": "unknown", "expected": "PARTIAL"}
+  ]
+}

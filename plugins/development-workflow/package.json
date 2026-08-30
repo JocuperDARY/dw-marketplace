@@ -1,10 +1,10 @@
 {
   "name": "development-workflow",
-  "version": "4.2.0",
-  "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共11个 Skill（1个总纲 + 10个子 Skill），并含 hooks、rules 及环境健康检查。",
+  "version": "5.2.0",
+  "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共12个 Skill（1个总纲 + 11个子 Skill），并含 hooks、rules 及环境健康检查。",
   "scripts": {
-    "test": "node test/hooks.test.js",
-    "validate": "node test/hooks.test.js"
+    "test": "node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/resource-control.test.js && node test/failure-loop-guard-hardening.test.js && node test/resource-aware-queue.test.js && node test/hooks.test.js",
+    "validate": "node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/resource-control.test.js && node test/failure-loop-guard-hardening.test.js && node test/resource-aware-queue.test.js && node test/hooks.test.js"
   },
   "license": "Apache-2.0",
   "keywords": [
@@ -33,6 +33,7 @@
     "skills/dw-reference/",
     "skills/check-updates/",
     "skills/dw-domains/",
+    "skills/dw-collaboration/",
     "rules/",
     "test/"
   ]

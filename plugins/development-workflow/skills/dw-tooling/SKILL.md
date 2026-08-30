@@ -15,6 +15,10 @@ description: Use when 任务可能受益于 Skills、MCP、子代理或其他工
 - 专用能力可能提高正确性，但无关调用会增加成本、权限面和上下文噪声。
 - 并行任务、后台服务和测试 worker 会引入进程与资源所有权，必须从启动时管理。
 
+## 复杂协作路由
+
+当任务需要子 agent 分派、互动消息、资源账本、生命周期恢复或多智能体证据时，先完成本页的能力发现，再读取 [dw-collaboration](../dw-collaboration/SKILL.md)。该 Skill 是协作协议的唯一规范入口；本页只负责 discovery/router，不复制其计划、状态机、授权或清理契约。产品名与配置只能声明候选能力，实际拓扑必须由当前会话的 spawn、collect、message 与资源控制探针决定。
+
 ---
 
 ## 普查流程
@@ -177,5 +181,6 @@ description: Use when 任务可能受益于 Skills、MCP、子代理或其他工
 
 - [development-workflow](../development-workflow/SKILL.md) — 返回总纲（铁律 A4 完整内容）
 - [check-updates](../check-updates/SKILL.md) — 检查 Claude/Codex/MCP/CodeGraph/OpenSpec 更新状态
+- [dw-collaboration](../dw-collaboration/SKILL.md) — 复杂协作、能力探针、状态/资源账本与证据闭环
 - [dw-implementation](../dw-implementation/SKILL.md) — 实现阶段工具选配
 - [dw-reference](../dw-reference/SKILL.md) — 场景化快速参考

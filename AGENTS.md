@@ -12,8 +12,8 @@ plugins/
 
 ## Working on development-workflow
 
-- hooks/ — Session lifecycle (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse)
-- skills/ — 1 core hub + 10 sub-skills
+- hooks/ — Session lifecycle (SessionStart, UserPromptSubmit)
+- skills/ — 1 core hub + 11 sub-skills
 - rules/ — Domain knowledge (coding style, security, testing)
 
 Before modifying: identify target sub-skill/hook/rule, update version in plugin.json.

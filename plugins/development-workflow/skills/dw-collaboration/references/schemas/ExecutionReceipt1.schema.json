@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-workflow.local/schemas/ExecutionReceipt1.schema.json",
+  "title": "ExecutionReceipt1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "artifact_id", "run_id", "session_id", "created_at", "producer", "redaction", "plan_ref", "ledger_ref", "run_outcome", "phase_receipts", "cleanup_summary", "authorization_summary", "contradictions", "residual_risks", "content_sha256"],
+  "properties": {
+    "schema": {"const": "ExecutionReceipt1"},
+    "schema_version": {"const": 1},
+    "artifact_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string"},
+    "producer": {"$ref": "#/$defs/producer"},
+    "redaction": {"$ref": "#/$defs/redaction"},
+    "plan_ref": {"$ref": "#/$defs/artifactRef"},
+    "ledger_ref": {"$ref": "#/$defs/artifactRef"},
+    "run_outcome": {"enum": ["COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "HOLD", "UNVERIFIED"]},
+    "phase_receipts": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/phaseReceipt"}},
+    "cleanup_summary": {
+      "type": "object", "additionalProperties": false, "required": ["status", "ledger_hash"],
+      "properties": {"status": {"enum": ["all_reclaimed", "quarantined", "unknown"]}, "ledger_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "authorization_summary": {
+      "type": "object", "additionalProperties": false, "required": ["authorization_refs"],
+      "properties": {"authorization_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}
+    },
+    "contradictions": {"type": "array", "maxItems": 256, "items": {"type": "object"}},
+    "residual_risks": {"type": "array", "maxItems": 256, "items": {"type": "object"}},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "producer": {
+      "type": "object", "additionalProperties": false, "required": ["role", "adapter_id"],
+      "properties": {"role": {"const": "root"}, "adapter_id": {"type": "string", "minLength": 1}}
+    },
+    "redaction": {
+      "type": "object", "additionalProperties": false, "required": ["policy"],
+      "properties": {"policy": {"enum": ["metadata_only", "hashed_identifiers", "approved_excerpt"]}}
+    },
+    "artifactRef": {
+      "type": "object", "additionalProperties": false, "required": ["artifact_id", "content_sha256"],
+      "properties": {"artifact_id": {"type": "string", "minLength": 1}, "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "phaseReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phase_id", "child_id", "dispatch_event", "running_evidence", "result_submission", "root_acceptance", "review", "verification", "requested_model", "selected_model", "actual_model", "requested_effort", "selected_effort", "actual_effort", "route_attestation", "actual_route_evidence", "artifact_refs"],
+      "properties": {
+        "phase_id": {"type": "string", "minLength": 1}, "child_id": {"type": ["string", "null"], "minLength": 1},
+        "dispatch_event": {"type": "string", "minLength": 1}, "running_evidence": {"type": "string", "minLength": 1},
+        "result_submission": {"type": "string", "minLength": 1}, "root_acceptance": {"type": "string", "minLength": 1},
+        "review": {"type": "string", "minLength": 1}, "verification": {"type": "string", "minLength": 1},
+        "requested_model": {"type": "string", "minLength": 1}, "selected_model": {"type": "string", "minLength": 1}, "actual_model": {"type": "string", "minLength": 1},
+        "requested_effort": {"type": "string", "minLength": 1}, "selected_effort": {"type": "string", "minLength": 1}, "actual_effort": {"type": "string", "minLength": 1},
+        "route_attestation": {"enum": ["VERIFIED", "UNVERIFIED", "NOT_REQUIRED"]}, "actual_route_evidence": {"type": ["string", "null"], "minLength": 1},
+        "artifact_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

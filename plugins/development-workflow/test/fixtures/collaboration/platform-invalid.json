@@ -1,0 +1,17 @@
+{
+  "process_identity_drifts": [
+    {"id": "pid-reuse", "field": "pid", "value": 49002, "reason": "IDENTITY_MISMATCH"},
+    {"id": "command-drift", "field": "argv_hash", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "reason": "IDENTITY_MISMATCH"},
+    {"id": "parent-drift", "field": "parent_identity_hash", "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "reason": "IDENTITY_MISMATCH"},
+    {"id": "native-run-id-drift", "field": "native_process_manager_run_id", "value": "native-run-other", "reason": "IDENTITY_MISMATCH"}
+  ],
+  "process_scope_drifts": [
+    {"id": "port-drift", "expected": {"kind": "port", "value": "43111"}, "observed": {"kind": "port", "value": "43112"}, "reason": "SCOPE_IDENTITY_MISMATCH"},
+    {"id": "purpose-drift", "expected": {"kind": "purpose", "value": "platform-marker"}, "observed": {"kind": "purpose", "value": "unrelated-service"}, "reason": "SCOPE_IDENTITY_MISMATCH"}
+  ],
+  "temporary_boundaries": [
+    {"id": "canonical-root-escape", "field": "child_path", "value": "__OUTSIDE__", "reason": "CANONICAL_ROOT_ESCAPE"},
+    {"id": "reparse-boundary", "field": "reparse_boundary", "value": true, "reason": "REPARSE_BOUNDARY"},
+    {"id": "path-rebound", "field": "path_rebound", "value": true, "reason": "PATH_IDENTITY_REBOUND"}
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "CollaborationPlan1",
+  "schema_version": 1,
+  "artifact_id": "plan-valid-A",
+  "run_id": "run-A",
+  "session_id": "sess-A",
+  "created_at": "2026-08-26T03:05:00Z",
+  "producer": {"role": "root", "adapter_id": "adapter-A"},
+  "redaction": {"policy": "metadata_only"},
+  "status": "VALIDATED",
+  "topology": "serial_fallback",
+  "capability_matrix_ref": {"artifact_id": "capability-run-A-g1", "content_sha256": "ec70595ad391faf2e31c5db709171cf2fbc88df1f22fc849b7a90e59533b5a34"},
+  "phases": [{
+    "phase_id": "route",
+    "task_type": "classification",
+    "scope": "single_unit",
+    "dependencies": [],
+    "risk": "low",
+    "reversibility": "reversible",
+    "phase_kind": "test_gates",
+    "latency_cost": "interactive",
+    "validation_failure_cost": "automatic_check",
+    "task_packet_ref": {"artifact_id": "packet-route-A", "content_sha256": "2acf4f11cabe78b416cdafaaafd305010d9c13aeea766e26344dd39b74d67eef"},
+    "ownership": {"exclusive_paths": ["logical:route-output"]},
+    "route": {"requested_model": "unspecified", "requested_effort": "unspecified", "selected_model": "lane-light", "selected_effort": "low", "selection_evidence": "available-light", "allowed_fallbacks": []}
+  }],
+  "resource_policy": {},
+  "failure_policy": {},
+  "telemetry_policy": {},
+  "gates": {"authorization": {}, "pre_dispatch": {}, "root_review": {}, "verification": {}, "cleanup": {}},
+  "content_sha256": "39bf479941fdb5bb6a78d439eecca4d34897c93d0017e3f36d3551a3d5b58aba"
+}

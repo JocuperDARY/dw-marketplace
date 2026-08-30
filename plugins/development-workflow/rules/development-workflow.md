@@ -10,6 +10,7 @@
 4. **Choose a minimal sufficient tool set.** Discover declared capabilities instead of assuming names. Use CodeGraph first only when `.codegraph/` exists; otherwise use `rg` and focused file reads.
 5. **Require fresh evidence.** A completion claim names the command/check, outcome, and any unverified residual risk.
 6. **Reclaim owned resources.** Track and stop this task's child processes, development servers, watchers, workers, ports, and temporary resources on success, failure, or interruption.
+7. **Use the canonical collaboration protocol.** When work needs child delegation, interactive messages, a resource ledger, lifecycle recovery, or multi-agent execution evidence, route through [dw-collaboration](../skills/dw-collaboration/SKILL.md). Select topology from freshly observed capabilities, serialize shared writes, and reclaim only exact verified task-owned resources.
 
 ## Scale By Risk
 

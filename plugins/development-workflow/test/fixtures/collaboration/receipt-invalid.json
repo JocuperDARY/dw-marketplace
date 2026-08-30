@@ -1,0 +1,5 @@
+{
+  "distinct_actions": ["local_edit", "stage", "commit", "push", "merge", "publish", "deploy", "paid_job", "credential_change", "config_change", "constrained_compute"],
+  "forbidden_authorizing_actor_kinds": ["child", "agent"],
+  "terminal_blocking_resource_states": ["UNKNOWN", "QUARANTINED", "ACTIVE", "LEASED", "RECLAIMING"]
+}

@@ -1,13 +1,11 @@
 {
-  "description": "DW Plugin hooks: session init, skill routing, workflow state tracking, tool checks, subagent context, post-code review, rules pruning",
+  "description": "DW 5 hooks: one read-only session initializer and one high-confidence workflow router",
   "hooks": {
     "SessionStart": [
       {
         "matcher": "",
         "hooks": [
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-inventory.js\"", "timeout": 30},
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"", "timeout": 10},
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prune-rules.js\"", "timeout": 15}
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"", "timeout": 10}
         ]
       }
     ],
@@ -15,30 +13,7 @@
       {
         "matcher": "",
         "hooks": [
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-router.js\"", "timeout": 15},
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/workflow-state.js\"", "timeout": 10}
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
-        "hooks": [
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-routing.js\"", "timeout": 10}
-        ]
-      },
-      {
-        "matcher": "Bash|Agent|Task",
-        "hooks": [
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-context.js\"", "timeout": 10}
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
-        "hooks": [
-          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-code-check.js\"", "timeout": 10}
+          {"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-router.js\"", "timeout": 5}
         ]
       }
     ]
