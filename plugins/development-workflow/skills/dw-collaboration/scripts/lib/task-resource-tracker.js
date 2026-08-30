@@ -652,6 +652,14 @@ class TaskResourceTracker {
   #validateIdentity(record, identity, generation, requireV2 = false) {
     if (!identity || typeof identity !== 'object' || Array.isArray(identity)
       || Object.keys(identity).length === 0) {
+      if (requireV2) {
+        const validation = validateResourceIdentity2(record.type, identity);
+        return structuredIdentityHold(validation.errors.map((item) => ({
+          code: item.code,
+          path: item.path,
+          message: item.message,
+        })));
+      }
       if (PROCESS_RESOURCE_TYPES.has(record.type)) {
         throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
       }

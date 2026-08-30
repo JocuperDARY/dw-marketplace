@@ -419,6 +419,53 @@ test('tracker returns replayable structured holds for rejected version-2 rebinds
   );
 });
 
+for (const [label, identity] of [
+  ['empty object', {}],
+  ['null', null],
+  ['array', []],
+]) {
+  test(`tracker holds malformed ${label} rebinds after a version-2 bind`, () => {
+    const tracker = makeTracker();
+    const scopeId = `malformed-versioned-${label.replace(/\s/g, '-')}`;
+    const resourceId = `malformed-versioned-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId, purpose: 'malformed versioned rebind' });
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    });
+    const bound = scope.getResource(resourceId);
+
+    const held = scope.bind(resourceId, {
+      identity, generation: 2, evidenceRefs: [`${label}-rebind`],
+    });
+    assert.strictEqual(held.valid, false, label);
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    assert.strictEqual(held.action_authorized, false, label);
+    assert(Array.isArray(held.errors) && held.errors.length > 0, label);
+
+    const after = scope.getResource(resourceId);
+    assert.notStrictEqual(after.state, 'ACTIVE', label);
+    assert.deepStrictEqual(after.identity, bound.identity, label);
+    const history = tracker.exportHistory();
+    const heldEvent = history.at(-1);
+    assert.strictEqual(heldEvent.kind, 'RESOURCE_HELD', label);
+    assert.deepStrictEqual(heldEvent.payload.decision, held, label);
+
+    const replay = TaskResourceTracker.fromHistory({
+      ownerId: 'root-A',
+      runId: 'run-A',
+      generation: 2,
+      trustedObservationResolver: () => true,
+      trustedFilesystemResolver: () => true,
+      trustedHistoryResolver: () => true,
+    }, history);
+    const replayed = replay.snapshot().resources.find((item) => item.resourceId === resourceId);
+    assert.strictEqual(replayed.state, 'HOLD', label);
+    assert.deepStrictEqual(replayed.identity, bound.identity, label);
+    assert.deepStrictEqual(replayed.decision, held, label);
+  });
+}
+
 test('tracker classifies complete resource-specific v2 intent without narrowing legacy process validation', () => {
   const tracker = makeTracker();
   const scope = tracker.openRootScope({ scopeId: 'v2-bound-v1-rebind', purpose: 'classification' });
