@@ -156,6 +156,75 @@ function resource(resourceId, type) {
   };
 }
 
+function replayTracker(history) {
+  return TaskResourceTracker.fromHistory({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: () => true,
+    trustedFilesystemResolver: () => true,
+    trustedHistoryResolver: () => true,
+  }, history);
+}
+
+function assertEnvelopeHold(scope, tracker, resourceId, observation, expectedCode, rejectedMarker = null) {
+  const before = scope.getResource(resourceId);
+  const held = scope.bind(resourceId, observation);
+  assert.strictEqual(Object.isFrozen(held), true);
+  assert.strictEqual(held.valid, false);
+  assert.strictEqual(held.disposition, 'HOLD');
+  assert.strictEqual(held.action_authorized, false);
+  assert.deepStrictEqual(held.errors, [{
+    code: expectedCode,
+    path: expectedCode === 'GENERATION_INVALID'
+      ? '$.generation'
+      : expectedCode === 'EVIDENCE_REFS_INVALID'
+        ? '$.evidenceRefs'
+        : '$.observation',
+    message: expectedCode === 'CANONICAL_REJECTED'
+      ? 'bind observation rejected by canonical JSON contract'
+      : expectedCode === 'RESOURCE_OBSERVATION_INVALID'
+        ? 'bind observation must be a non-array object'
+        : expectedCode === 'GENERATION_INVALID'
+          ? 'generation must be a positive safe integer'
+          : 'evidenceRefs must contain non-empty strings',
+  }]);
+
+  const after = scope.getResource(resourceId);
+  assert.strictEqual(after.state, 'HOLD');
+  assert.strictEqual(after.releaseConfirmed, false);
+  assert.deepStrictEqual(after.identity, before.identity);
+  assert.strictEqual(after.boundGeneration, before.boundGeneration);
+  assert.deepStrictEqual(after.evidenceRefs, before.evidenceRefs);
+  assert.deepStrictEqual(after.decision, held);
+
+  const history = tracker.exportHistory();
+  const heldEvent = history.at(-1);
+  assert.strictEqual(heldEvent.kind, 'RESOURCE_HELD');
+  assert.deepStrictEqual(heldEvent.payload.evidenceRefs, []);
+  assert.deepStrictEqual(heldEvent.payload.decision, held);
+  if (rejectedMarker !== null) {
+    assert.strictEqual(JSON.stringify(tracker.snapshot()).includes(rejectedMarker), false);
+    assert.strictEqual(JSON.stringify(history).includes(rejectedMarker), false);
+  }
+
+  const replayed = replayTracker(history).snapshot().resources
+    .find((item) => item.resourceId === resourceId);
+  assert.strictEqual(replayed.state, 'HOLD');
+  assert.deepStrictEqual(replayed.identity, before.identity);
+  assert.deepStrictEqual(replayed.evidenceRefs, before.evidenceRefs);
+  assert.deepStrictEqual(replayed.decision, held);
+
+  const historyLength = history.length;
+  const rebound = scope.bind(resourceId, {
+    identity: before.identity,
+    generation: before.boundGeneration,
+    evidenceRefs: before.evidenceRefs.filter((item) => !item.startsWith('declare-')),
+  });
+  assert.strictEqual(rebound.state, 'HOLD');
+  assert.strictEqual(tracker.exportHistory().length, historyLength);
+}
+
 test('exports the version-2 validation surface and controlled support states', () => {
   for (const name of [
     'validateProcessIdentity2',
@@ -504,6 +573,217 @@ test('tracker holds non-canonical rebinds after a version-2 bind without retaini
     assert.deepStrictEqual(replayed.decision, held, label);
   }
   assert.strictEqual(accessorReads, 0);
+});
+
+test('tracker snapshots the complete bind observation before reading fields', () => {
+  for (const [label, buildObservation] of [
+    ['cyclic identity getter', (counts) => {
+      const observation = { generation: 2, evidenceRefs: ['rejected-new-evidence'] };
+      Object.defineProperty(observation, 'identity', {
+        enumerable: true,
+        get() {
+          counts.identity += 1;
+          const identity = { rejected_marker: 'outer-getter-cycle' };
+          identity.self = identity;
+          return identity;
+        },
+      });
+      return observation;
+    }],
+    ['caller error identity getter', (counts) => {
+      const observation = { generation: 2, evidenceRefs: ['rejected-new-evidence'] };
+      Object.defineProperty(observation, 'identity', {
+        enumerable: true,
+        get() {
+          counts.identity += 1;
+          throw new contracts.ContractError('CALLER_CONSTRUCTED', '$.caller', 'caller message');
+        },
+      });
+      return observation;
+    }],
+    ['unused extension accessor', (counts) => {
+      const observation = {
+        identity: windowsProcess(),
+        generation: 2,
+        evidenceRefs: ['rejected-new-evidence'],
+      };
+      Object.defineProperty(observation, 'unused_extension', {
+        enumerable: true,
+        get() {
+          counts.extension += 1;
+          return 'outer-unused-accessor';
+        },
+      });
+      return observation;
+    }],
+    ['unused extension cycle', () => {
+      const extension = { rejected_marker: 'outer-unused-cycle' };
+      extension.self = extension;
+      return {
+        identity: windowsProcess(),
+        generation: 2,
+        evidenceRefs: ['rejected-new-evidence'],
+        unused_extension: extension,
+      };
+    }],
+  ]) {
+    const counts = { identity: 0, extension: 0 };
+    const tracker = makeTracker();
+    const resourceId = `observation-snapshot-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId: resourceId, purpose: 'observation snapshot' });
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    });
+    assertEnvelopeHold(
+      scope,
+      tracker,
+      resourceId,
+      buildObservation(counts),
+      'CANONICAL_REJECTED',
+      label.includes('cycle') ? 'outer-' : 'caller message',
+    );
+    assert.deepStrictEqual(counts, { identity: 0, extension: 0 }, label);
+    const serialized = JSON.stringify(tracker.exportHistory());
+    assert.strictEqual(serialized.includes('CALLER_CONSTRUCTED'), false, label);
+    assert.strictEqual(serialized.includes('caller message'), false, label);
+    assert.strictEqual(serialized.includes('rejected-new-evidence'), false, label);
+  }
+
+  for (const getBehavior of ['cycle', 'throw']) {
+    let getCount = 0;
+    const identity = windowsProcess();
+    const target = { identity, generation: 2, evidenceRefs: ['proxy-data-bind'] };
+    const observation = new Proxy(target, {
+      get(object, key, receiver) {
+        if (key === 'identity') {
+          getCount += 1;
+          if (getBehavior === 'throw') throw new Error('proxy get must not run');
+          const cycle = {};
+          cycle.self = cycle;
+          return cycle;
+        }
+        return Reflect.get(object, key, receiver);
+      },
+    });
+    const tracker = makeTracker();
+    const resourceId = `proxy-data-${getBehavior}`;
+    const scope = tracker.openRootScope({ scopeId: resourceId, purpose: 'proxy descriptor snapshot' });
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, { identity, generation: 2, evidenceRefs: ['proxy-data-bind'] });
+    const historyLength = tracker.exportHistory().length;
+    const result = scope.bind(resourceId, observation);
+    assert.strictEqual(result.state, 'ACTIVE');
+    assert.strictEqual(getCount, 0);
+    assert.strictEqual(tracker.exportHistory().length, historyLength);
+  }
+});
+
+test('tracker maps malformed observation envelopes to stable v2 holds without accepting new evidence', () => {
+  const cases = [
+    ['missing generation', { identity: windowsProcess(), evidenceRefs: ['rejected-marker-generation'] }, 'GENERATION_INVALID'],
+    ['invalid generation', { identity: windowsProcess(), generation: 0, evidenceRefs: ['rejected-marker-generation-invalid'] }, 'GENERATION_INVALID'],
+    ['missing evidence', { identity: windowsProcess(), generation: 2 }, 'EVIDENCE_REFS_INVALID'],
+    ['invalid evidence', { identity: windowsProcess(), generation: 2, evidenceRefs: [] }, 'EVIDENCE_REFS_INVALID'],
+    ['missing identity', { generation: 2, evidenceRefs: ['rejected-marker-missing-identity'] }, 'CANONICAL_REJECTED'],
+    ['scalar', 'rejected-marker-scalar', 'RESOURCE_OBSERVATION_INVALID'],
+    ['null', null, 'RESOURCE_OBSERVATION_INVALID'],
+    ['array', ['rejected-marker-array'], 'RESOURCE_OBSERVATION_INVALID'],
+  ];
+  for (const [label, observation, code] of cases) {
+    const tracker = makeTracker();
+    const resourceId = `envelope-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId: resourceId, purpose: 'malformed envelope' });
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    });
+    assertEnvelopeHold(scope, tracker, resourceId, observation, code, 'rejected-marker');
+  }
+});
+
+test('tracker preserves controlled exception behavior without an existing v2 binding', () => {
+  const canonicalFailure = {
+    identity: windowsProcess(),
+    generation: 2,
+    evidenceRefs: ['first-canonical-failure'],
+  };
+  Object.defineProperty(canonicalFailure, 'unused_extension', {
+    enumerable: true,
+    get() {
+      throw new contracts.ContractError('CALLER_CONSTRUCTED', '$.caller', 'caller message');
+    },
+  });
+  const cases = [
+    ['omitted', undefined, ResourceTrackerError, 'GENERATION_INVALID'],
+    ['invalid generation', { identity: windowsProcess(), generation: 0, evidenceRefs: ['first-generation'] }, ResourceTrackerError, 'GENERATION_INVALID'],
+    ['missing evidence', { identity: windowsProcess(), generation: 2 }, ResourceTrackerError, 'EVIDENCE_REFS_INVALID'],
+    ['missing identity', { generation: 2, evidenceRefs: ['first-missing-identity'] }, contracts.ContractError, 'CANONICAL_REJECTED'],
+    ['canonical failure', canonicalFailure, contracts.ContractError, 'CANONICAL_REJECTED'],
+    ['scalar', 'first-scalar', ResourceTrackerError, 'RESOURCE_OBSERVATION_INVALID'],
+  ];
+  for (const [label, observation, ErrorType, code] of cases) {
+    const tracker = makeTracker();
+    const resourceId = `first-envelope-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId: resourceId, purpose: 'first malformed envelope' });
+    scope.register(resource(resourceId, 'process_tree'));
+    const before = tracker.exportHistory();
+    assert.throws(
+      () => scope.bind(resourceId, observation),
+      (error) => error instanceof ErrorType
+        && error.code === code
+        && (code !== 'CANONICAL_REJECTED'
+          || (error.path === '$.observation'
+            && error.message === 'bind observation rejected by canonical JSON contract')),
+      label,
+    );
+    assert.strictEqual(scope.getResource(resourceId).state, 'DECLARED', label);
+    assert.deepStrictEqual(tracker.exportHistory(), before, label);
+  }
+
+  const tracker = makeTracker();
+  const scope = tracker.openRootScope({ scopeId: 'legacy-envelope', purpose: 'legacy envelope' });
+  scope.register(resource('legacy-envelope', 'process_tree'));
+  scope.bind('legacy-envelope', {
+    identity: legacyProcess({ owner_id: 'root-A', platform: 'windows' }),
+    generation: 2,
+    evidenceRefs: ['legacy-envelope-initial'],
+  });
+  const before = scope.getResource('legacy-envelope');
+  const history = tracker.exportHistory();
+  assert.throws(
+    () => scope.bind('legacy-envelope', { generation: 2, evidenceRefs: ['legacy-rejected'] }),
+    (error) => error instanceof contracts.ContractError && error.code === 'CANONICAL_REJECTED',
+  );
+  assert.deepStrictEqual(scope.getResource('legacy-envelope'), before);
+  assert.deepStrictEqual(tracker.exportHistory(), history);
+});
+
+test('tracker propagates hold capacity failure and preserves the active checkpoint', () => {
+  const tracker = new TaskResourceTracker({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: () => true,
+    trustedFilesystemResolver: () => true,
+    limits: { maxHistoryEvents: 3 },
+  });
+  const scope = tracker.openRootScope({ scopeId: 'capacity-envelope', purpose: 'capacity envelope' });
+  scope.register(resource('capacity-envelope', 'process_tree'));
+  scope.bind('capacity-envelope', {
+    identity: windowsProcess(), generation: 2, evidenceRefs: ['capacity-initial'],
+  });
+  const before = scope.getResource('capacity-envelope');
+  const history = tracker.exportHistory();
+  assert.throws(
+    () => scope.bind('capacity-envelope', {
+      generation: 2,
+      evidenceRefs: ['capacity-rejected'],
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'TRACKER_HISTORY_LIMIT_REACHED',
+  );
+  assert.deepStrictEqual(scope.getResource('capacity-envelope'), before);
+  assert.deepStrictEqual(tracker.exportHistory(), history);
 });
 
 test('tracker preserves complete legacy process identities with overlapping version-2 metadata', () => {

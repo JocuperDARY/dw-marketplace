@@ -149,6 +149,60 @@ function requireEvidenceRefs(value, code = 'EVIDENCE_REFS_INVALID') {
   return Array.from(new Set(value));
 }
 
+function normalizeBindObservation(observation) {
+  const snapshot = detached(observation);
+  if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new ResourceTrackerError('RESOURCE_OBSERVATION_INVALID');
+  }
+  const generation = requireGeneration(snapshot.generation);
+  const evidenceRefs = requireEvidenceRefs(snapshot.evidenceRefs);
+  if (!hasOwn(snapshot, 'identity')) {
+    throw new ContractError(
+      'CANONICAL_REJECTED',
+      '$.observation',
+      'bind observation rejected by canonical JSON contract',
+    );
+  }
+  return { generation, evidenceRefs, identity: snapshot.identity };
+}
+
+function normalizeBindObservationFailure(error) {
+  if (error instanceof ContractError) {
+    return {
+      exception: new ContractError(
+        'CANONICAL_REJECTED',
+        '$.observation',
+        'bind observation rejected by canonical JSON contract',
+      ),
+      decisionError: trackerIdentityError(
+        'CANONICAL_REJECTED',
+        '$.observation',
+        'bind observation rejected by canonical JSON contract',
+      ),
+    };
+  }
+  const controlled = {
+    RESOURCE_OBSERVATION_INVALID: {
+      path: '$.observation',
+      message: 'bind observation must be a non-array object',
+    },
+    GENERATION_INVALID: {
+      path: '$.generation',
+      message: 'generation must be a positive safe integer',
+    },
+    EVIDENCE_REFS_INVALID: {
+      path: '$.evidenceRefs',
+      message: 'evidenceRefs must contain non-empty strings',
+    },
+  };
+  if (!(error instanceof ResourceTrackerError) || !hasOwn(controlled, error.code)) return null;
+  const normalized = controlled[error.code];
+  return {
+    exception: new ResourceTrackerError(error.code),
+    decisionError: trackerIdentityError(error.code, normalized.path, normalized.message),
+  };
+}
+
 function sameValue(left, right) {
   try {
     return canonicalize(left) === canonicalize(right);
@@ -601,21 +655,27 @@ class TaskResourceTracker {
   #bind(scopeId, resourceId, observation = {}) {
     const record = this.#requireOwnedResource(scopeId, resourceId);
     this.#requireScopeMutable(scopeId);
-    const generation = requireGeneration(observation.generation);
-    const evidenceRefs = requireEvidenceRefs(observation.evidenceRefs);
     const boundIdentityRequiresV2 = record.identity !== null
       && hasExplicitV2IdentityMarker(record.identity);
-    let identity;
+    let normalizedObservation;
+    let observationError = null;
     try {
-      identity = detached(observation.identity);
+      normalizedObservation = normalizeBindObservation(observation);
     } catch (error) {
-      if (boundIdentityRequiresV2 && error instanceof ContractError) {
-        return this.#holdInvalidV2Identity(record, scopeId, structuredIdentityHold([
-          trackerIdentityError('CANONICAL_REJECTED', '$.identity', 'version-2 identity input rejected by canonical JSON contract'),
-        ]), evidenceRefs);
-      }
-      throw error;
+      observationError = error;
     }
+    if (observationError !== null) {
+      const failure = normalizeBindObservationFailure(observationError);
+      if (failure === null) throw observationError;
+      if (!boundIdentityRequiresV2) throw failure.exception;
+      return this.#holdInvalidV2Identity(
+        record,
+        scopeId,
+        structuredIdentityHold([failure.decisionError]),
+        [],
+      );
+    }
+    const { identity, generation, evidenceRefs } = normalizedObservation;
     const signature = detached({
       resourceId,
       type: record.type,
