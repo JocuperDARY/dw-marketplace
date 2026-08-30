@@ -419,6 +419,119 @@ test('tracker returns replayable structured holds for rejected version-2 rebinds
   );
 });
 
+test('tracker holds non-canonical rebinds after a version-2 bind without retaining rejected identities', () => {
+  const cyclic = { schema: 'ProcessIdentity2', rejected_marker: 'cyclic-rejected-input' };
+  cyclic.self = cyclic;
+  const nullPrototype = Object.create(null);
+  Object.assign(nullPrototype, {
+    schema: 'ProcessIdentity2',
+    schema_version: 2,
+    rejected_marker: 'null-prototype-rejected-input',
+  });
+  let accessorReads = 0;
+  const accessor = { schema: 'ProcessIdentity2', schema_version: 2 };
+  Object.defineProperty(accessor, 'rejected_marker', {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return 'accessor-rejected-input';
+    },
+  });
+  const nonStandardPrototype = Object.create({ inherited: true });
+  Object.assign(nonStandardPrototype, {
+    schema: 'ProcessIdentity2',
+    schema_version: 2,
+    rejected_marker: 'non-standard-prototype-rejected-input',
+  });
+
+  for (const [label, identity, rejectedMarker] of [
+    ['cyclic', cyclic, 'cyclic-rejected-input'],
+    ['null prototype', nullPrototype, 'null-prototype-rejected-input'],
+    ['accessor', accessor, 'accessor-rejected-input'],
+    ['non-standard prototype', nonStandardPrototype, 'non-standard-prototype-rejected-input'],
+  ]) {
+    const tracker = makeTracker();
+    const scopeId = `non-canonical-versioned-${label.replace(/\s/g, '-')}`;
+    const resourceId = `non-canonical-versioned-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId, purpose: 'non-canonical versioned rebind' });
+    scope.register(resource(resourceId, 'process_tree'));
+    scope.bind(resourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    });
+    const bound = scope.getResource(resourceId);
+
+    let held;
+    assert.doesNotThrow(() => {
+      held = scope.bind(resourceId, {
+        identity, generation: 2, evidenceRefs: [`${label}-rebind`],
+      });
+    }, label);
+    assert.strictEqual(Object.isFrozen(held), true, label);
+    assert.strictEqual(held.valid, false, label);
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    assert.strictEqual(held.action_authorized, false, label);
+    assert(held.errors.some((error) => (
+      typeof error.code === 'string' && error.code !== ''
+      && typeof error.path === 'string' && error.path !== ''
+      && typeof error.message === 'string' && error.message !== ''
+    )), label);
+
+    const after = scope.getResource(resourceId);
+    assert.strictEqual(after.state, 'HOLD', label);
+    assert.deepStrictEqual(after.identity, bound.identity, label);
+    const history = tracker.exportHistory();
+    assert.strictEqual(history.at(-1).kind, 'RESOURCE_HELD', label);
+    assert.deepStrictEqual(history.at(-1).payload.decision, held, label);
+    assert.strictEqual(JSON.stringify(tracker.snapshot()).includes(rejectedMarker), false, label);
+    assert.strictEqual(JSON.stringify(history).includes(rejectedMarker), false, label);
+    const historyLength = history.length;
+    assert.strictEqual(scope.bind(resourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    }).state, 'HOLD', label);
+    assert.strictEqual(tracker.exportHistory().length, historyLength, label);
+
+    const replay = TaskResourceTracker.fromHistory({
+      ownerId: 'root-A',
+      runId: 'run-A',
+      generation: 2,
+      trustedObservationResolver: () => true,
+      trustedFilesystemResolver: () => true,
+      trustedHistoryResolver: () => true,
+    }, history);
+    const replayed = replay.snapshot().resources.find((item) => item.resourceId === resourceId);
+    assert.strictEqual(replayed.state, 'HOLD', label);
+    assert.deepStrictEqual(replayed.identity, bound.identity, label);
+    assert.deepStrictEqual(replayed.decision, held, label);
+  }
+  assert.strictEqual(accessorReads, 0);
+});
+
+test('tracker preserves complete legacy process identities with overlapping version-2 metadata', () => {
+  for (const [label, overrides] of [
+    ['owner id', { owner_id: 'root-A' }],
+    ['platform', { platform: 'windows' }],
+    ['owner id and platform', { owner_id: 'root-A', platform: 'windows' }],
+  ]) {
+    const identity = legacyProcess(overrides);
+    assert.strictEqual(stateMachines.validateProcessIdentity(identity).valid, true, label);
+    const tracker = makeTracker();
+    const scopeId = `legacy-overlap-${label.replace(/\s/g, '-')}`;
+    const resourceId = `legacy-overlap-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId, purpose: 'legacy metadata compatibility' });
+    scope.register(resource(resourceId, 'process_tree'));
+    assert.strictEqual(scope.bind(resourceId, {
+      identity, generation: 2, evidenceRefs: [`${label}-initial`],
+    }).state, 'ACTIVE', label);
+    assert.throws(
+      () => scope.bind(resourceId, {
+        identity: { ...identity, pid: identity.pid + 1 }, generation: 2, evidenceRefs: [`${label}-changed`],
+      }),
+      (error) => error instanceof ResourceTrackerError && error.code === 'RESOURCE_IDENTITY_DRIFT',
+      label,
+    );
+  }
+});
+
 for (const [label, identity] of [
   ['empty object', {}],
   ['null', null],

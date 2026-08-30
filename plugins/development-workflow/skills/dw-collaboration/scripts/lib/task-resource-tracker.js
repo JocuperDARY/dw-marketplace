@@ -6,6 +6,7 @@ const {
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
 const {
+  ContractError,
   decideProcessRecovery,
   decideTemporaryLease,
 } = require('./contracts');
@@ -227,6 +228,11 @@ function hasV2IdentityIntent(resourceType, identity) {
         const exclusiveKeys = V2_EXCLUSIVE_KEYS_BY_RESOURCE_TYPE.get(resourceType);
         return exclusiveKeys !== undefined && exclusiveKeys.has(key);
       }));
+}
+
+function hasExplicitV2IdentityMarker(identity) {
+  return identity && typeof identity === 'object' && !Array.isArray(identity)
+    && (hasOwn(identity, 'schema') || hasOwn(identity, 'schema_version'));
 }
 
 function trackerIdentityError(code, path, message) {
@@ -596,8 +602,20 @@ class TaskResourceTracker {
     const record = this.#requireOwnedResource(scopeId, resourceId);
     this.#requireScopeMutable(scopeId);
     const generation = requireGeneration(observation.generation);
-    const identity = detached(observation.identity);
     const evidenceRefs = requireEvidenceRefs(observation.evidenceRefs);
+    const boundIdentityRequiresV2 = record.identity !== null
+      && hasExplicitV2IdentityMarker(record.identity);
+    let identity;
+    try {
+      identity = detached(observation.identity);
+    } catch (error) {
+      if (boundIdentityRequiresV2 && error instanceof ContractError) {
+        return this.#holdInvalidV2Identity(record, scopeId, structuredIdentityHold([
+          trackerIdentityError('CANONICAL_REJECTED', '$.identity', 'version-2 identity input rejected by canonical JSON contract'),
+        ]), evidenceRefs);
+      }
+      throw error;
+    }
     const signature = detached({
       resourceId,
       type: record.type,
@@ -608,8 +626,12 @@ class TaskResourceTracker {
       generation,
       identity,
     });
-    const requiresV2Validation = hasV2IdentityIntent(record.type, identity)
-      || (record.identity !== null && hasV2IdentityIntent(record.type, record.identity));
+    const legacyProcessIdentity = PROCESS_RESOURCE_TYPES.has(record.type)
+      && !hasExplicitV2IdentityMarker(identity)
+      && validateProcessIdentity(identity).valid;
+    const requiresV2Validation = boundIdentityRequiresV2
+      || hasExplicitV2IdentityMarker(identity)
+      || (hasV2IdentityIntent(record.type, identity) && !legacyProcessIdentity);
     let identityValidation = requiresV2Validation
       ? this.#validateIdentity(record, identity, generation, true)
       : null;
@@ -664,6 +686,16 @@ class TaskResourceTracker {
         throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
       }
       throw new ResourceTrackerError('RESOURCE_IDENTITY_INVALID');
+    }
+    if (!requireV2 && PROCESS_RESOURCE_TYPES.has(record.type) && !hasExplicitV2IdentityMarker(identity)) {
+      const legacyValidation = validateProcessIdentity(identity);
+      if (legacyValidation.valid) {
+        if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
+        return null;
+      }
+      if (!hasV2IdentityIntent(record.type, identity)) {
+        throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
+      }
     }
     if (requireV2 || hasV2IdentityIntent(record.type, identity)) {
       const validation = validateResourceIdentity2(record.type, identity);
