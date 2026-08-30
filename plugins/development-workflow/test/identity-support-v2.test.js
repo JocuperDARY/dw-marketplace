@@ -29,8 +29,228 @@ const schemaNames = [
   'SupportMatrix2.schema.json',
 ];
 const schemaBundle = schemaNames.map(loadSchema);
+const schemaRequirementsPath = path.resolve(__dirname, 'schema-validation-requirements.txt');
+const compatiblePythonDescriptors = new Map();
+const stableVersionPattern = /^\d+(?:\.\d+)*$/;
+const compatibilityPythonErrorCodes = new Set([
+  'PYTHON_SCHEMA_DEPENDENCY_MISSING',
+  'PYTHON_SCHEMA_VERSION_UNSUPPORTED',
+  'PYTHON_SCHEMA_API_MISSING',
+  'PYTHON_SCHEMA_MALFORMED_OUTPUT',
+]);
 
-function validateDraft202012Fixtures(schema, fixtures) {
+function pythonDescriptor(executable, prefixArgs = []) {
+  return Object.freeze({ executable, prefixArgs: Object.freeze([...prefixArgs]) });
+}
+
+function pythonDiscoveryKey() {
+  const overrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  return JSON.stringify({
+    platform: process.platform,
+    override: overrideIsSet ? process.env.DW_SCHEMA_PYTHON : null,
+    path: process.env.PATH ?? '',
+  });
+}
+
+function pythonCandidates() {
+  if (Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON')) {
+    return { override: true, candidates: [pythonDescriptor(process.env.DW_SCHEMA_PYTHON)] };
+  }
+  return {
+    override: false,
+    candidates: process.platform === 'win32'
+      ? [pythonDescriptor('py', ['-3']), pythonDescriptor('python'), pythonDescriptor('python3')]
+      : [pythonDescriptor('python3'), pythonDescriptor('python')],
+  };
+}
+
+function pythonError(code, message, descriptor = null) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  error.descriptor = descriptor;
+  return error;
+}
+
+function descriptorDisplay(descriptor) {
+  return [descriptor.executable, ...descriptor.prefixArgs].map((part) => JSON.stringify(part)).join(' ');
+}
+
+function installCommand(descriptor) {
+  return `${descriptorDisplay(descriptor)} -m pip install -r ${JSON.stringify(schemaRequirementsPath)}`;
+}
+
+function classifyPythonSpawn(result, descriptor, stage) {
+  const errorCode = result.error?.code;
+  if (errorCode === 'ENOBUFS') {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_OUTPUT_OVERFLOW', `${stage} exceeded the 65536-byte output limit`, descriptor) };
+  }
+  if (errorCode === 'ETIMEDOUT') {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_TIMEOUT', `${stage} exceeded the 10000ms timeout`, descriptor) };
+  }
+  if (result.error) {
+    if (errorCode === 'ENOENT') {
+      return { executed: false, error: pythonError('PYTHON_SCHEMA_NO_INTERPRETER', `${stage} could not execute ${descriptorDisplay(descriptor)}`, descriptor) };
+    }
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', `${stage} failed to start: ${result.error.message}`, descriptor) };
+  }
+  if (result.signal) {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_TERMINATED', `${stage} terminated by ${result.signal}`, descriptor) };
+  }
+  if (result.status === null) {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', `${stage} returned a null status`, descriptor) };
+  }
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', `${stage} exited with status ${result.status}${detail ? `: ${detail}` : ''}`, descriptor) };
+  }
+  return { executed: true, result };
+}
+
+function runPython(descriptor, args, input, stage) {
+  const result = childProcess.spawnSync(descriptor.executable, [...descriptor.prefixArgs, ...args], {
+    encoding: 'utf8',
+    input,
+    shell: false,
+    timeout: 10000,
+    maxBuffer: 65536,
+    windowsHide: true,
+  });
+  return classifyPythonSpawn(result, descriptor, stage);
+}
+
+function parsePythonJson(stdout, descriptor, stage) {
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    throw pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', `${stage} did not produce JSON: ${error.message}`, descriptor);
+  }
+}
+
+function selectPythonResolutionError(probes) {
+  let firstCompatibilityError = null;
+  let firstExecutedError = null;
+  for (const probe of probes) {
+    if (!probe.executed) continue;
+    firstExecutedError ??= probe.error;
+    if (compatibilityPythonErrorCodes.has(probe.error?.code)) {
+      firstCompatibilityError ??= probe.error;
+    }
+  }
+  return firstCompatibilityError ?? firstExecutedError
+    ?? pythonError('PYTHON_SCHEMA_NO_INTERPRETER', 'No configured Python interpreter could be executed');
+}
+
+function compareVersionSegments(left, right) {
+  const width = Math.max(left.length, right.length);
+  for (let index = 0; index < width; index += 1) {
+    const leftSegment = Number(left[index] ?? 0);
+    const rightSegment = Number(right[index] ?? 0);
+    if (leftSegment !== rightSegment) return leftSegment < rightSegment ? -1 : 1;
+  }
+  return 0;
+}
+
+function stableVersionInRange(version, lowerBound, upperBound) {
+  if (typeof version !== 'string' || !stableVersionPattern.test(version)) return false;
+  const segments = version.split('.').map(Number);
+  return compareVersionSegments(segments, lowerBound.split('.').map(Number)) >= 0
+    && compareVersionSegments(segments, upperBound.split('.').map(Number)) < 0;
+}
+
+const pythonCompatibilityProbe = [
+  'import json',
+  'from importlib.metadata import PackageNotFoundError, version',
+  'try:',
+  '    jsonschema_version = version("jsonschema")',
+  '    referencing_version = version("referencing")',
+  'except PackageNotFoundError as error:',
+  '    print(json.dumps({"kind": "missing_dependency", "package": getattr(error, "name", str(error))}))',
+  '    raise SystemExit(0)',
+  'try:',
+  '    from jsonschema import Draft202012Validator',
+  '    from referencing import Registry, Resource',
+  '    required = [Draft202012Validator, Registry, Resource, Resource.from_contents, Registry.with_resource]',
+  '    if not all(callable(value) for value in required):',
+  '        raise TypeError("required Draft 2020-12 API surface is not callable")',
+  '    registry = Registry().with_resource("urn:dw:python-probe", Resource.from_contents({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:dw:python-probe"}))',
+  '    Draft202012Validator({"$schema": "https://json-schema.org/draft/2020-12/schema"}, registry=registry)',
+  'except Exception as error:',
+  '    print(json.dumps({"kind": "missing_api", "detail": f"{type(error).__name__}: {error}"}))',
+  '    raise SystemExit(0)',
+  'print(json.dumps({"kind": "compatible", "jsonschema": jsonschema_version, "referencing": referencing_version}))',
+].join('\n');
+
+function probePythonDescriptor(descriptor, prefixArgs = []) {
+  const probeDescriptor = pythonDescriptor(descriptor.executable, [...descriptor.prefixArgs, ...prefixArgs]);
+  const execution = runPython(probeDescriptor, ['-X', 'utf8', '-c', pythonCompatibilityProbe], undefined, 'Python compatibility probe');
+  if (execution.error) return execution;
+  let probe;
+  try {
+    probe = JSON.parse(execution.result.stdout);
+  } catch (error) {
+    return {
+      executed: true,
+      error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', `Python compatibility probe did not produce JSON: ${error.message}`, probeDescriptor),
+    };
+  }
+  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility probe returned a non-object', probeDescriptor) };
+  }
+  if (probe.kind === 'missing_dependency') {
+    return {
+      executed: true,
+      error: pythonError(
+        'PYTHON_SCHEMA_DEPENDENCY_MISSING',
+        `Python compatibility probe is missing ${String(probe.package)}; install with ${installCommand(descriptor)}`,
+        probeDescriptor,
+      ),
+    };
+  }
+  if (probe.kind === 'missing_api') {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_API_MISSING', `Python compatibility probe is incompatible: ${String(probe.detail)}`, probeDescriptor) };
+  }
+  if (probe.kind !== 'compatible' || typeof probe.jsonschema !== 'string' || typeof probe.referencing !== 'string') {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility probe returned an unrecognized payload', probeDescriptor) };
+  }
+  if (!stableVersionInRange(probe.jsonschema, '4.18.0', '5.0.0')
+    || !stableVersionInRange(probe.referencing, '0.28.4', '1.0.0')) {
+    return {
+      executed: true,
+      error: pythonError(
+        'PYTHON_SCHEMA_VERSION_UNSUPPORTED',
+        `Python compatibility probe requires jsonschema >=4.18.0,<5.0.0 and referencing >=0.28.4,<1.0.0; received jsonschema=${probe.jsonschema}, referencing=${probe.referencing}`,
+        probeDescriptor,
+      ),
+    };
+  }
+  return { executed: true, descriptor: probeDescriptor };
+}
+
+function resolveCompatiblePythonDescriptor({ bypassCache = false } = {}) {
+  const cacheKey = pythonDiscoveryKey();
+  if (!bypassCache && compatiblePythonDescriptors.has(cacheKey)) return compatiblePythonDescriptors.get(cacheKey);
+
+  const { override, candidates } = pythonCandidates();
+  const probes = [];
+  for (const candidate of candidates) {
+    const probe = probePythonDescriptor(candidate);
+    if (probe.descriptor) {
+      if (!bypassCache) compatiblePythonDescriptors.set(cacheKey, probe.descriptor);
+      return probe.descriptor;
+    }
+    probes.push(probe);
+    if (override) throw probe.error;
+  }
+  throw selectPythonResolutionError(probes);
+}
+
+function validateDraft202012Fixtures(schema, fixtures, { isolatedDependencyProbe = false } = {}) {
+  const descriptor = resolveCompatiblePythonDescriptor({ bypassCache: isolatedDependencyProbe });
+  if (isolatedDependencyProbe) {
+    const isolatedProbe = probePythonDescriptor(descriptor, ['-I', '-S']);
+    assert(isolatedProbe.error, 'PYTHON_SCHEMA_DEPENDENCY_MISSING: isolated dependency probe unexpectedly succeeded');
+    throw isolatedProbe.error;
+  }
   const script = [
     'import json, sys',
     'from jsonschema import Draft202012Validator',
@@ -42,13 +262,75 @@ function validateDraft202012Fixtures(schema, fixtures) {
     'validator = Draft202012Validator(payload["schema"], registry=registry)',
     'print(json.dumps([validator.is_valid(item) for item in payload["fixtures"]]))',
   ].join('\n');
-  const result = childProcess.spawnSync('python', ['-X', 'utf8', '-c', script], {
-    encoding: 'utf8',
-    input: JSON.stringify({ schema, fixtures, schemas: schemaBundle }),
-  });
-  assert.strictEqual(result.status, 0, result.stderr || result.error?.message);
-  return JSON.parse(result.stdout);
+  const execution = runPython(
+    descriptor,
+    ['-X', 'utf8', '-c', script],
+    JSON.stringify({ schema, fixtures, schemas: schemaBundle }),
+    'Draft 2020-12 schema validation',
+  );
+  if (execution.error) throw execution.error;
+  const output = parsePythonJson(execution.result.stdout, descriptor, 'Draft 2020-12 schema validation');
+  if (!Array.isArray(output) || !output.every((value) => typeof value === 'boolean')) {
+    throw pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Draft 2020-12 schema validation returned a non-boolean result array', descriptor);
+  }
+  return output;
 }
+
+test('schema validation reports an actionable isolated dependency failure', () => {
+  const selectedDescriptor = resolveCompatiblePythonDescriptor();
+  const expectedInstallCommand = installCommand(selectedDescriptor);
+  assert.throws(
+    () => validateDraft202012Fixtures(loadSchema('SupportMatrix2.schema.json'), [], { isolatedDependencyProbe: true }),
+    (error) => {
+      assert.strictEqual(error.code, 'PYTHON_SCHEMA_DEPENDENCY_MISSING');
+      assert(error.message.includes(expectedInstallCommand));
+      assert(!error.message.includes(`${descriptorDisplay(pythonDescriptor(selectedDescriptor.executable, [...selectedDescriptor.prefixArgs, '-I', '-S']))} -m pip install`));
+      return true;
+    },
+  );
+  assert.strictEqual(resolveCompatiblePythonDescriptor(), selectedDescriptor);
+});
+
+test('compatibility probe classifies malformed JSON without stopping discovery', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  try {
+    childProcess.spawnSync = () => ({ status: 0, stdout: 'not JSON', stderr: '', signal: null });
+    const probe = probePythonDescriptor(pythonDescriptor('synthetic-python'));
+    assert.strictEqual(probe.executed, true);
+    assert(probe.error);
+    assert.strictEqual(probe.error.code, 'PYTHON_SCHEMA_MALFORMED_OUTPUT');
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+  }
+});
+
+test('Python resolution prefers the first compatibility error over process failures', () => {
+  const processFailure = pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', 'first candidate failed');
+  const apiMissing = pythonError('PYTHON_SCHEMA_API_MISSING', 'second candidate is incompatible');
+  const malformedOutput = pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'third candidate was malformed');
+  assert.strictEqual(
+    selectPythonResolutionError([
+      { executed: true, error: processFailure },
+      { executed: true, error: apiMissing },
+      { executed: true, error: malformedOutput },
+    ]),
+    apiMissing,
+  );
+  assert.strictEqual(
+    selectPythonResolutionError([
+      { executed: true, error: malformedOutput },
+      { executed: true, error: apiMissing },
+    ]),
+    malformedOutput,
+  );
+});
+
+test('packages the exact schema validation requirements', () => {
+  assert.strictEqual(
+    fs.readFileSync(schemaRequirementsPath, 'utf8'),
+    'jsonschema>=4.18,<5\nreferencing>=0.28.4,<1\n',
+  );
+});
 
 function windowsProcess(overrides = {}) {
   return {
@@ -1309,6 +1591,19 @@ test('schema scalar constraints match the bounded runtime identity validators', 
   externalRecovery.identity = externalHarness;
   assert.deepStrictEqual(validateDraft202012Fixtures(schemas.RecoveryRecord2, [externalRecovery]), [true]);
 
+  const temporaryAllocationRecovery = recoveryRecord();
+  temporaryAllocationRecovery.resource_type = 'temporary_allocation';
+  temporaryAllocationRecovery.identity = temporaryAllocation();
+  const incompleteTemporaryAllocationRecovery = clone(temporaryAllocationRecovery);
+  delete incompleteTemporaryAllocationRecovery.identity.task_directory;
+  assertParity(
+    'temporary allocation recovery identity',
+    schemas.RecoveryRecord2,
+    contracts.validateRecoveryRecord2,
+    [temporaryAllocationRecovery, incompleteTemporaryAllocationRecovery],
+    [true, false],
+  );
+
   const trimmedStringValues = [
     ['ASCII whitespace', ' \t\n', false],
     ['NBSP', '\u00a0', false],
@@ -1362,15 +1657,15 @@ test('schema scalar constraints match the bounded runtime identity validators', 
     exactShaValues.map(([, value]) => temporaryAllocation({ manifest_sha256: value })), exactShaValues.map(([, , valid]) => valid));
 
   const referenceTargets = [
-    ['observation reference', 'observation', (record, value) => { record.last_valid_observation.observation_ref = value; }],
-    ['identity reference', 'identity', (record, value) => { record.last_valid_observation.identity_ref = value; }],
-    ['authority reference', 'authority', (record, value) => { record.cleanup_authority_ref = value; }],
-    ['evidence reference', 'evidence', (record, value) => { record.evidence_refs = [value]; }],
+    ['observation reference', 'observation', 'evidence', (record, value) => { record.last_valid_observation.observation_ref = value; }],
+    ['identity reference', 'identity', 'evidence', (record, value) => { record.last_valid_observation.identity_ref = value; }],
+    ['authority reference', 'authority', 'evidence', (record, value) => { record.cleanup_authority_ref = value; }],
+    ['evidence reference', 'evidence', 'authority', (record, value) => { record.evidence_refs = [value]; }],
   ];
-  for (const [target, prefix, setReference] of referenceTargets) {
+  for (const [target, prefix, wrongPrefix, setReference] of referenceTargets) {
     const referenceValues = [
       [`${prefix} exact`, `${prefix}:${sha}`, true], [`${prefix} short`, `${prefix}:${sha.slice(1)}`, false],
-      [`${prefix} uppercase`, `${prefix}:${sha.toUpperCase()}`, false], ['wrong typed prefix', `evidence:${sha}`, prefix === 'evidence'],
+      [`${prefix} uppercase`, `${prefix}:${sha.toUpperCase()}`, false], ['wrong typed prefix', `${wrongPrefix}:${sha}`, false],
       ['terminal LF', `${prefix}:${sha}\n`, false], ['terminal CR', `${prefix}:${sha}\r`, false],
       ['terminal line separator', `${prefix}:${sha}\u2028`, false], ['terminal paragraph separator', `${prefix}:${sha}\u2029`, false],
       ['surrounding text', `prefix ${prefix}:${sha} suffix`, false],
