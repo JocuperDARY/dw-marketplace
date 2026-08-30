@@ -3,6 +3,8 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const contracts = require('../skills/dw-collaboration/scripts/lib/contracts');
 const stateMachines = require('../skills/dw-collaboration/scripts/lib/state-machines');
@@ -15,12 +17,21 @@ const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 const hash = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const opaqueRef = (kind, value) => `${kind}:${hash(value)}`;
+const schemaRoot = path.resolve(__dirname, '../skills/dw-collaboration/references/schemas');
+const loadSchema = (name) => JSON.parse(fs.readFileSync(path.join(schemaRoot, name), 'utf8'));
 
 function windowsProcess(overrides = {}) {
   return {
     schema: 'ProcessIdentity2',
     schema_version: 2,
     platform: 'windows',
+    owner_id: 'root-A',
+    run_id: 'run-A',
+    session_id: 'session-A',
+    lease_generation: 2,
+    adapter_generation: 2,
+    manager_generation: 7,
     pid: 41002,
     start_time: '2026-08-30T01:00:00Z',
     executable_path_sha256: hash('C:\\Program Files\\nodejs\\node.exe'),
@@ -41,6 +52,12 @@ function linuxProcess(overrides = {}) {
     schema: 'ProcessIdentity2',
     schema_version: 2,
     platform: 'linux',
+    owner_id: 'root-A',
+    run_id: 'run-A',
+    session_id: 'session-A',
+    lease_generation: 2,
+    adapter_generation: 2,
+    manager_generation: 7,
     pid: 41003,
     start_time: '2026-08-30T01:00:01Z',
     executable_path_sha256: hash('/usr/bin/node'),
@@ -61,11 +78,14 @@ function harnessSession(kind = 'agent_session', overrides = {}) {
     schema: 'HarnessSessionIdentity2',
     schema_version: 2,
     harness_kind: kind,
-    session_id: `${kind}-A`,
+    session_id: 'session-A',
     owner_id: 'root-A',
     run_id: 'run-A',
     lease_generation: 2,
+    adapter_generation: 2,
     harness_instance_id: `instance-${kind}-A`,
+    launch_nonce: `launch-${kind}-A`,
+    ...(kind === 'agent_session' ? { agent_id: 'agent-A' } : { thread_id: 'thread-A' }),
     ...overrides,
   };
 }
@@ -83,6 +103,16 @@ function temporaryAllocation(overrides = {}) {
     child_id: 'child-A',
     manifest_sha256: hash('manifest-A'),
     canonical_root: '/tmp/dw/run-A',
+    task_directory: {
+      path: '/tmp/dw/run-A/task-A',
+      linux_file_identity: { device_id: 'dev-2049', inode: 889901 },
+    },
+    confirmed_parent_directory: {
+      path: '/tmp/dw/run-A',
+      linux_file_identity: { device_id: 'dev-2049', inode: 889900 },
+    },
+    quota: { unit: 'bytes', limit: 1048576 },
+    creation_nonce: 'creation-temp-A',
     linux_file_identity: {
       device_id: 'dev-2049',
       inode: 889900,
@@ -120,6 +150,8 @@ test('exports the version-2 validation surface and controlled support states', (
     'validateRecoveryRecord2',
     'validateSupportMatrix2',
     'validateResourceIdentity2',
+    'createResourceIdentity2',
+    'createRecoveryRecord2',
   ]) assert.strictEqual(typeof contracts[name], 'function', `${name} must be exported`);
   assert.deepStrictEqual(contracts.SUPPORT_STATES2, [
     'VERIFIED_FULL',
@@ -128,6 +160,30 @@ test('exports the version-2 validation surface and controlled support states', (
     'NOT_RUN',
     'FAILED',
   ]);
+});
+
+test('requires task binding, adapter generations, nonces, and platform directory identities', () => {
+  for (const field of ['owner_id', 'run_id', 'session_id', 'lease_generation', 'adapter_generation', 'manager_generation']) {
+    const identity = windowsProcess();
+    delete identity[field];
+    assert.strictEqual(contracts.validateProcessIdentity2(identity).valid, false, `process ${field}`);
+  }
+  for (const field of ['launch_nonce', 'adapter_generation', 'agent_id']) {
+    const identity = harnessSession();
+    delete identity[field];
+    assert.strictEqual(contracts.validateHarnessSessionIdentity2(identity).valid, false, `harness ${field}`);
+  }
+  const wrongHarnessKind = harnessSession('runtime_thread', { agent_id: 'agent-A' });
+  delete wrongHarnessKind.thread_id;
+  assert.strictEqual(contracts.validateHarnessSessionIdentity2(wrongHarnessKind).valid, false);
+  for (const field of ['task_directory', 'confirmed_parent_directory', 'quota', 'creation_nonce']) {
+    const identity = temporaryAllocation();
+    delete identity[field];
+    assert.strictEqual(contracts.validateTemporaryAllocationIdentity2(identity).valid, false, `temporary ${field}`);
+  }
+  const missingParentFileIdentity = temporaryAllocation();
+  delete missingParentFileIdentity.confirmed_parent_directory.linux_file_identity;
+  assert.strictEqual(contracts.validateTemporaryAllocationIdentity2(missingParentFileIdentity).valid, false);
 });
 
 test('process identities reject cross-type and mixed-platform shapes', () => {
@@ -194,13 +250,19 @@ test('tracker routes v2 identities by resource type while retaining v1 compatibi
   }).state, 'ACTIVE');
 
   scope.register(resource('process-A', 'process_tree'));
-  assert.throws(
-    () => scope.bind('process-A', {
-      identity: harnessSession(), generation: 2, evidenceRefs: ['wrong-type'],
-    }),
-    (error) => error instanceof ResourceTrackerError && error.code === 'PROCESS_IDENTITY_INVALID',
-  );
-  assert.strictEqual(scope.bind('process-A', {
+  const wrongType = scope.bind('process-A', {
+    identity: harnessSession(), generation: 2, evidenceRefs: ['wrong-type'],
+  });
+  assert.strictEqual(wrongType.disposition, 'HOLD');
+  assert.strictEqual(wrongType.action_authorized, false);
+  assert(Array.isArray(wrongType.errors) && wrongType.errors.length > 0);
+  assert.strictEqual(scope.getResource('process-A').state, 'HOLD');
+  assert.strictEqual(scope.getResource('process-A').identity, null);
+
+  const validProcessTracker = makeTracker();
+  const validProcessScope = validProcessTracker.openRootScope({ scopeId: 'root', purpose: 'test' });
+  validProcessScope.register(resource('process-A', 'process_tree'));
+  assert.strictEqual(validProcessScope.bind('process-A', {
     identity: windowsProcess(), generation: 2, evidenceRefs: ['process-observed'],
   }).state, 'ACTIVE');
 
@@ -228,6 +290,88 @@ test('tracker routes v2 identities by resource type while retaining v1 compatibi
   }).state, 'ACTIVE');
 });
 
+test('tracker binds harness task identity and holds every ambiguous v2 path without legacy fallback', () => {
+  for (const [label, overrides] of [
+    ['owner', { owner_id: 'other-root' }],
+    ['run', { run_id: 'other-run' }],
+    ['lease generation', { lease_generation: 3 }],
+    ['adapter generation', { adapter_generation: 3 }],
+  ]) {
+    const tracker = makeTracker();
+    const scope = tracker.openRootScope({ scopeId: `root-${label.replace(/\s/g, '-')}`, purpose: 'binding' });
+    scope.register(resource(`agent-${label}`, 'agent_session'));
+    const held = scope.bind(`agent-${label}`, {
+      identity: harnessSession('agent_session', overrides), generation: 2, evidenceRefs: [`binding-${label}`],
+    });
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    assert.strictEqual(held.action_authorized, false, label);
+    assert.strictEqual(scope.getResource(`agent-${label}`).state, 'HOLD', label);
+  }
+
+  for (const [label, identity] of [
+    ['malformed schema', { ...windowsProcess(), schema: 'ProcessIdentity3' }],
+    ['wrong schema', { ...windowsProcess(), schema: 'HarnessSessionIdentity2' }],
+    ['mixed legacy v2', { ...windowsProcess(), native_handle: 'legacy-handle' }],
+  ]) {
+    const tracker = makeTracker();
+    const scope = tracker.openRootScope({ scopeId: `root-${label.replace(/\s/g, '-')}`, purpose: 'routing' });
+    scope.register(resource(`process-${label}`, 'process_tree'));
+    const held = scope.bind(`process-${label}`, {
+      identity, generation: 2, evidenceRefs: [`routing-${label}`],
+    });
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    assert.strictEqual(held.action_authorized, false, label);
+    assert.strictEqual(scope.getResource(`process-${label}`).state, 'HOLD', label);
+  }
+
+  const legacyTracker = makeTracker();
+  const legacyScope = legacyTracker.openRootScope({ scopeId: 'legacy-invalid', purpose: 'legacy behavior' });
+  legacyScope.register(resource('legacy-invalid', 'process_tree'));
+  assert.throws(
+    () => legacyScope.bind('legacy-invalid', {
+      identity: { pid: 1 }, generation: 2, evidenceRefs: ['legacy-invalid'],
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'PROCESS_IDENTITY_INVALID',
+  );
+});
+
+test('tracker detects generation, nonce, and confirmed parent identity drift', () => {
+  const processTracker = makeTracker();
+  const processScope = processTracker.openRootScope({ scopeId: 'process-drift', purpose: 'drift' });
+  processScope.register(resource('process-drift', 'process_tree'));
+  processScope.bind('process-drift', { identity: windowsProcess(), generation: 2, evidenceRefs: ['process-bind'] });
+  assert.throws(
+    () => processScope.bind('process-drift', {
+      identity: windowsProcess({ adapter_generation: 3 }), generation: 2, evidenceRefs: ['generation-drift'],
+    }),
+    /RESOURCE_IDENTITY_DRIFT/,
+  );
+
+  const nonceTracker = makeTracker();
+  const nonceScope = nonceTracker.openRootScope({ scopeId: 'nonce-drift', purpose: 'drift' });
+  nonceScope.register(resource('nonce-drift', 'agent_session'));
+  nonceScope.bind('nonce-drift', { identity: harnessSession(), generation: 2, evidenceRefs: ['nonce-bind'] });
+  assert.throws(
+    () => nonceScope.bind('nonce-drift', {
+      identity: harnessSession('agent_session', { launch_nonce: 'changed-nonce' }), generation: 2, evidenceRefs: ['nonce-drift'],
+    }),
+    /RESOURCE_IDENTITY_DRIFT/,
+  );
+
+  const parentTracker = makeTracker();
+  const parentScope = parentTracker.openRootScope({ scopeId: 'parent-drift', purpose: 'drift' });
+  parentScope.register(resource('parent-drift', 'temporary_allocation'));
+  parentScope.bind('parent-drift', { identity: temporaryAllocation(), generation: 2, evidenceRefs: ['parent-bind'] });
+  const changedParent = temporaryAllocation();
+  changedParent.confirmed_parent_directory.linux_file_identity.inode += 1;
+  assert.throws(
+    () => parentScope.bind('parent-drift', {
+      identity: changedParent, generation: 2, evidenceRefs: ['parent-drift'],
+    }),
+    /RESOURCE_IDENTITY_DRIFT/,
+  );
+});
+
 test('recovery records reject prompt, reply, command output, and credential material', () => {
   const valid = {
     schema: 'RecoveryRecord2',
@@ -238,9 +382,15 @@ test('recovery records reject prompt, reply, command output, and credential mate
     session_id: 'session-A',
     lease_generation: 2,
     identity: windowsProcess(),
-    cleanup_authority_ref: 'cleanup-authority-A',
-    teardown_condition: 'identity-bound absence verified',
-    evidence_refs: ['host-observation-A'],
+    current_phase: { phase: 'cleanup', state: 'ACTIVE' },
+    last_valid_observation: {
+      observed_at: '2026-08-30T01:30:00Z',
+      observation_ref: opaqueRef('observation', 'host-observation-A'),
+      identity_ref: opaqueRef('identity', 'process-A'),
+    },
+    cleanup_authority_ref: opaqueRef('authority', 'cleanup-authority-A'),
+    teardown_condition: 'identity_absence_verified',
+    evidence_refs: [opaqueRef('evidence', 'host-observation-A')],
   };
   assert.strictEqual(contracts.validateRecoveryRecord2(valid).valid, true);
 
@@ -261,8 +411,64 @@ test('recovery records reject prompt, reply, command output, and credential mate
   }
   const sensitiveValue = clone(valid);
   sensitiveValue.evidence_refs = ['access_token=do-not-store'];
-  assert(contracts.validateRecoveryRecord2(sensitiveValue).errors
-    .some((error) => error.code === 'RECOVERY_SENSITIVE_CONTENT'));
+  assert.strictEqual(contracts.validateRecoveryRecord2(sensitiveValue).valid, false);
+
+  for (const nakedSecret of [
+    'sk-proj-1234567890abcdef',
+    'ghp_1234567890abcdefghijklmnop',
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature',
+    'bareCredentialValue123456',
+  ]) {
+    const exposed = clone(valid);
+    exposed.evidence_refs = [nakedSecret];
+    assert.strictEqual(contracts.validateRecoveryRecord2(exposed).valid, false, nakedSecret);
+  }
+});
+
+test('recovery records bind phase, observation, resource type, and outer task identity', () => {
+  const identities = [
+    ['process_tree', windowsProcess()],
+    ['command_session', windowsProcess()],
+    ['agent_session', harnessSession('agent_session')],
+    ['runtime_thread', harnessSession('runtime_thread')],
+    ['temporary_allocation', temporaryAllocation()],
+  ];
+  const base = {
+    schema: 'RecoveryRecord2', schema_version: 2, resource_id: 'resource-A', resource_type: 'process_tree',
+    run_id: 'run-A', session_id: 'session-A', lease_generation: 2, identity: windowsProcess(),
+    current_phase: { phase: 'cleanup', state: 'ACTIVE' },
+    last_valid_observation: {
+      observed_at: '2026-08-30T01:30:00Z', observation_ref: opaqueRef('observation', 'obs-A'),
+      identity_ref: opaqueRef('identity', 'identity-A'),
+    },
+    cleanup_authority_ref: opaqueRef('authority', 'authority-A'),
+    teardown_condition: 'identity_absence_verified', evidence_refs: [opaqueRef('evidence', 'evidence-A')],
+  };
+  for (const [resourceType, identity] of identities) {
+    const record = {
+      ...clone(base),
+      resource_type: resourceType,
+      run_id: identity.run_id,
+      session_id: identity.session_id,
+      lease_generation: identity.lease_generation,
+      identity: clone(identity),
+    };
+    assert.strictEqual(contracts.validateRecoveryRecord2(record).valid, true, resourceType);
+    const wrongType = { ...clone(record), resource_type: resourceType === 'agent_session' ? 'process_tree' : 'agent_session' };
+    assert.strictEqual(contracts.validateRecoveryRecord2(wrongType).valid, false, `${resourceType} cross type`);
+    for (const field of ['run_id', 'session_id', 'lease_generation']) {
+      const mismatch = clone(record);
+      mismatch[field] = field === 'lease_generation' ? 3 : `other-${field}`;
+      const result = contracts.validateRecoveryRecord2(mismatch);
+      assert.strictEqual(result.valid, false, `${resourceType} ${field}`);
+      assert(result.errors.some((error) => error.code === 'RECOVERY_IDENTITY_BINDING_MISMATCH'));
+    }
+  }
+  for (const field of ['current_phase', 'last_valid_observation']) {
+    const missing = clone(base);
+    delete missing[field];
+    assert.strictEqual(contracts.validateRecoveryRecord2(missing).valid, false, field);
+  }
 });
 
 test('support matrices cannot turn skipped or not-run claims into full support', () => {
@@ -303,6 +509,83 @@ test('support matrices cannot turn skipped or not-run claims into full support',
   assert.strictEqual(incompleteResult.valid, false);
   assert.strictEqual(incompleteResult.disposition, 'HOLD');
   assert.strictEqual(incompleteResult.action_authorized, false);
+
+  const emptyFullEvidence = clone(full);
+  emptyFullEvidence.claims[0].evidence_refs = [];
+  const emptyFullResult = contracts.validateSupportMatrix2(emptyFullEvidence);
+  assert.strictEqual(emptyFullResult.valid, false);
+  assert.strictEqual(emptyFullResult.effective_state, 'UNVERIFIED');
+
+  const notRunEvidence = clone(skipped);
+  notRunEvidence.claims[0].evidence_refs = ['test-ran'];
+  const notRunEvidenceResult = contracts.validateSupportMatrix2(notRunEvidence);
+  assert.strictEqual(notRunEvidenceResult.valid, false);
+  assert.strictEqual(notRunEvidenceResult.effective_state, 'UNVERIFIED');
+
+  const duplicate = clone(full);
+  duplicate.claims.push(clone(duplicate.claims[0]));
+  const duplicateResult = contracts.validateSupportMatrix2(duplicate);
+  assert.strictEqual(duplicateResult.valid, false);
+  assert.strictEqual(duplicateResult.effective_state, 'UNVERIFIED');
+});
+
+test('schema contracts encode the same critical identity, recovery, and support rules', () => {
+  const processSchema = loadSchema('ProcessIdentity2.schema.json');
+  for (const field of ['owner_id', 'run_id', 'session_id', 'lease_generation', 'adapter_generation', 'manager_generation']) {
+    assert(processSchema.$defs.common.required.includes(field), field);
+  }
+  const harnessSchema = loadSchema('HarnessSessionIdentity2.schema.json');
+  for (const field of ['launch_nonce', 'adapter_generation']) assert(harnessSchema.required.includes(field), field);
+  assert(Array.isArray(harnessSchema.oneOf) && harnessSchema.oneOf.length === 2);
+  const temporarySchema = loadSchema('TemporaryAllocationIdentity2.schema.json');
+  for (const field of ['task_directory', 'confirmed_parent_directory', 'quota', 'creation_nonce']) {
+    assert(temporarySchema.$defs.common.required.includes(field), field);
+  }
+  const recoverySchema = loadSchema('RecoveryRecord2.schema.json');
+  assert(recoverySchema.required.includes('current_phase'));
+  assert(recoverySchema.required.includes('last_valid_observation'));
+  assert(Array.isArray(recoverySchema.allOf) && recoverySchema.allOf.length === 5);
+  const supportSchema = loadSchema('SupportMatrix2.schema.json');
+  assert(Array.isArray(supportSchema.allOf) && supportSchema.allOf.length >= 2);
+  assert.strictEqual(supportSchema.properties.claims['x-uniqueBy'], 'capability_id');
+});
+
+test('version-2 factories own schema fields and reject legacy identity input', () => {
+  const processFields = windowsProcess();
+  delete processFields.schema;
+  delete processFields.schema_version;
+  const createdProcess = contracts.createResourceIdentity2('process_tree', processFields);
+  assert.strictEqual(createdProcess.schema, 'ProcessIdentity2');
+  assert.strictEqual(createdProcess.schema_version, 2);
+  assert(Object.isFrozen(createdProcess));
+
+  const harnessFields = harnessSession();
+  delete harnessFields.schema;
+  delete harnessFields.schema_version;
+  delete harnessFields.harness_kind;
+  assert.strictEqual(contracts.createResourceIdentity2('agent_session', harnessFields).schema_version, 2);
+
+  const recoveryFields = {
+    resource_id: 'process-A', resource_type: 'process_tree', run_id: 'run-A', session_id: 'session-A',
+    lease_generation: 2, identity: createdProcess, current_phase: { phase: 'cleanup', state: 'ACTIVE' },
+    last_valid_observation: {
+      observed_at: '2026-08-30T01:30:00Z', observation_ref: opaqueRef('observation', 'factory-observation'),
+      identity_ref: opaqueRef('identity', 'factory-identity'),
+    },
+    cleanup_authority_ref: opaqueRef('authority', 'factory-authority'),
+    teardown_condition: 'identity_absence_verified', evidence_refs: [opaqueRef('evidence', 'factory-evidence')],
+  };
+  assert.strictEqual(contracts.createRecoveryRecord2(recoveryFields).schema_version, 2);
+  assert.throws(() => contracts.createResourceIdentity2('process_tree', {
+    pid: 1, native_handle: 'legacy', start_time: '2026-08-30T01:00:00Z',
+    exe_path_hash: hash('legacy'), argv_hash: hash('legacy'), parent_identity_hash: hash('legacy'),
+    nonce: 'legacy', native_process_manager_run_id: 'legacy',
+  }), /IDENTITY_V2_BUILD_REJECTED/);
+  assert.throws(() => contracts.createRecoveryRecord2({ ...recoveryFields, identity: {
+    pid: 1, native_handle: 'legacy', start_time: '2026-08-30T01:00:00Z',
+    exe_path_hash: hash('legacy'), argv_hash: hash('legacy'), parent_identity_hash: hash('legacy'),
+    nonce: 'legacy', native_process_manager_run_id: 'legacy',
+  } }), /RECOVERY_V2_BUILD_REJECTED/);
 });
 
 let failed = 0;

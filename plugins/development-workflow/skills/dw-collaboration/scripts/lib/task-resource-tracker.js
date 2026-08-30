@@ -13,9 +13,7 @@ const {
   validateProcessIdentity,
 } = require('./state-machines');
 const {
-  validateHarnessSessionIdentity2,
-  validateProcessIdentity2,
-  validateTemporaryAllocationIdentity2,
+  validateResourceIdentity2,
 } = require('./identity-support-v2');
 
 const PROCESS_V2_RESOURCE_TYPES = new Set([
@@ -25,6 +23,43 @@ const PROCESS_V2_RESOURCE_TYPES = new Set([
 const HARNESS_RESOURCE_TYPES = new Set([
   'agent_session',
   'runtime_thread',
+]);
+const LEGACY_PROCESS_IDENTITY_KEYS = new Set([
+  'pid',
+  'native_handle',
+  'start_time',
+  'exe_path_hash',
+  'argv_hash',
+  'parent_identity_hash',
+  'nonce',
+  'native_process_manager_run_id',
+  'confidence',
+]);
+const LEGACY_PROCESS_REQUIRED_KEYS = [
+  'pid',
+  'native_handle',
+  'start_time',
+  'exe_path_hash',
+  'argv_hash',
+  'parent_identity_hash',
+  'nonce',
+  'native_process_manager_run_id',
+];
+const V2_EXCLUSIVE_KEYS = new Set([
+  'schema',
+  'schema_version',
+  'platform',
+  'adapter_generation',
+  'manager_generation',
+  'launch_nonce',
+  'harness_kind',
+  'harness_instance_id',
+  'agent_id',
+  'thread_id',
+  'allocation_id',
+  'task_directory',
+  'confirmed_parent_directory',
+  'creation_nonce',
 ]);
 
 const PROCESS_RESOURCE_TYPES = new Set([
@@ -173,6 +208,30 @@ function validateTemporaryIdentity(identity) {
     && SHA256.test(identity.manifest_sha256 || '')
     && identity.canonical_root_identity && typeof identity.canonical_root_identity === 'object'
     && typeof identity.child_id === 'string' && identity.child_id !== '';
+}
+
+function hasV2IdentityIntent(identity) {
+  return identity && typeof identity === 'object' && !Array.isArray(identity)
+    && Object.keys(identity).some((key) => V2_EXCLUSIVE_KEYS.has(key));
+}
+
+function isStrictLegacyProcessIdentity(identity) {
+  return identity && typeof identity === 'object' && !Array.isArray(identity)
+    && LEGACY_PROCESS_REQUIRED_KEYS.every((key) => hasOwn(identity, key))
+    && Object.keys(identity).every((key) => LEGACY_PROCESS_IDENTITY_KEYS.has(key));
+}
+
+function trackerIdentityError(code, path, message) {
+  return { code, path, message };
+}
+
+function structuredIdentityHold(errors, disposition = 'HOLD') {
+  return detached({
+    valid: false,
+    disposition,
+    action_authorized: false,
+    errors,
+  });
 }
 
 const TRACKER_SCOPE_OPERATIONS = new WeakMap();
@@ -530,7 +589,6 @@ class TaskResourceTracker {
     this.#requireScopeMutable(scopeId);
     const generation = requireGeneration(observation.generation);
     const identity = detached(observation.identity);
-    this.#validateIdentity(record, identity, generation);
     const evidenceRefs = requireEvidenceRefs(observation.evidenceRefs);
     const signature = detached({
       resourceId,
@@ -546,8 +604,9 @@ class TaskResourceTracker {
       if (sameValue(record.bindSignature, signature)) return cloneRecord(record);
       this.#markIdentityDrift(record, 'BINDING_CHANGED');
     }
-    if (generation !== this.generation || record.generation !== this.generation) {
-      this.#markIdentityDrift(record, 'GENERATION_CHANGED');
+    const identityValidation = this.#validateIdentity(record, identity, generation);
+    if (identityValidation !== null && !identityValidation.valid) {
+      return this.#holdInvalidV2Identity(record, scopeId, identityValidation, evidenceRefs);
     }
     const eventPayload = { scopeId, resourceId, observation: { identity, generation, evidenceRefs } };
     this.#assertInputSize(eventPayload);
@@ -570,36 +629,93 @@ class TaskResourceTracker {
   }
 
   #validateIdentity(record, identity, generation) {
-    if (HARNESS_RESOURCE_TYPES.has(record.type)
-      && identity && identity.schema === 'HarnessSessionIdentity2') {
-      const validation = validateHarnessSessionIdentity2(identity);
-      if (!validation.valid || identity.harness_kind !== record.type) {
-        throw new ResourceTrackerError('HARNESS_IDENTITY_INVALID');
-      }
-    } else if (PROCESS_V2_RESOURCE_TYPES.has(record.type)
-      && identity && identity.schema === 'ProcessIdentity2') {
-      const validation = validateProcessIdentity2(identity);
-      if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
-    } else if (PROCESS_RESOURCE_TYPES.has(record.type)) {
-      const validation = validateProcessIdentity(identity);
-      if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
-    }
     if (!identity || typeof identity !== 'object' || Array.isArray(identity)
       || Object.keys(identity).length === 0) {
+      if (PROCESS_RESOURCE_TYPES.has(record.type)) {
+        throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
+      }
       throw new ResourceTrackerError('RESOURCE_IDENTITY_INVALID');
+    }
+    if (hasV2IdentityIntent(identity)) {
+      const validation = validateResourceIdentity2(record.type, identity);
+      const errors = validation.errors.map((item) => ({
+        code: item.code,
+        path: item.path,
+        message: item.message,
+      }));
+      if (generation !== this.generation || record.generation !== this.generation) {
+        errors.push(trackerIdentityError('TRACKER_GENERATION_MISMATCH', '$.generation', 'bind generation must match tracker generation'));
+      }
+      if (validation.valid && (HARNESS_RESOURCE_TYPES.has(record.type) || PROCESS_V2_RESOURCE_TYPES.has(record.type))) {
+        if (identity.owner_id !== record.ownerId) {
+          errors.push(trackerIdentityError('TRACKER_OWNER_MISMATCH', '$.owner_id', 'identity owner must match resource owner'));
+        }
+        if (identity.run_id !== this.runId) {
+          errors.push(trackerIdentityError('TRACKER_RUN_MISMATCH', '$.run_id', 'identity run must match tracker run'));
+        }
+        if (identity.lease_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_LEASE_GENERATION_MISMATCH', '$.lease_generation', 'identity lease generation must match bind generation'));
+        }
+        if (identity.adapter_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_ADAPTER_GENERATION_MISMATCH', '$.adapter_generation', 'adapter generation must match bind generation'));
+        }
+      }
+      if (validation.valid && record.type === 'temporary_allocation') {
+        if (identity.owner_id !== record.ownerId) {
+          errors.push(trackerIdentityError('TRACKER_OWNER_MISMATCH', '$.owner_id', 'identity owner must match resource owner'));
+        }
+        if (identity.run_id !== this.runId) {
+          errors.push(trackerIdentityError('TRACKER_RUN_MISMATCH', '$.run_id', 'identity run must match tracker run'));
+        }
+        if (identity.lease_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_LEASE_GENERATION_MISMATCH', '$.lease_generation', 'identity lease generation must match bind generation'));
+        }
+      }
+      return errors.length === 0 ? validation : structuredIdentityHold(errors);
+    }
+    if (PROCESS_RESOURCE_TYPES.has(record.type)) {
+      const validation = isStrictLegacyProcessIdentity(identity)
+        ? validateProcessIdentity(identity)
+        : { valid: false };
+      if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
     }
     if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
     if (record.type === 'temporary_allocation') {
-      const validTemporary = identity.schema === 'TemporaryAllocationIdentity2'
-        ? validateTemporaryAllocationIdentity2(identity).valid
-        : validateTemporaryIdentity(identity);
-      if (!validTemporary
+      if (!validateTemporaryIdentity(identity)
         || identity.owner_id !== record.ownerId
         || identity.run_id !== this.runId
         || identity.lease_generation !== generation) {
         throw new ResourceTrackerError('TEMPORARY_IDENTITY_INVALID');
       }
     }
+    return null;
+  }
+
+  #holdInvalidV2Identity(record, scopeId, validation, evidenceRefs) {
+    const decision = detached(validation);
+    const eventPayload = {
+      scopeId,
+      resourceId: record.resourceId,
+      reason: 'V2_IDENTITY_VALIDATION_FAILED',
+      decision,
+      evidenceRefs,
+    };
+    this.#assertInputSize(eventPayload);
+    this.#requireHistoryCapacity([{ kind: 'RESOURCE_HELD', payload: eventPayload }]);
+    const checkpoint = this.#checkpoint();
+    try {
+      record.state = 'HOLD';
+      record.releaseConfirmed = false;
+      record.decision = decision;
+      record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...evidenceRefs]));
+      this.#touch();
+      this.#assertStateWithinLimit();
+      this.#record('RESOURCE_HELD', eventPayload);
+    } catch (error) {
+      this.#restoreCheckpoint(checkpoint);
+      throw error;
+    }
+    return decision;
   }
 
   #observe(scopeId, resourceId, observation) {
@@ -1138,6 +1254,10 @@ class TaskResourceTracker {
         const record = this.#requireOwnedResource(payload.scopeId, payload.resourceId);
         record.state = 'HOLD';
         record.releaseConfirmed = false;
+        if (payload.decision !== undefined) record.decision = detached(payload.decision);
+        if (Array.isArray(payload.evidenceRefs)) {
+          record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...payload.evidenceRefs]));
+        }
         this.#touch();
         break;
       }

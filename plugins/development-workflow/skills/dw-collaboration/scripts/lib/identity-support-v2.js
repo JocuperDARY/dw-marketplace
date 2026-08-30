@@ -10,6 +10,8 @@ const SUPPORT_STATES2 = Object.freeze([
 
 const SUPPORT_STATE_SET = new Set(SUPPORT_STATES2);
 const SHA256 = /^[0-9a-f]{64}$/;
+const OPAQUE_REF = /^(authority|evidence|observation|identity):[0-9a-f]{64}$/;
+const SECRET_TOKEN = /(?:sk-(?:proj-)?[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|bareCredentialValue[A-Za-z0-9_-]*)/;
 const UTC_TIMESTAMP = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.(\d+))?Z$/;
 const SENSITIVE_KEY = /(?:^|_)(?:user_?prompt|model_?(?:reply|response)|command_?output|stdout|stderr|api_?key|access_?token|credential|secret|password)(?:$|_)/i;
 const SENSITIVE_VALUE = /(?:^|[\s,;:{[(])(?:api[_-]?key|access[_-]?token|credential|secret|password|bearer)(?:\s|=|:|$)/i;
@@ -18,6 +20,12 @@ const PROCESS_BASE_KEYS = Object.freeze([
   'schema',
   'schema_version',
   'platform',
+  'owner_id',
+  'run_id',
+  'session_id',
+  'lease_generation',
+  'adapter_generation',
+  'manager_generation',
   'pid',
   'start_time',
   'executable_path_sha256',
@@ -34,7 +42,11 @@ const HARNESS_KEYS = Object.freeze([
   'owner_id',
   'run_id',
   'lease_generation',
+  'adapter_generation',
   'harness_instance_id',
+  'launch_nonce',
+  'agent_id',
+  'thread_id',
   'process_identity',
 ]);
 const TEMPORARY_BASE_KEYS = Object.freeze([
@@ -49,6 +61,10 @@ const TEMPORARY_BASE_KEYS = Object.freeze([
   'child_id',
   'manifest_sha256',
   'canonical_root',
+  'task_directory',
+  'confirmed_parent_directory',
+  'quota',
+  'creation_nonce',
 ]);
 const RECOVERY_KEYS = Object.freeze([
   'schema',
@@ -59,6 +75,8 @@ const RECOVERY_KEYS = Object.freeze([
   'session_id',
   'lease_generation',
   'identity',
+  'current_phase',
+  'last_valid_observation',
   'cleanup_authority_ref',
   'teardown_condition',
   'evidence_refs',
@@ -73,6 +91,18 @@ const SUPPORT_MATRIX_KEYS = Object.freeze([
   'claims',
 ]);
 const SUPPORT_CLAIM_KEYS = Object.freeze(['capability_id', 'state', 'evidence_refs']);
+const RECOVERY_PHASES = new Set(['execution', 'cleanup']);
+const RECOVERY_PHASE_STATES = new Set(['ACTIVE', 'HOLD', 'COMPLETE']);
+const TEARDOWN_CONDITIONS = new Set(['identity_absence_verified', 'harness_closed', 'allocation_absence_verified']);
+
+class IdentitySupportV2Error extends Error {
+  constructor(code, validation) {
+    super(code);
+    this.name = 'IdentitySupportV2Error';
+    this.code = code;
+    this.validation = validation;
+  }
+}
 
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -106,6 +136,14 @@ function result(errors, extras = {}) {
     errors: Object.freeze(errors),
     ...extras,
   });
+}
+
+function cloneAndFreeze(value) {
+  if (Array.isArray(value)) return Object.freeze(value.map((item) => cloneAndFreeze(item)));
+  if (!isPlainObject(value)) return value;
+  return Object.freeze(Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, cloneAndFreeze(item)]),
+  ));
 }
 
 function requireExactKeys(value, allowedKeys, requiredKeys, errors, path = '$') {
@@ -149,6 +187,51 @@ function requireHashes(value, fields, errors) {
   }
 }
 
+function requirePositiveIntegers(value, fields, errors) {
+  for (const field of fields) {
+    if (!isPositiveInteger(value[field])) {
+      errors.push(error('IDENTITY_GENERATION_INVALID', `$.${field}`, 'field must be a positive safe integer'));
+    }
+  }
+}
+
+function validateOpaqueReference(value, kind, path, errors) {
+  const match = typeof value === 'string' ? OPAQUE_REF.exec(value) : null;
+  if (!match || match[1] !== kind) {
+    errors.push(error('RECOVERY_REFERENCE_INVALID', path, `reference must use ${kind}:<sha256>`));
+  }
+}
+
+function validatePlatformFileIdentity(container, platform, path, errors) {
+  if (!isPlainObject(container)) {
+    errors.push(error('TEMPORARY_DIRECTORY_INVALID', path, 'directory identity must be an object'));
+    return;
+  }
+  const platformKey = platform === 'windows' ? 'windows_file_identity' : 'linux_file_identity';
+  const otherKey = platform === 'windows' ? 'linux_file_identity' : 'windows_file_identity';
+  if (!requireExactKeys(container, ['path', platformKey], ['path', platformKey], errors, path)) return;
+  if (!isNonEmptyString(container.path)) {
+    errors.push(error('TEMPORARY_DIRECTORY_PATH_INVALID', `${path}.path`, 'directory path must be non-empty'));
+  }
+  if (Object.hasOwn(container, otherKey)) {
+    errors.push(error('TEMPORARY_PLATFORM_MIXED', `${path}.${otherKey}`, 'directory identity mixes platforms'));
+  }
+  const nativeIdentity = container[platformKey];
+  if (platform === 'windows') {
+    if (requireExactKeys(nativeIdentity, ['volume_serial_number', 'file_id'], ['volume_serial_number', 'file_id'], errors, `${path}.${platformKey}`)) {
+      if (!isNonEmptyString(nativeIdentity.volume_serial_number) || !isNonEmptyString(nativeIdentity.file_id)) {
+        errors.push(error('TEMPORARY_PLATFORM_FIELD_INVALID', `${path}.${platformKey}`, 'Windows file identity fields must be non-empty'));
+      }
+    }
+  } else if (platform === 'linux') {
+    if (requireExactKeys(nativeIdentity, ['device_id', 'inode'], ['device_id', 'inode'], errors, `${path}.${platformKey}`)) {
+      if (!isNonEmptyString(nativeIdentity.device_id) || !isPositiveInteger(nativeIdentity.inode)) {
+        errors.push(error('TEMPORARY_PLATFORM_FIELD_INVALID', `${path}.${platformKey}`, 'Linux file identity fields are invalid'));
+      }
+    }
+  }
+}
+
 function validateProcessIdentity2(identity) {
   const errors = [];
   const allowed = [...PROCESS_BASE_KEYS, 'windows_identity', 'linux_identity'];
@@ -159,7 +242,8 @@ function validateProcessIdentity2(identity) {
   }
   if (!isPositiveInteger(identity.pid)) errors.push(error('PROCESS_PID_INVALID', '$.pid', 'pid must be a positive safe integer'));
   if (!isTimestamp(identity.start_time)) errors.push(error('PROCESS_START_TIME_INVALID', '$.start_time', 'start_time must be a UTC timestamp'));
-  requireStrings(identity, ['launch_nonce', 'manager_run_id'], errors);
+  requireStrings(identity, ['owner_id', 'run_id', 'session_id', 'launch_nonce', 'manager_run_id'], errors);
+  requirePositiveIntegers(identity, ['lease_generation', 'adapter_generation', 'manager_generation'], errors);
   requireHashes(identity, ['executable_path_sha256', 'argv_sha256', 'parent_identity_sha256'], errors);
 
   if (identity.platform === 'windows') {
@@ -199,20 +283,33 @@ function validateProcessIdentity2(identity) {
 
 function validateHarnessSessionIdentity2(identity) {
   const errors = [];
-  const required = HARNESS_KEYS.filter((key) => key !== 'process_identity');
+  const required = HARNESS_KEYS.filter((key) => !['process_identity', 'agent_id', 'thread_id'].includes(key));
   if (!requireExactKeys(identity, HARNESS_KEYS, required, errors)) return result(errors);
   requireSchema(identity, 'HarnessSessionIdentity2', errors);
   if (!['agent_session', 'runtime_thread'].includes(identity.harness_kind)) {
     errors.push(error('HARNESS_KIND_INVALID', '$.harness_kind', 'unsupported harness kind'));
   }
-  requireStrings(identity, ['session_id', 'owner_id', 'run_id', 'harness_instance_id'], errors);
-  if (!isPositiveInteger(identity.lease_generation)) {
-    errors.push(error('HARNESS_GENERATION_INVALID', '$.lease_generation', 'lease generation must be positive'));
+  requireStrings(identity, ['session_id', 'owner_id', 'run_id', 'harness_instance_id', 'launch_nonce'], errors);
+  requirePositiveIntegers(identity, ['lease_generation', 'adapter_generation'], errors);
+  if (identity.harness_kind === 'agent_session') {
+    if (!isNonEmptyString(identity.agent_id)) errors.push(error('HARNESS_AGENT_ID_REQUIRED', '$.agent_id', 'agent session requires agent_id'));
+    if (Object.hasOwn(identity, 'thread_id')) errors.push(error('HARNESS_IDENTITY_MIXED', '$.thread_id', 'agent session cannot carry thread_id'));
+  }
+  if (identity.harness_kind === 'runtime_thread') {
+    if (!isNonEmptyString(identity.thread_id)) errors.push(error('HARNESS_THREAD_ID_REQUIRED', '$.thread_id', 'runtime thread requires thread_id'));
+    if (Object.hasOwn(identity, 'agent_id')) errors.push(error('HARNESS_IDENTITY_MIXED', '$.agent_id', 'runtime thread cannot carry agent_id'));
   }
   if (Object.hasOwn(identity, 'process_identity')) {
     const processResult = validateProcessIdentity2(identity.process_identity);
     for (const processError of processResult.errors) {
       errors.push(error(processError.code, `$.process_identity${processError.path.slice(1)}`, processError.message));
+    }
+    if (processResult.valid) {
+      for (const field of ['owner_id', 'run_id', 'session_id', 'lease_generation', 'adapter_generation']) {
+        if (identity.process_identity[field] !== identity[field]) {
+          errors.push(error('HARNESS_PROCESS_BINDING_MISMATCH', `$.process_identity.${field}`, `process ${field} must match harness`));
+        }
+      }
     }
   }
   return result(errors);
@@ -227,9 +324,17 @@ function validateTemporaryAllocationIdentity2(identity) {
     errors.push(error('TEMPORARY_PLATFORM_INVALID', '$.platform', 'platform must be windows or linux'));
   }
   requireStrings(identity, ['allocation_id', 'owner_id', 'run_id', 'session_id', 'child_id', 'canonical_root'], errors);
+  requireStrings(identity, ['creation_nonce'], errors);
   requireHashes(identity, ['manifest_sha256'], errors);
   if (!isPositiveInteger(identity.lease_generation)) {
     errors.push(error('TEMPORARY_GENERATION_INVALID', '$.lease_generation', 'lease generation must be positive'));
+  }
+  validatePlatformFileIdentity(identity.task_directory, identity.platform, '$.task_directory', errors);
+  validatePlatformFileIdentity(identity.confirmed_parent_directory, identity.platform, '$.confirmed_parent_directory', errors);
+  if (!isPlainObject(identity.quota)
+    || !requireExactKeys(identity.quota, ['unit', 'limit'], ['unit', 'limit'], errors, '$.quota')
+    || identity.quota.unit !== 'bytes' || !isPositiveInteger(identity.quota.limit)) {
+    errors.push(error('TEMPORARY_QUOTA_INVALID', '$.quota', 'quota must be a positive byte limit'));
   }
 
   if (identity.platform === 'windows') {
@@ -290,7 +395,7 @@ function findSensitiveContent(value, path = '$', matches = []) {
     }
     return matches;
   }
-  if (typeof value === 'string' && SENSITIVE_VALUE.test(value)) matches.push(path);
+  if (typeof value === 'string' && (SENSITIVE_VALUE.test(value) || SECRET_TOKEN.test(value))) matches.push(path);
   return matches;
 }
 
@@ -310,7 +415,7 @@ function validateRecoveryRecord2(record) {
   if (!requireExactKeys(record, RECOVERY_KEYS, RECOVERY_KEYS, errors)) return result(errors);
   requireSchema(record, 'RecoveryRecord2', errors);
   requireStrings(record, [
-    'resource_id', 'resource_type', 'run_id', 'session_id', 'cleanup_authority_ref', 'teardown_condition',
+    'resource_id', 'resource_type', 'run_id', 'session_id',
   ], errors);
   if (!isPositiveInteger(record.lease_generation)) {
     errors.push(error('RECOVERY_GENERATION_INVALID', '$.lease_generation', 'lease generation must be positive'));
@@ -319,7 +424,39 @@ function validateRecoveryRecord2(record) {
   for (const identityError of identityResult.errors) {
     errors.push(error(identityError.code, `$.identity${identityError.path.slice(1)}`, identityError.message));
   }
+  if (identityResult.valid) {
+    for (const field of ['run_id', 'session_id', 'lease_generation']) {
+      if (record[field] !== record.identity[field]) {
+        errors.push(error('RECOVERY_IDENTITY_BINDING_MISMATCH', `$.${field}`, `outer ${field} must match identity`));
+      }
+    }
+  }
+  if (!isPlainObject(record.current_phase)
+    || !requireExactKeys(record.current_phase, ['phase', 'state'], ['phase', 'state'], errors, '$.current_phase')
+    || !RECOVERY_PHASES.has(record.current_phase.phase)
+    || !RECOVERY_PHASE_STATES.has(record.current_phase.state)) {
+    errors.push(error('RECOVERY_PHASE_INVALID', '$.current_phase', 'current phase is invalid'));
+  }
+  if (!isPlainObject(record.last_valid_observation)
+    || !requireExactKeys(record.last_valid_observation,
+      ['observed_at', 'observation_ref', 'identity_ref'],
+      ['observed_at', 'observation_ref', 'identity_ref'], errors, '$.last_valid_observation')) {
+    errors.push(error('RECOVERY_OBSERVATION_INVALID', '$.last_valid_observation', 'last valid observation is invalid'));
+  } else {
+    if (!isTimestamp(record.last_valid_observation.observed_at)) {
+      errors.push(error('RECOVERY_OBSERVATION_INVALID', '$.last_valid_observation.observed_at', 'observation timestamp is invalid'));
+    }
+    validateOpaqueReference(record.last_valid_observation.observation_ref, 'observation', '$.last_valid_observation.observation_ref', errors);
+    validateOpaqueReference(record.last_valid_observation.identity_ref, 'identity', '$.last_valid_observation.identity_ref', errors);
+  }
+  validateOpaqueReference(record.cleanup_authority_ref, 'authority', '$.cleanup_authority_ref', errors);
+  if (!TEARDOWN_CONDITIONS.has(record.teardown_condition)) {
+    errors.push(error('RECOVERY_TEARDOWN_CONDITION_INVALID', '$.teardown_condition', 'teardown condition must be controlled'));
+  }
   validateStringArray(record.evidence_refs, '$.evidence_refs', errors);
+  if (Array.isArray(record.evidence_refs)) {
+    record.evidence_refs.forEach((ref, index) => validateOpaqueReference(ref, 'evidence', `$.evidence_refs[${index}]`, errors));
+  }
   return result(errors);
 }
 
@@ -355,6 +492,10 @@ function validateSupportMatrix2(matrix) {
         errors.push(error('SUPPORT_STATE_INVALID', `${path}.state`, 'support state is not controlled'));
       }
       validateStringArray(claim.evidence_refs, `${path}.evidence_refs`, errors, claim.state === 'NOT_RUN');
+      if (claim.state === 'VERIFIED_FULL'
+        && (!Array.isArray(claim.evidence_refs) || claim.evidence_refs.length === 0)) {
+        errors.push(error('SUPPORT_FULL_EVIDENCE_REQUIRED', `${path}.evidence_refs`, 'full claims require execution evidence'));
+      }
       if (claim.state === 'NOT_RUN'
         && Array.isArray(claim.evidence_refs)
         && claim.evidence_refs.length !== 0) {
@@ -364,22 +505,62 @@ function validateSupportMatrix2(matrix) {
   }
   if (matrix.overall_state === 'VERIFIED_FULL'
     && Array.isArray(matrix.claims)
-    && matrix.claims.some((claim) => claim.state !== 'VERIFIED_FULL')) {
+    && matrix.claims.some((claim) => !isPlainObject(claim) || claim.state !== 'VERIFIED_FULL'
+      || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length === 0)) {
     errors.push(error('SUPPORT_FULL_WITH_INCOMPLETE_CLAIM', '$.overall_state', 'full support requires every claim to be fully verified'));
   }
   if (matrix.overall_state === 'NOT_RUN'
     && Array.isArray(matrix.claims)
-    && matrix.claims.some((claim) => claim.state !== 'NOT_RUN')) {
+    && matrix.claims.some((claim) => !isPlainObject(claim) || claim.state !== 'NOT_RUN'
+      || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length !== 0)) {
     errors.push(error('SUPPORT_NOT_RUN_WITH_EXECUTED_CLAIM', '$.overall_state', 'NOT_RUN requires every claim to be NOT_RUN'));
   }
-  const effectiveState = errors.some((item) => item.code === 'SUPPORT_FULL_WITH_INCOMPLETE_CLAIM')
+  const effectiveState = errors.length > 0
     ? 'UNVERIFIED'
-    : (SUPPORT_STATE_SET.has(matrix.overall_state) ? matrix.overall_state : 'UNVERIFIED');
+    : matrix.overall_state;
   return result(errors, { effective_state: effectiveState });
 }
 
+function createResourceIdentity2(resourceType, fields) {
+  if (!isPlainObject(fields) || Object.hasOwn(fields, 'schema') || Object.hasOwn(fields, 'schema_version')) {
+    throw new IdentitySupportV2Error('IDENTITY_V2_BUILD_REJECTED', result([
+      error('IDENTITY_FACTORY_INPUT_INVALID', '$', 'factory owns schema fields'),
+    ]));
+  }
+  let identity;
+  if (resourceType === 'process_tree' || resourceType === 'command_session') {
+    identity = { schema: 'ProcessIdentity2', schema_version: 2, ...fields };
+  } else if (resourceType === 'agent_session' || resourceType === 'runtime_thread') {
+    identity = { schema: 'HarnessSessionIdentity2', schema_version: 2, harness_kind: resourceType, ...fields };
+  } else if (resourceType === 'temporary_allocation') {
+    identity = { schema: 'TemporaryAllocationIdentity2', schema_version: 2, ...fields };
+  } else {
+    throw new IdentitySupportV2Error('IDENTITY_V2_BUILD_REJECTED', result([
+      error('RESOURCE_IDENTITY_TYPE_UNSUPPORTED', '$.resource_type', 'resource type is unsupported'),
+    ]));
+  }
+  const validation = validateResourceIdentity2(resourceType, identity);
+  if (!validation.valid) throw new IdentitySupportV2Error('IDENTITY_V2_BUILD_REJECTED', validation);
+  return cloneAndFreeze(identity);
+}
+
+function createRecoveryRecord2(fields) {
+  if (!isPlainObject(fields) || Object.hasOwn(fields, 'schema') || Object.hasOwn(fields, 'schema_version')) {
+    throw new IdentitySupportV2Error('RECOVERY_V2_BUILD_REJECTED', result([
+      error('RECOVERY_FACTORY_INPUT_INVALID', '$', 'factory owns schema fields'),
+    ]));
+  }
+  const record = { schema: 'RecoveryRecord2', schema_version: 2, ...fields };
+  const validation = validateRecoveryRecord2(record);
+  if (!validation.valid) throw new IdentitySupportV2Error('RECOVERY_V2_BUILD_REJECTED', validation);
+  return cloneAndFreeze(record);
+}
+
 module.exports = {
+  IdentitySupportV2Error,
   SUPPORT_STATES2,
+  createRecoveryRecord2,
+  createResourceIdentity2,
   validateHarnessSessionIdentity2,
   validateProcessIdentity2,
   validateRecoveryRecord2,

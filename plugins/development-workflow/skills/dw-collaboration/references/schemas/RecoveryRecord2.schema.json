@@ -3,7 +3,7 @@
   "$id": "RecoveryRecord2.schema.json",
   "title": "RecoveryRecord2",
   "type": "object",
-  "required": ["schema", "schema_version", "resource_id", "resource_type", "run_id", "session_id", "lease_generation", "identity", "cleanup_authority_ref", "teardown_condition", "evidence_refs"],
+  "required": ["schema", "schema_version", "resource_id", "resource_type", "run_id", "session_id", "lease_generation", "identity", "current_phase", "last_valid_observation", "cleanup_authority_ref", "teardown_condition", "evidence_refs"],
   "properties": {
     "schema": { "const": "RecoveryRecord2" },
     "schema_version": { "const": 2 },
@@ -19,14 +19,40 @@
         { "$ref": "TemporaryAllocationIdentity2.schema.json" }
       ]
     },
-    "cleanup_authority_ref": { "type": "string", "minLength": 1 },
-    "teardown_condition": { "type": "string", "minLength": 1 },
+    "current_phase": {
+      "type": "object",
+      "required": ["phase", "state"],
+      "properties": {
+        "phase": { "enum": ["execution", "cleanup"] },
+        "state": { "enum": ["ACTIVE", "HOLD", "COMPLETE"] }
+      },
+      "additionalProperties": false
+    },
+    "last_valid_observation": {
+      "type": "object",
+      "required": ["observed_at", "observation_ref", "identity_ref"],
+      "properties": {
+        "observed_at": { "type": "string", "format": "date-time" },
+        "observation_ref": { "type": "string", "pattern": "^observation:[0-9a-f]{64}$" },
+        "identity_ref": { "type": "string", "pattern": "^identity:[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "cleanup_authority_ref": { "type": "string", "pattern": "^authority:[0-9a-f]{64}$" },
+    "teardown_condition": { "enum": ["identity_absence_verified", "harness_closed", "allocation_absence_verified"] },
     "evidence_refs": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1 }
+      "items": { "type": "string", "pattern": "^evidence:[0-9a-f]{64}$" }
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    { "if": { "properties": { "resource_type": { "const": "process_tree" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" } } } },
+    { "if": { "properties": { "resource_type": { "const": "command_session" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" } } } },
+    { "if": { "properties": { "resource_type": { "const": "agent_session" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "agent_session" } } }] } } } },
+    { "if": { "properties": { "resource_type": { "const": "runtime_thread" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "runtime_thread" } } }] } } } },
+    { "if": { "properties": { "resource_type": { "const": "temporary_allocation" } } }, "then": { "properties": { "identity": { "$ref": "TemporaryAllocationIdentity2.schema.json" } } } }
+  ]
 }

@@ -9,7 +9,7 @@
   "$defs": {
     "common": {
       "type": "object",
-      "required": ["schema", "schema_version", "platform", "allocation_id", "owner_id", "run_id", "session_id", "lease_generation", "child_id", "manifest_sha256", "canonical_root"],
+      "required": ["schema", "schema_version", "platform", "allocation_id", "owner_id", "run_id", "session_id", "lease_generation", "child_id", "manifest_sha256", "canonical_root", "task_directory", "confirmed_parent_directory", "quota", "creation_nonce"],
       "properties": {
         "schema": { "const": "TemporaryAllocationIdentity2" },
         "schema_version": { "const": 2 },
@@ -21,7 +21,17 @@
         "lease_generation": { "type": "integer", "minimum": 1 },
         "child_id": { "type": "string", "minLength": 1 },
         "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "canonical_root": { "type": "string", "minLength": 1 }
+        "canonical_root": { "type": "string", "minLength": 1 },
+        "creation_nonce": { "type": "string", "minLength": 1 },
+        "quota": {
+          "type": "object",
+          "required": ["unit", "limit"],
+          "properties": {
+            "unit": { "const": "bytes" },
+            "limit": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
       }
     },
     "windows": {
@@ -29,7 +39,7 @@
         { "$ref": "#/$defs/common" },
         {
           "type": "object",
-          "required": ["windows_file_identity"],
+          "required": ["windows_file_identity", "task_directory", "confirmed_parent_directory"],
           "properties": {
             "platform": { "const": "windows" },
             "windows_file_identity": {
@@ -40,7 +50,9 @@
                 "file_id": { "type": "string", "minLength": 1 }
               },
               "additionalProperties": false
-            }
+            },
+            "task_directory": { "$ref": "#/$defs/windows_directory" },
+            "confirmed_parent_directory": { "$ref": "#/$defs/windows_directory" }
           }
         }
       ],
@@ -51,7 +63,7 @@
         { "$ref": "#/$defs/common" },
         {
           "type": "object",
-          "required": ["linux_file_identity"],
+          "required": ["linux_file_identity", "task_directory", "confirmed_parent_directory"],
           "properties": {
             "platform": { "const": "linux" },
             "linux_file_identity": {
@@ -62,11 +74,47 @@
                 "inode": { "type": "integer", "minimum": 1 }
               },
               "additionalProperties": false
-            }
+            },
+            "task_directory": { "$ref": "#/$defs/linux_directory" },
+            "confirmed_parent_directory": { "$ref": "#/$defs/linux_directory" }
           }
         }
       ],
       "unevaluatedProperties": false
+    },
+    "windows_directory": {
+      "type": "object",
+      "required": ["path", "windows_file_identity"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "windows_file_identity": {
+          "type": "object",
+          "required": ["volume_serial_number", "file_id"],
+          "properties": {
+            "volume_serial_number": { "type": "string", "minLength": 1 },
+            "file_id": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "linux_directory": {
+      "type": "object",
+      "required": ["path", "linux_file_identity"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "linux_file_identity": {
+          "type": "object",
+          "required": ["device_id", "inode"],
+          "properties": {
+            "device_id": { "type": "string", "minLength": 1 },
+            "inode": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

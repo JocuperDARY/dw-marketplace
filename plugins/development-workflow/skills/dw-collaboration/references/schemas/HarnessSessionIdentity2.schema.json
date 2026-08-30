@@ -3,7 +3,7 @@
   "$id": "HarnessSessionIdentity2.schema.json",
   "title": "HarnessSessionIdentity2",
   "type": "object",
-  "required": ["schema", "schema_version", "harness_kind", "session_id", "owner_id", "run_id", "lease_generation", "harness_instance_id"],
+  "required": ["schema", "schema_version", "harness_kind", "session_id", "owner_id", "run_id", "lease_generation", "adapter_generation", "harness_instance_id", "launch_nonce"],
   "properties": {
     "schema": { "const": "HarnessSessionIdentity2" },
     "schema_version": { "const": 2 },
@@ -12,8 +12,24 @@
     "owner_id": { "type": "string", "minLength": 1 },
     "run_id": { "type": "string", "minLength": 1 },
     "lease_generation": { "type": "integer", "minimum": 1 },
+    "adapter_generation": { "type": "integer", "minimum": 1 },
     "harness_instance_id": { "type": "string", "minLength": 1 },
+    "launch_nonce": { "type": "string", "minLength": 1 },
+    "agent_id": { "type": "string", "minLength": 1 },
+    "thread_id": { "type": "string", "minLength": 1 },
     "process_identity": { "$ref": "ProcessIdentity2.schema.json" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": { "harness_kind": { "const": "agent_session" } },
+      "required": ["agent_id"],
+      "not": { "required": ["thread_id"] }
+    },
+    {
+      "properties": { "harness_kind": { "const": "runtime_thread" } },
+      "required": ["thread_id"],
+      "not": { "required": ["agent_id"] }
+    }
+  ]
 }

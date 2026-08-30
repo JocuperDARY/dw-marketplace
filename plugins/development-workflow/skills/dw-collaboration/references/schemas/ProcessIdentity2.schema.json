@@ -9,11 +9,17 @@
   "$defs": {
     "common": {
       "type": "object",
-      "required": ["schema", "schema_version", "platform", "pid", "start_time", "executable_path_sha256", "argv_sha256", "parent_identity_sha256", "launch_nonce", "manager_run_id"],
+      "required": ["schema", "schema_version", "platform", "owner_id", "run_id", "session_id", "lease_generation", "adapter_generation", "manager_generation", "pid", "start_time", "executable_path_sha256", "argv_sha256", "parent_identity_sha256", "launch_nonce", "manager_run_id"],
       "properties": {
         "schema": { "const": "ProcessIdentity2" },
         "schema_version": { "const": 2 },
         "platform": { "enum": ["windows", "linux"] },
+        "owner_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "lease_generation": { "type": "integer", "minimum": 1 },
+        "adapter_generation": { "type": "integer", "minimum": 1 },
+        "manager_generation": { "type": "integer", "minimum": 1 },
         "pid": { "type": "integer", "minimum": 1 },
         "start_time": { "type": "string", "format": "date-time" },
         "executable_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
