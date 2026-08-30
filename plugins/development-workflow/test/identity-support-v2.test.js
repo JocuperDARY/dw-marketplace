@@ -1124,6 +1124,7 @@ test('support matrices require opaque evidence references without changing state
     'evidence:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     'observation:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
     'prefix evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa suffix',
     42,
   ]) {
@@ -1249,6 +1250,7 @@ test('schema contracts encode the same critical identity, recovery, and support 
       'evidence:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       'observation:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
       'prefix evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa suffix',
       42,
     ].map((evidenceRef) => {
@@ -1258,7 +1260,7 @@ test('schema contracts encode the same critical identity, recovery, and support 
     }),
   ];
   const schemaResults = validateDraft202012Fixtures(supportSchema, schemaFixtures);
-  assert.deepStrictEqual(schemaResults, [true, false, false, false, false, false, false, false]);
+  assert.deepStrictEqual(schemaResults, [true, false, false, false, false, false, false, false, false]);
   assert.deepStrictEqual(
     schemaFixtures.map((fixture) => contracts.validateSupportMatrix2(fixture).valid),
     schemaResults,
