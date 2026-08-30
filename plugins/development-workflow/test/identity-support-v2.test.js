@@ -121,6 +121,20 @@ function temporaryAllocation(overrides = {}) {
   };
 }
 
+function legacyProcess(overrides = {}) {
+  return {
+    pid: 41001,
+    native_handle: 'handle-41001',
+    start_time: '2026-08-29T00:00:00Z',
+    exe_path_hash: hash('node.exe'),
+    argv_hash: hash('legacy-resource-control-test'),
+    parent_identity_hash: hash('legacy-parent'),
+    nonce: 'legacy-launch-nonce',
+    native_process_manager_run_id: 'legacy-native-run',
+    ...overrides,
+  };
+}
+
 function makeTracker() {
   return new TaskResourceTracker({
     ownerId: 'root-A',
@@ -400,6 +414,98 @@ test('tracker returns replayable structured holds for rejected version-2 rebinds
   assert.throws(
     () => legacyScope.bind('legacy-rebind', {
       identity: { ...legacy, pid: 41002 }, generation: 2, evidenceRefs: ['legacy-changed'],
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'RESOURCE_IDENTITY_DRIFT',
+  );
+});
+
+test('tracker classifies complete resource-specific v2 intent without narrowing legacy process validation', () => {
+  const tracker = makeTracker();
+  const scope = tracker.openRootScope({ scopeId: 'v2-bound-v1-rebind', purpose: 'classification' });
+  scope.register(resource('v2-bound-v1-rebind', 'process_tree'));
+  scope.bind('v2-bound-v1-rebind', {
+    identity: windowsProcess(), generation: 2, evidenceRefs: ['v2-initial'],
+  });
+  const bound = scope.getResource('v2-bound-v1-rebind');
+  const held = scope.bind('v2-bound-v1-rebind', {
+    identity: legacyProcess(), generation: 2, evidenceRefs: ['pure-v1-rebind'],
+  });
+  assert.strictEqual(held.valid, false);
+  assert.strictEqual(held.disposition, 'HOLD');
+  assert.strictEqual(held.action_authorized, false);
+  assert(held.errors.length > 0);
+  const after = scope.getResource('v2-bound-v1-rebind');
+  assert.strictEqual(after.state, 'HOLD');
+  assert.deepStrictEqual(after.identity, bound.identity);
+  const history = tracker.exportHistory();
+  assert.strictEqual(history.at(-1).kind, 'RESOURCE_HELD');
+  assert.deepStrictEqual(history.at(-1).payload.decision, held);
+  const replay = TaskResourceTracker.fromHistory({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: () => true,
+    trustedFilesystemResolver: () => true,
+    trustedHistoryResolver: () => true,
+  }, history);
+  const replayed = replay.snapshot().resources.find((item) => item.resourceId === 'v2-bound-v1-rebind');
+  assert.strictEqual(replayed.state, 'HOLD');
+  assert.deepStrictEqual(replayed.identity, bound.identity);
+  assert.deepStrictEqual(replayed.decision, held);
+
+  for (const [label, identity] of [
+    ['windows identity only', { windows_identity: windowsProcess().windows_identity }],
+    ['process hash only', { executable_path_sha256: windowsProcess().executable_path_sha256 }],
+  ]) {
+    const firstTracker = makeTracker();
+    const firstScope = firstTracker.openRootScope({ scopeId: `first-${label.replace(/\s/g, '-')}`, purpose: 'classification' });
+    const firstResourceId = `first-${label.replace(/\s/g, '-')}`;
+    firstScope.register(resource(firstResourceId, 'process_tree'));
+    const firstHold = firstScope.bind(firstResourceId, {
+      identity, generation: 2, evidenceRefs: [`${label}-first`],
+    });
+    assert.strictEqual(firstHold.disposition, 'HOLD', `${label} first bind`);
+    assert.strictEqual(firstHold.action_authorized, false, `${label} first bind`);
+
+    const rebindTracker = makeTracker();
+    const rebindScope = rebindTracker.openRootScope({ scopeId: `rebind-${label.replace(/\s/g, '-')}`, purpose: 'classification' });
+    const rebindResourceId = `rebind-${label.replace(/\s/g, '-')}`;
+    rebindScope.register(resource(rebindResourceId, 'process_tree'));
+    rebindScope.bind(rebindResourceId, {
+      identity: windowsProcess(), generation: 2, evidenceRefs: [`${label}-initial`],
+    });
+    const rebindHold = rebindScope.bind(rebindResourceId, {
+      identity, generation: 2, evidenceRefs: [`${label}-rebind`],
+    });
+    assert.strictEqual(rebindHold.disposition, 'HOLD', `${label} rebind`);
+    assert.strictEqual(rebindHold.action_authorized, false, `${label} rebind`);
+  }
+
+  for (const [resourceType, identity] of [
+    ['agent_session', { process_identity: windowsProcess() }],
+    ['temporary_allocation', { quota: { unit: 'bytes', limit: 1 } }],
+  ]) {
+    const strictTracker = makeTracker();
+    const strictScope = strictTracker.openRootScope({ scopeId: `exclusive-${resourceType}`, purpose: 'classification' });
+    const resourceId = `exclusive-${resourceType}`;
+    strictScope.register(resource(resourceId, resourceType));
+    const strictHold = strictScope.bind(resourceId, {
+      identity, generation: 2, evidenceRefs: [`exclusive-${resourceType}`],
+    });
+    assert.strictEqual(strictHold.disposition, 'HOLD', resourceType);
+    assert.strictEqual(strictHold.action_authorized, false, resourceType);
+  }
+
+  const legacyTracker = makeTracker();
+  const legacyScope = legacyTracker.openRootScope({ scopeId: 'legacy-observation-id', purpose: 'legacy compatibility' });
+  legacyScope.register(resource('legacy-observation-id', 'process_tree'));
+  const legacy = legacyProcess({ observation_id: 'harmless-observation' });
+  assert.strictEqual(legacyScope.bind('legacy-observation-id', {
+    identity: legacy, generation: 2, evidenceRefs: ['legacy-extra-first'],
+  }).state, 'ACTIVE');
+  assert.throws(
+    () => legacyScope.bind('legacy-observation-id', {
+      identity: { ...legacy, pid: 41002 }, generation: 2, evidenceRefs: ['legacy-extra-rebind'],
     }),
     (error) => error instanceof ResourceTrackerError && error.code === 'RESOURCE_IDENTITY_DRIFT',
   );

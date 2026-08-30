@@ -24,42 +24,52 @@ const HARNESS_RESOURCE_TYPES = new Set([
   'agent_session',
   'runtime_thread',
 ]);
-const LEGACY_PROCESS_IDENTITY_KEYS = new Set([
-  'pid',
-  'native_handle',
-  'start_time',
-  'exe_path_hash',
-  'argv_hash',
-  'parent_identity_hash',
-  'nonce',
-  'native_process_manager_run_id',
-  'confidence',
-]);
-const LEGACY_PROCESS_REQUIRED_KEYS = [
-  'pid',
-  'native_handle',
-  'start_time',
-  'exe_path_hash',
-  'argv_hash',
-  'parent_identity_hash',
-  'nonce',
-  'native_process_manager_run_id',
-];
-const V2_EXCLUSIVE_KEYS = new Set([
-  'schema',
-  'schema_version',
+const PROCESS_V2_EXCLUSIVE_KEYS = new Set([
   'platform',
+  'owner_id',
+  'run_id',
+  'session_id',
+  'lease_generation',
   'adapter_generation',
   'manager_generation',
+  'executable_path_sha256',
+  'argv_sha256',
+  'parent_identity_sha256',
   'launch_nonce',
+  'manager_run_id',
+  'windows_identity',
+  'linux_identity',
+]);
+const HARNESS_V2_EXCLUSIVE_KEYS = new Set([
   'harness_kind',
+  'session_id',
+  'owner_id',
+  'run_id',
+  'lease_generation',
+  'adapter_generation',
   'harness_instance_id',
+  'launch_nonce',
   'agent_id',
   'thread_id',
+  'process_identity',
+]);
+const TEMPORARY_V2_EXCLUSIVE_KEYS = new Set([
+  'platform',
   'allocation_id',
+  'canonical_root',
   'task_directory',
   'confirmed_parent_directory',
+  'quota',
   'creation_nonce',
+  'windows_file_identity',
+  'linux_file_identity',
+]);
+const V2_EXCLUSIVE_KEYS_BY_RESOURCE_TYPE = new Map([
+  ['process_tree', PROCESS_V2_EXCLUSIVE_KEYS],
+  ['command_session', PROCESS_V2_EXCLUSIVE_KEYS],
+  ['agent_session', HARNESS_V2_EXCLUSIVE_KEYS],
+  ['runtime_thread', HARNESS_V2_EXCLUSIVE_KEYS],
+  ['temporary_allocation', TEMPORARY_V2_EXCLUSIVE_KEYS],
 ]);
 
 const PROCESS_RESOURCE_TYPES = new Set([
@@ -210,15 +220,13 @@ function validateTemporaryIdentity(identity) {
     && typeof identity.child_id === 'string' && identity.child_id !== '';
 }
 
-function hasV2IdentityIntent(identity) {
+function hasV2IdentityIntent(resourceType, identity) {
   return identity && typeof identity === 'object' && !Array.isArray(identity)
-    && Object.keys(identity).some((key) => V2_EXCLUSIVE_KEYS.has(key));
-}
-
-function isStrictLegacyProcessIdentity(identity) {
-  return identity && typeof identity === 'object' && !Array.isArray(identity)
-    && LEGACY_PROCESS_REQUIRED_KEYS.every((key) => hasOwn(identity, key))
-    && Object.keys(identity).every((key) => LEGACY_PROCESS_IDENTITY_KEYS.has(key));
+    && (hasOwn(identity, 'schema') || hasOwn(identity, 'schema_version')
+      || Object.keys(identity).some((key) => {
+        const exclusiveKeys = V2_EXCLUSIVE_KEYS_BY_RESOURCE_TYPE.get(resourceType);
+        return exclusiveKeys !== undefined && exclusiveKeys.has(key);
+      }));
 }
 
 function trackerIdentityError(code, path, message) {
@@ -600,8 +608,10 @@ class TaskResourceTracker {
       generation,
       identity,
     });
-    let identityValidation = hasV2IdentityIntent(identity)
-      ? this.#validateIdentity(record, identity, generation)
+    const requiresV2Validation = hasV2IdentityIntent(record.type, identity)
+      || (record.identity !== null && hasV2IdentityIntent(record.type, record.identity));
+    let identityValidation = requiresV2Validation
+      ? this.#validateIdentity(record, identity, generation, true)
       : null;
     if (record.bindSignature !== null) {
       if (sameValue(record.bindSignature, signature)) return cloneRecord(record);
@@ -639,7 +649,7 @@ class TaskResourceTracker {
     return cloneRecord(record);
   }
 
-  #validateIdentity(record, identity, generation) {
+  #validateIdentity(record, identity, generation, requireV2 = false) {
     if (!identity || typeof identity !== 'object' || Array.isArray(identity)
       || Object.keys(identity).length === 0) {
       if (PROCESS_RESOURCE_TYPES.has(record.type)) {
@@ -647,7 +657,7 @@ class TaskResourceTracker {
       }
       throw new ResourceTrackerError('RESOURCE_IDENTITY_INVALID');
     }
-    if (hasV2IdentityIntent(identity)) {
+    if (requireV2 || hasV2IdentityIntent(record.type, identity)) {
       const validation = validateResourceIdentity2(record.type, identity);
       const errors = validation.errors.map((item) => ({
         code: item.code,
@@ -685,9 +695,7 @@ class TaskResourceTracker {
       return errors.length === 0 ? validation : structuredIdentityHold(errors);
     }
     if (PROCESS_RESOURCE_TYPES.has(record.type)) {
-      const validation = isStrictLegacyProcessIdentity(identity)
-        ? validateProcessIdentity(identity)
-        : { valid: false };
+      const validation = validateProcessIdentity(identity);
       if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
     }
     if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
