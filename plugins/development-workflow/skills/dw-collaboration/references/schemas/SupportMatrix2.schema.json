@@ -12,43 +12,63 @@
     "observed_at": { "type": "string", "format": "date-time" },
     "overall_state": { "$ref": "#/$defs/support_state" },
     "claims": {
-      "type": "array",
-      "minItems": 1,
-      "x-uniqueBy": "capability_id",
-      "items": {
-        "type": "object",
-        "required": ["capability_id", "state", "evidence_refs"],
-        "properties": {
-          "capability_id": { "type": "string", "minLength": 1 },
-          "state": { "$ref": "#/$defs/support_state" },
-          "evidence_refs": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": { "type": "string", "minLength": 1 }
-          }
-        },
-        "additionalProperties": false,
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
         "allOf": [
-          { "if": { "properties": { "state": { "const": "VERIFIED_FULL" } } }, "then": { "properties": { "evidence_refs": { "minItems": 1 } } } },
-          { "if": { "properties": { "state": { "const": "NOT_RUN" } } }, "then": { "properties": { "evidence_refs": { "maxItems": 0 } } } }
+          { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" },
+          { "not": { "enum": ["constructor", "prototype"] } }
         ]
-      }
+      },
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim" }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,
   "allOf": [
     {
       "if": { "properties": { "overall_state": { "const": "VERIFIED_FULL" } } },
-      "then": { "properties": { "claims": { "items": { "properties": { "state": { "const": "VERIFIED_FULL" }, "evidence_refs": { "minItems": 1 } } } } } }
+      "then": { "properties": { "claims": { "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_full" } } } } }
     },
     {
       "if": { "properties": { "overall_state": { "const": "NOT_RUN" } } },
-      "then": { "properties": { "claims": { "items": { "properties": { "state": { "const": "NOT_RUN" }, "evidence_refs": { "maxItems": 0 } } } } } }
+      "then": { "properties": { "claims": { "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_not_run" } } } } }
     }
   ],
   "$defs": {
     "support_state": {
       "enum": ["VERIFIED_FULL", "VERIFIED_DEGRADED", "UNVERIFIED", "NOT_RUN", "FAILED"]
+    },
+    "support_claim": {
+      "type": "object",
+      "required": ["state", "evidence_refs"],
+      "properties": {
+        "state": { "$ref": "#/$defs/support_state" },
+        "evidence_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "state": { "const": "VERIFIED_FULL" } } }, "then": { "properties": { "evidence_refs": { "minItems": 1 } } } },
+        { "if": { "properties": { "state": { "const": "NOT_RUN" } } }, "then": { "properties": { "evidence_refs": { "maxItems": 0 } } } }
+      ]
+    },
+    "support_claim_full": {
+      "allOf": [
+        { "$ref": "#/$defs/support_claim" },
+        { "properties": { "state": { "const": "VERIFIED_FULL" }, "evidence_refs": { "minItems": 1 } } }
+      ]
+    },
+    "support_claim_not_run": {
+      "allOf": [
+        { "$ref": "#/$defs/support_claim" },
+        { "properties": { "state": { "const": "NOT_RUN" }, "evidence_refs": { "maxItems": 0 } } }
+      ]
     }
   }
 }

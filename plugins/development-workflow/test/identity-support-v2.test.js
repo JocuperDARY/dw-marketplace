@@ -479,14 +479,16 @@ test('support matrices cannot turn skipped or not-run claims into full support',
     platform: 'windows',
     observed_at: '2026-08-30T02:00:00Z',
     overall_state: 'VERIFIED_FULL',
-    claims: [{ capability_id: 'process_identity', state: 'VERIFIED_FULL', evidence_refs: ['test-A'] }],
+    claims: {
+      process_identity: { state: 'VERIFIED_FULL', evidence_refs: ['test-A'] },
+    },
   };
   const fullResult = contracts.validateSupportMatrix2(full);
   assert.strictEqual(fullResult.valid, true);
   assert.strictEqual(fullResult.effective_state, 'VERIFIED_FULL');
 
   const skippedAsFull = clone(full);
-  skippedAsFull.claims.push({ capability_id: 'process_tree_terminate', state: 'NOT_RUN', evidence_refs: [] });
+  skippedAsFull.claims.process_tree_terminate = { state: 'NOT_RUN', evidence_refs: [] };
   const skippedResult = contracts.validateSupportMatrix2(skippedAsFull);
   assert.strictEqual(skippedResult.valid, false);
   assert.strictEqual(skippedResult.effective_state, 'UNVERIFIED');
@@ -495,7 +497,7 @@ test('support matrices cannot turn skipped or not-run claims into full support',
 
   const skipped = clone(full);
   skipped.overall_state = 'NOT_RUN';
-  skipped.claims = [{ capability_id: 'process_tree_terminate', state: 'NOT_RUN', evidence_refs: [] }];
+  skipped.claims = { process_tree_terminate: { state: 'NOT_RUN', evidence_refs: [] } };
   assert.strictEqual(contracts.validateSupportMatrix2(skipped).valid, true);
 
   const uncontrolled = clone(full);
@@ -504,29 +506,50 @@ test('support matrices cannot turn skipped or not-run claims into full support',
     .some((error) => error.code === 'SUPPORT_STATE_INVALID'));
 
   const incompleteNotRun = clone(skipped);
-  delete incompleteNotRun.claims[0].evidence_refs;
+  delete incompleteNotRun.claims.process_tree_terminate.evidence_refs;
   const incompleteResult = contracts.validateSupportMatrix2(incompleteNotRun);
   assert.strictEqual(incompleteResult.valid, false);
   assert.strictEqual(incompleteResult.disposition, 'HOLD');
   assert.strictEqual(incompleteResult.action_authorized, false);
 
   const emptyFullEvidence = clone(full);
-  emptyFullEvidence.claims[0].evidence_refs = [];
+  emptyFullEvidence.claims.process_identity.evidence_refs = [];
   const emptyFullResult = contracts.validateSupportMatrix2(emptyFullEvidence);
   assert.strictEqual(emptyFullResult.valid, false);
   assert.strictEqual(emptyFullResult.effective_state, 'UNVERIFIED');
 
   const notRunEvidence = clone(skipped);
-  notRunEvidence.claims[0].evidence_refs = ['test-ran'];
+  notRunEvidence.claims.process_tree_terminate.evidence_refs = ['test-ran'];
   const notRunEvidenceResult = contracts.validateSupportMatrix2(notRunEvidence);
   assert.strictEqual(notRunEvidenceResult.valid, false);
   assert.strictEqual(notRunEvidenceResult.effective_state, 'UNVERIFIED');
 
-  const duplicate = clone(full);
-  duplicate.claims.push(clone(duplicate.claims[0]));
-  const duplicateResult = contracts.validateSupportMatrix2(duplicate);
-  assert.strictEqual(duplicateResult.valid, false);
-  assert.strictEqual(duplicateResult.effective_state, 'UNVERIFIED');
+  const legacyArray = {
+    ...clone(full),
+    claims: [
+      { capability_id: 'process_identity', state: 'VERIFIED_FULL', evidence_refs: ['test-A'] },
+      { capability_id: 'process_tree_terminate', state: 'VERIFIED_FULL', evidence_refs: ['test-B'] },
+    ],
+  };
+  const legacyArrayResult = contracts.validateSupportMatrix2(legacyArray);
+  assert.strictEqual(legacyArrayResult.valid, false);
+  assert.strictEqual(legacyArrayResult.effective_state, 'UNVERIFIED');
+  assert.strictEqual(legacyArrayResult.action_authorized, false);
+
+  const distinctCapabilities = clone(full);
+  distinctCapabilities.claims.process_tree_terminate = {
+    state: 'VERIFIED_FULL', evidence_refs: ['test-B'],
+  };
+  const distinctCapabilitiesResult = contracts.validateSupportMatrix2(distinctCapabilities);
+  assert.strictEqual(distinctCapabilitiesResult.valid, true);
+  assert.strictEqual(distinctCapabilitiesResult.effective_state, 'VERIFIED_FULL');
+
+  const invalidKey = clone(full);
+  invalidKey.claims.constructor = { state: 'VERIFIED_FULL', evidence_refs: ['test-B'] };
+  const invalidKeyResult = contracts.validateSupportMatrix2(invalidKey);
+  assert.strictEqual(invalidKeyResult.valid, false);
+  assert.strictEqual(invalidKeyResult.effective_state, 'UNVERIFIED');
+  assert.strictEqual(invalidKeyResult.action_authorized, false);
 });
 
 test('schema contracts encode the same critical identity, recovery, and support rules', () => {
@@ -547,7 +570,10 @@ test('schema contracts encode the same critical identity, recovery, and support 
   assert(Array.isArray(recoverySchema.allOf) && recoverySchema.allOf.length === 5);
   const supportSchema = loadSchema('SupportMatrix2.schema.json');
   assert(Array.isArray(supportSchema.allOf) && supportSchema.allOf.length >= 2);
-  assert.strictEqual(supportSchema.properties.claims['x-uniqueBy'], 'capability_id');
+  assert.strictEqual(supportSchema.properties.claims.type, 'object');
+  assert.strictEqual(supportSchema.properties.claims.minProperties, 1);
+  assert.strictEqual(typeof supportSchema.properties.claims.propertyNames, 'object');
+  assert.strictEqual(supportSchema.properties.claims['x-uniqueBy'], undefined);
 });
 
 test('version-2 factories own schema fields and reject legacy identity input', () => {

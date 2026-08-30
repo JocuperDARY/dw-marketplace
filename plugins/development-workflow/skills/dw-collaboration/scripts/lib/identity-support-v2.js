@@ -90,7 +90,9 @@ const SUPPORT_MATRIX_KEYS = Object.freeze([
   'overall_state',
   'claims',
 ]);
-const SUPPORT_CLAIM_KEYS = Object.freeze(['capability_id', 'state', 'evidence_refs']);
+const SUPPORT_CLAIM_KEYS = Object.freeze(['state', 'evidence_refs']);
+const CAPABILITY_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
+const FORBIDDEN_CAPABILITY_IDS = new Set(['constructor', 'prototype']);
 const RECOVERY_PHASES = new Set(['execution', 'cleanup']);
 const RECOVERY_PHASE_STATES = new Set(['ACTIVE', 'HOLD', 'COMPLETE']);
 const TEARDOWN_CONDITIONS = new Set(['identity_absence_verified', 'harness_closed', 'allocation_absence_verified']);
@@ -112,6 +114,10 @@ function isPlainObject(value) {
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim() !== '';
+}
+
+function isCapabilityId(value) {
+  return CAPABILITY_ID.test(value) && !FORBIDDEN_CAPABILITY_IDS.has(value);
 }
 
 function isPositiveInteger(value) {
@@ -476,18 +482,15 @@ function validateSupportMatrix2(matrix) {
   if (!SUPPORT_STATE_SET.has(matrix.overall_state)) {
     errors.push(error('SUPPORT_STATE_INVALID', '$.overall_state', 'support state is not controlled'));
   }
-  if (!Array.isArray(matrix.claims) || matrix.claims.length === 0) {
+  if (!isPlainObject(matrix.claims) || Object.keys(matrix.claims).length === 0) {
     errors.push(error('SUPPORT_CLAIMS_INVALID', '$.claims', 'at least one support claim is required'));
   } else {
-    const capabilityIds = new Set();
-    matrix.claims.forEach((claim, index) => {
-      const path = `$.claims[${index}]`;
+    Object.entries(matrix.claims).forEach(([capabilityId, claim]) => {
+      const path = `$.claims.${capabilityId}`;
       if (!requireExactKeys(claim, SUPPORT_CLAIM_KEYS, SUPPORT_CLAIM_KEYS, errors, path)) return;
-      if (!isNonEmptyString(claim.capability_id)) {
-        errors.push(error('SUPPORT_CAPABILITY_INVALID', `${path}.capability_id`, 'capability ID must be non-empty'));
-      } else if (capabilityIds.has(claim.capability_id)) {
-        errors.push(error('SUPPORT_CAPABILITY_DUPLICATE', `${path}.capability_id`, 'capability IDs must be unique'));
-      } else capabilityIds.add(claim.capability_id);
+      if (!isCapabilityId(capabilityId)) {
+        errors.push(error('SUPPORT_CAPABILITY_INVALID', path, 'capability ID must use the controlled key grammar'));
+      }
       if (!SUPPORT_STATE_SET.has(claim.state)) {
         errors.push(error('SUPPORT_STATE_INVALID', `${path}.state`, 'support state is not controlled'));
       }
@@ -504,14 +507,14 @@ function validateSupportMatrix2(matrix) {
     });
   }
   if (matrix.overall_state === 'VERIFIED_FULL'
-    && Array.isArray(matrix.claims)
-    && matrix.claims.some((claim) => !isPlainObject(claim) || claim.state !== 'VERIFIED_FULL'
+    && isPlainObject(matrix.claims)
+    && Object.values(matrix.claims).some((claim) => !isPlainObject(claim) || claim.state !== 'VERIFIED_FULL'
       || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length === 0)) {
     errors.push(error('SUPPORT_FULL_WITH_INCOMPLETE_CLAIM', '$.overall_state', 'full support requires every claim to be fully verified'));
   }
   if (matrix.overall_state === 'NOT_RUN'
-    && Array.isArray(matrix.claims)
-    && matrix.claims.some((claim) => !isPlainObject(claim) || claim.state !== 'NOT_RUN'
+    && isPlainObject(matrix.claims)
+    && Object.values(matrix.claims).some((claim) => !isPlainObject(claim) || claim.state !== 'NOT_RUN'
       || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length !== 0)) {
     errors.push(error('SUPPORT_NOT_RUN_WITH_EXECUTED_CLAIM', '$.overall_state', 'NOT_RUN requires every claim to be NOT_RUN'));
   }
