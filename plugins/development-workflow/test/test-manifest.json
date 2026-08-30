@@ -49,7 +49,8 @@
         { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
         { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
-        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"] }
+        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"] },
+        { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"] }
       ]
     }
   }

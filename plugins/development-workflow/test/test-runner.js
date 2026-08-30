@@ -38,6 +38,10 @@ function hasLifecycleEvidence(output) {
   return /(?:^|\r?\n)LIFECYCLE_RAN:[a-z]+/.test(output);
 }
 
+function testIdentity(test) {
+  return JSON.stringify([test.command, test.args || []]);
+}
+
 function runTest(test) {
   const result = childProcess.spawnSync(test.command, test.args || [], {
     encoding: 'utf8',
@@ -46,8 +50,9 @@ function runTest(test) {
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`;
   if (result.error || result.status !== 0) return { status: 'fail', output, error: result.error };
-  if (isSkipped(output) && !hasLifecycleEvidence(output)) return { status: 'skip', output };
-  return { status: 'pass', output };
+  const skipped = isSkipped(output);
+  if (skipped && !hasLifecycleEvidence(output)) return { status: 'skip', output, skipped: true };
+  return { status: 'pass', output, skipped };
 }
 
 function main() {
@@ -57,16 +62,26 @@ function main() {
   const selectedSuite = manifest.suites[options.suite];
   if (!selectedSuite || !Array.isArray(selectedSuite.tests)) throw new Error('TEST_SUITE_UNKNOWN');
 
-  const allTests = Object.values(manifest.suites).flatMap((suite) => Array.isArray(suite.tests) ? suite.tests : []);
-  const counts = { pass: 0, fail: 0, skip: 0, 'not-run': allTests.length - selectedSuite.tests.length };
+  const allTestIds = new Set(Object.values(manifest.suites)
+    .flatMap((suite) => Array.isArray(suite.tests) ? suite.tests : [])
+    .map(testIdentity));
+  const selectedTestIds = new Set(selectedSuite.tests.map(testIdentity));
+  const counts = {
+    pass: 0,
+    fail: 0,
+    skip: 0,
+    'not-run': [...allTestIds].filter((id) => !selectedTestIds.has(id)).length,
+  };
   const lifecycleMarker = selectedSuite.requiredLifecycle ? `LIFECYCLE_RAN:${selectedSuite.requiredLifecycle}` : null;
   let lifecycleRan = false;
 
   for (const test of selectedSuite.tests) {
     const result = runTest(test);
     counts[result.status] += 1;
+    if (result.status === 'pass' && result.skipped) counts.skip += 1;
     if (lifecycleMarker && result.status === 'pass' && result.output.includes(lifecycleMarker)) lifecycleRan = true;
     console.log(`${result.status.toUpperCase()} - ${test.name}`);
+    if (result.status === 'pass' && result.skipped) console.log(`SKIP - ${test.name} (inapplicable evidence)`);
     if (result.output) process.stdout.write(result.output);
   }
 

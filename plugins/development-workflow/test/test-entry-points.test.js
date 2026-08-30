@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const childProcess = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const pluginRoot = path.resolve(__dirname, '..');
@@ -10,9 +11,10 @@ const npmArgs = (script) => process.platform === 'win32'
   ? ['/d', '/s', '/c', `npm run ${script}`]
   : ['run', script];
 
-function runNpm(script) {
+function runNpm(script, env = process.env) {
   return childProcess.spawnSync(npm, npmArgs(script), {
     cwd: pluginRoot,
+    env,
     encoding: 'utf8',
     timeout: 120000,
     windowsHide: true,
@@ -30,6 +32,12 @@ function test(name, fn) {
   }
 }
 
+test('complete test manifest retains entry-point behavior coverage', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'test', 'test-manifest.json'), 'utf8'));
+  const completeFiles = manifest.suites.all.tests.flatMap((entry) => entry.args || []);
+  assert(completeFiles.includes('test/test-entry-points.test.js'));
+});
+
 test('core entry point completes without an installed host harness', () => {
   const result = runNpm('test:core');
   assert.strictEqual(result.error, undefined, result.error && result.error.message);
@@ -40,7 +48,10 @@ test('core entry point completes without an installed host harness', () => {
 
 test('raw Windows platform entry point preserves the lifecycle guard', () => {
   if (process.platform !== 'win32') return;
-  const result = runNpm('test:platform:windows');
+  const env = { ...process.env };
+  delete env.DW_PLATFORM_SANDBOX_ROOT;
+  delete env.DW_PLATFORM_NATIVE_RUN_ID;
+  const result = runNpm('test:platform:windows', env);
   assert.strictEqual(result.error, undefined, result.error && result.error.message);
   assert.strictEqual(result.status, 1, result.stderr || result.stdout);
   assert.match(result.stderr, /LIFECYCLE_NOT_RUN:windows/);

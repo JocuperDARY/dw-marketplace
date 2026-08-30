@@ -46,6 +46,13 @@ fs.writeFileSync(manifestPath, JSON.stringify({
     hooks: {
       tests: [{ name: 'hook passes', command: node, args: ['-e', "console.log('hook complete')"] }],
     },
+    all: {
+      tests: [
+        { name: 'core passes', command: node, args: ['-e', "console.log('core complete')"] },
+        { name: 'inapplicable platform evidence', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:host is linux')"] },
+        { name: 'windows lifecycle skipped', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:no registered sandbox')"] },
+        { name: 'hook passes', command: node, args: ['-e', "console.log('hook complete')"] }],
+    },
   },
 }, null, 2));
 
@@ -76,13 +83,24 @@ try {
       '-e',
       "console.log('SKIP_NOT_APPLICABLE:linux:host is win32');console.log('LIFECYCLE_RAN:windows')",
     ];
+    manifest.suites.all.tests[2].args = manifest.suites['platform:windows'].tests[0].args;
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     const result = run('platform:windows');
     assert.strictEqual(result.error, undefined, result.error && result.error.message);
     assert.strictEqual(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /pass: 1/);
-    assert.match(result.stdout, /skip: 0/);
+    assert.match(result.stdout, /skip: 1/);
     assert.match(result.stdout, /fail: 0/);
+    assert.match(result.stdout, /not-run: 3/);
+  });
+
+  test('the complete suite reports no tests as not-run when it covers every test identity', () => {
+    const result = run('all');
+    assert.strictEqual(result.error, undefined, result.error && result.error.message);
+    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /pass: 3/);
+    assert.match(result.stdout, /skip: 2/);
+    assert.match(result.stdout, /not-run: 0/);
   });
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
