@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "TemporaryAllocationIdentity2.schema.json",
+  "title": "TemporaryAllocationIdentity2",
+  "oneOf": [
+    { "$ref": "#/$defs/windows" },
+    { "$ref": "#/$defs/linux" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["schema", "schema_version", "platform", "allocation_id", "owner_id", "run_id", "session_id", "lease_generation", "child_id", "manifest_sha256", "canonical_root"],
+      "properties": {
+        "schema": { "const": "TemporaryAllocationIdentity2" },
+        "schema_version": { "const": 2 },
+        "platform": { "enum": ["windows", "linux"] },
+        "allocation_id": { "type": "string", "minLength": 1 },
+        "owner_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "lease_generation": { "type": "integer", "minimum": 1 },
+        "child_id": { "type": "string", "minLength": 1 },
+        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "canonical_root": { "type": "string", "minLength": 1 }
+      }
+    },
+    "windows": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["windows_file_identity"],
+          "properties": {
+            "platform": { "const": "windows" },
+            "windows_file_identity": {
+              "type": "object",
+              "required": ["volume_serial_number", "file_id"],
+              "properties": {
+                "volume_serial_number": { "type": "string", "minLength": 1 },
+                "file_id": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "linux": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["linux_file_identity"],
+          "properties": {
+            "platform": { "const": "linux" },
+            "linux_file_identity": {
+              "type": "object",
+              "required": ["device_id", "inode"],
+              "properties": {
+                "device_id": { "type": "string", "minLength": 1 },
+                "inode": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

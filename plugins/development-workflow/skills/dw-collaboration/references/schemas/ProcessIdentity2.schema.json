@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ProcessIdentity2.schema.json",
+  "title": "ProcessIdentity2",
+  "oneOf": [
+    { "$ref": "#/$defs/windows" },
+    { "$ref": "#/$defs/linux" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["schema", "schema_version", "platform", "pid", "start_time", "executable_path_sha256", "argv_sha256", "parent_identity_sha256", "launch_nonce", "manager_run_id"],
+      "properties": {
+        "schema": { "const": "ProcessIdentity2" },
+        "schema_version": { "const": 2 },
+        "platform": { "enum": ["windows", "linux"] },
+        "pid": { "type": "integer", "minimum": 1 },
+        "start_time": { "type": "string", "format": "date-time" },
+        "executable_path_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "argv_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "parent_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "launch_nonce": { "type": "string", "minLength": 1 },
+        "manager_run_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "windows": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["windows_identity"],
+          "properties": {
+            "platform": { "const": "windows" },
+            "windows_identity": {
+              "type": "object",
+              "required": ["process_creation_time_filetime", "process_handle"],
+              "properties": {
+                "process_creation_time_filetime": { "type": "string", "pattern": "^[0-9]+$" },
+                "process_handle": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "linux": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["linux_identity"],
+          "properties": {
+            "platform": { "const": "linux" },
+            "linux_identity": {
+              "type": "object",
+              "required": ["proc_start_ticks", "boot_id_sha256"],
+              "properties": {
+                "proc_start_ticks": { "type": "integer", "minimum": 1 },
+                "boot_id_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

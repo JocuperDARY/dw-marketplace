@@ -12,6 +12,20 @@ const {
 const {
   validateProcessIdentity,
 } = require('./state-machines');
+const {
+  validateHarnessSessionIdentity2,
+  validateProcessIdentity2,
+  validateTemporaryAllocationIdentity2,
+} = require('./identity-support-v2');
+
+const PROCESS_V2_RESOURCE_TYPES = new Set([
+  'process_tree',
+  'command_session',
+]);
+const HARNESS_RESOURCE_TYPES = new Set([
+  'agent_session',
+  'runtime_thread',
+]);
 
 const PROCESS_RESOURCE_TYPES = new Set([
   'agent_session',
@@ -556,7 +570,17 @@ class TaskResourceTracker {
   }
 
   #validateIdentity(record, identity, generation) {
-    if (PROCESS_RESOURCE_TYPES.has(record.type)) {
+    if (HARNESS_RESOURCE_TYPES.has(record.type)
+      && identity && identity.schema === 'HarnessSessionIdentity2') {
+      const validation = validateHarnessSessionIdentity2(identity);
+      if (!validation.valid || identity.harness_kind !== record.type) {
+        throw new ResourceTrackerError('HARNESS_IDENTITY_INVALID');
+      }
+    } else if (PROCESS_V2_RESOURCE_TYPES.has(record.type)
+      && identity && identity.schema === 'ProcessIdentity2') {
+      const validation = validateProcessIdentity2(identity);
+      if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
+    } else if (PROCESS_RESOURCE_TYPES.has(record.type)) {
       const validation = validateProcessIdentity(identity);
       if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
     }
@@ -566,7 +590,10 @@ class TaskResourceTracker {
     }
     if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
     if (record.type === 'temporary_allocation') {
-      if (!validateTemporaryIdentity(identity)
+      const validTemporary = identity.schema === 'TemporaryAllocationIdentity2'
+        ? validateTemporaryAllocationIdentity2(identity).valid
+        : validateTemporaryIdentity(identity);
+      if (!validTemporary
         || identity.owner_id !== record.ownerId
         || identity.run_id !== this.runId
         || identity.lease_generation !== generation) {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "HarnessSessionIdentity2.schema.json",
+  "title": "HarnessSessionIdentity2",
+  "type": "object",
+  "required": ["schema", "schema_version", "harness_kind", "session_id", "owner_id", "run_id", "lease_generation", "harness_instance_id"],
+  "properties": {
+    "schema": { "const": "HarnessSessionIdentity2" },
+    "schema_version": { "const": 2 },
+    "harness_kind": { "enum": ["agent_session", "runtime_thread"] },
+    "session_id": { "type": "string", "minLength": 1 },
+    "owner_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "lease_generation": { "type": "integer", "minimum": 1 },
+    "harness_instance_id": { "type": "string", "minLength": 1 },
+    "process_identity": { "$ref": "ProcessIdentity2.schema.json" }
+  },
+  "additionalProperties": false
+}

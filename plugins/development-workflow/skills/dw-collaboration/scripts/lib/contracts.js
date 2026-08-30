@@ -9,6 +9,7 @@ const {
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
 const stateMachines = require('./state-machines');
+const identitySupportV2 = require('./identity-support-v2');
 
 const CAPABILITY_IDS = Object.freeze(['spawn_child', 'collect_result', 'child_to_root_message', 'root_to_child_message', 'interrupt_child', 'request_shutdown', 'verify_child_exit', 'shared_task_status', 'isolated_workspace', 'exclusive_file_ownership', 'runtime_liveness', 'process_identity', 'process_tree_terminate', 'terminal_session_control', 'temporary_lease', 'constrained_compute_lease', 'resource_observation', 'model_request_control', 'reasoning_request_control', 'actual_model_metadata', 'actual_effort_metadata']);
 const CAPABILITY_SUBJECTS = Object.freeze(['root', 'child', 'adapter']);
@@ -1657,4 +1658,4 @@ function isActionAuthorized(action, authorization, context = {}) {
   return validateAuthorization(authorization, { ...context, expectedAction: action }).valid;
 }
 
-module.exports = { CAPABILITY_IDS, CAPABILITY_SUBJECTS, SUPPORT, EVIDENCE_LEVELS, SOURCE_KINDS, REDACTION_POLICIES, UTC_TIMESTAMP_PATTERN, PROCESS_RECOVERY_ACTIONS, TEMPORARY_LEASE_ACTIONS, PROGRESS_CLASSIFICATIONS, RUN_OUTCOMES, ROUTE_ATTESTATIONS, CLEANUP_STATUSES, AUTHORIZATION_ACTIONS, ContractError, getEffectiveCapabilities, isCapabilitySupported, validateArtifact, validateArtifactSet, validateTaskPacket, selectTopology, selectRoute, validateRouteDecision, validateCollaborationPlan, decideProcessRecovery, computeTemporaryManifestSha256, decideTemporaryLease, validateProgressReport, decideRetry, validateExecutionReceipt, validateAuthorization, isActionAuthorized, ...stateMachines };
+module.exports = { CAPABILITY_IDS, CAPABILITY_SUBJECTS, SUPPORT, EVIDENCE_LEVELS, SOURCE_KINDS, REDACTION_POLICIES, UTC_TIMESTAMP_PATTERN, PROCESS_RECOVERY_ACTIONS, TEMPORARY_LEASE_ACTIONS, PROGRESS_CLASSIFICATIONS, RUN_OUTCOMES, ROUTE_ATTESTATIONS, CLEANUP_STATUSES, AUTHORIZATION_ACTIONS, ContractError, getEffectiveCapabilities, isCapabilitySupported, validateArtifact, validateArtifactSet, validateTaskPacket, selectTopology, selectRoute, validateRouteDecision, validateCollaborationPlan, decideProcessRecovery, computeTemporaryManifestSha256, decideTemporaryLease, validateProgressReport, decideRetry, validateExecutionReceipt, validateAuthorization, isActionAuthorized, ...stateMachines, ...identitySupportV2 };

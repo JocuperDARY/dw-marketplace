@@ -9,6 +9,7 @@
         { "name": "collaboration behavior", "command": "node", "args": ["test/collaboration-behavior.test.js"] },
         { "name": "synthetic host evidence data", "command": "node", "args": ["test/host-evidence-data.test.js"] },
         { "name": "resource control", "command": "node", "args": ["test/resource-control.test.js"] },
+        { "name": "identity and support v2", "command": "node", "args": ["test/identity-support-v2.test.js"] },
         { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
         { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] }
@@ -46,6 +47,7 @@
         { "name": "synthetic host evidence data", "command": "node", "args": ["test/host-evidence-data.test.js"] },
         { "name": "platform lifecycle", "command": "node", "args": ["test/collaboration-platform.test.js"] },
         { "name": "resource control", "command": "node", "args": ["test/resource-control.test.js"] },
+        { "name": "identity and support v2", "command": "node", "args": ["test/identity-support-v2.test.js"] },
         { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
         { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
