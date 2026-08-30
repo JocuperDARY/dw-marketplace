@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('assert');
+const childProcess = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +21,22 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const opaqueRef = (kind, value) => `${kind}:${hash(value)}`;
 const schemaRoot = path.resolve(__dirname, '../skills/dw-collaboration/references/schemas');
 const loadSchema = (name) => JSON.parse(fs.readFileSync(path.join(schemaRoot, name), 'utf8'));
+
+function validateDraft202012Fixtures(schema, fixtures) {
+  const script = [
+    'import json, sys',
+    'from jsonschema import Draft202012Validator',
+    'payload = json.load(sys.stdin)',
+    'validator = Draft202012Validator(payload["schema"])',
+    'print(json.dumps([validator.is_valid(item) for item in payload["fixtures"]]))',
+  ].join('\n');
+  const result = childProcess.spawnSync('python', ['-X', 'utf8', '-c', script], {
+    encoding: 'utf8',
+    input: JSON.stringify({ schema, fixtures }),
+  });
+  assert.strictEqual(result.status, 0, result.stderr || result.error?.message);
+  return JSON.parse(result.stdout);
+}
 
 function windowsProcess(overrides = {}) {
   return {
@@ -1084,7 +1101,8 @@ test('recovery records bind phase, observation, resource type, and outer task id
   }
 });
 
-test('support matrices cannot turn skipped or not-run claims into full support', () => {
+test('support matrices require opaque evidence references without changing state aggregation', () => {
+  const validEvidenceRef = 'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const full = {
     schema: 'SupportMatrix2',
     schema_version: 2,
@@ -1093,12 +1111,35 @@ test('support matrices cannot turn skipped or not-run claims into full support',
     observed_at: '2026-08-30T02:00:00Z',
     overall_state: 'VERIFIED_FULL',
     claims: {
-      process_identity: { state: 'VERIFIED_FULL', evidence_refs: ['test-A'] },
+      process_identity: { state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef] },
     },
   };
   const fullResult = contracts.validateSupportMatrix2(full);
   assert.strictEqual(fullResult.valid, true);
   assert.strictEqual(fullResult.effective_state, 'VERIFIED_FULL');
+
+  for (const evidenceRef of [
+    'NOT_RUN: process termination was not executed',
+    'skipped by platform gate',
+    'evidence:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    'observation:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'prefix evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa suffix',
+    42,
+  ]) {
+    const invalidEvidence = clone(full);
+    invalidEvidence.claims.process_identity.evidence_refs = [evidenceRef];
+    const invalidEvidenceResult = contracts.validateSupportMatrix2(invalidEvidence);
+    assert.strictEqual(invalidEvidenceResult.valid, false, String(evidenceRef));
+    assert.strictEqual(invalidEvidenceResult.effective_state, 'UNVERIFIED', String(evidenceRef));
+    assert.strictEqual(invalidEvidenceResult.action_authorized, false, String(evidenceRef));
+  }
+
+  const duplicateEvidence = clone(full);
+  duplicateEvidence.claims.process_identity.evidence_refs = [validEvidenceRef, validEvidenceRef];
+  const duplicateEvidenceResult = contracts.validateSupportMatrix2(duplicateEvidence);
+  assert.strictEqual(duplicateEvidenceResult.valid, false);
+  assert.strictEqual(duplicateEvidenceResult.effective_state, 'UNVERIFIED');
 
   const skippedAsFull = clone(full);
   skippedAsFull.claims.process_tree_terminate = { state: 'NOT_RUN', evidence_refs: [] };
@@ -1132,7 +1173,7 @@ test('support matrices cannot turn skipped or not-run claims into full support',
   assert.strictEqual(emptyFullResult.effective_state, 'UNVERIFIED');
 
   const notRunEvidence = clone(skipped);
-  notRunEvidence.claims.process_tree_terminate.evidence_refs = ['test-ran'];
+  notRunEvidence.claims.process_tree_terminate.evidence_refs = [validEvidenceRef];
   const notRunEvidenceResult = contracts.validateSupportMatrix2(notRunEvidence);
   assert.strictEqual(notRunEvidenceResult.valid, false);
   assert.strictEqual(notRunEvidenceResult.effective_state, 'UNVERIFIED');
@@ -1140,8 +1181,8 @@ test('support matrices cannot turn skipped or not-run claims into full support',
   const legacyArray = {
     ...clone(full),
     claims: [
-      { capability_id: 'process_identity', state: 'VERIFIED_FULL', evidence_refs: ['test-A'] },
-      { capability_id: 'process_tree_terminate', state: 'VERIFIED_FULL', evidence_refs: ['test-B'] },
+      { capability_id: 'process_identity', state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef] },
+      { capability_id: 'process_tree_terminate', state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef] },
     ],
   };
   const legacyArrayResult = contracts.validateSupportMatrix2(legacyArray);
@@ -1151,14 +1192,14 @@ test('support matrices cannot turn skipped or not-run claims into full support',
 
   const distinctCapabilities = clone(full);
   distinctCapabilities.claims.process_tree_terminate = {
-    state: 'VERIFIED_FULL', evidence_refs: ['test-B'],
+    state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef],
   };
   const distinctCapabilitiesResult = contracts.validateSupportMatrix2(distinctCapabilities);
   assert.strictEqual(distinctCapabilitiesResult.valid, true);
   assert.strictEqual(distinctCapabilitiesResult.effective_state, 'VERIFIED_FULL');
 
   const invalidKey = clone(full);
-  invalidKey.claims.constructor = { state: 'VERIFIED_FULL', evidence_refs: ['test-B'] };
+  invalidKey.claims.constructor = { state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef] };
   const invalidKeyResult = contracts.validateSupportMatrix2(invalidKey);
   assert.strictEqual(invalidKeyResult.valid, false);
   assert.strictEqual(invalidKeyResult.effective_state, 'UNVERIFIED');
@@ -1187,6 +1228,41 @@ test('schema contracts encode the same critical identity, recovery, and support 
   assert.strictEqual(supportSchema.properties.claims.minProperties, 1);
   assert.strictEqual(typeof supportSchema.properties.claims.propertyNames, 'object');
   assert.strictEqual(supportSchema.properties.claims['x-uniqueBy'], undefined);
+
+  const validEvidenceRef = 'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const supportFixture = {
+    schema: 'SupportMatrix2',
+    schema_version: 2,
+    adapter_id: 'windows-local-A',
+    platform: 'windows',
+    observed_at: '2026-08-30T02:00:00Z',
+    overall_state: 'VERIFIED_FULL',
+    claims: {
+      process_identity: { state: 'VERIFIED_FULL', evidence_refs: [validEvidenceRef] },
+    },
+  };
+  const schemaFixtures = [
+    supportFixture,
+    ...[
+      'NOT_RUN: process termination was not executed',
+      'skipped by platform gate',
+      'evidence:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      'observation:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'prefix evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa suffix',
+      42,
+    ].map((evidenceRef) => {
+      const fixture = clone(supportFixture);
+      fixture.claims.process_identity.evidence_refs = [evidenceRef];
+      return fixture;
+    }),
+  ];
+  const schemaResults = validateDraft202012Fixtures(supportSchema, schemaFixtures);
+  assert.deepStrictEqual(schemaResults, [true, false, false, false, false, false, false, false]);
+  assert.deepStrictEqual(
+    schemaFixtures.map((fixture) => contracts.validateSupportMatrix2(fixture).valid),
+    schemaResults,
+  );
 });
 
 test('version-2 factories own schema fields and reject legacy identity input', () => {

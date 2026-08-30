@@ -49,7 +49,10 @@
         "evidence_refs": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "pattern": "^evidence:[0-9a-f]{64}$"
+          }
         }
       },
       "additionalProperties": false,

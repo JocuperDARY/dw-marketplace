@@ -201,10 +201,10 @@ function requirePositiveIntegers(value, fields, errors) {
   }
 }
 
-function validateOpaqueReference(value, kind, path, errors) {
+function validateOpaqueReference(value, kind, path, errors, errorCode = 'RECOVERY_REFERENCE_INVALID') {
   const match = typeof value === 'string' ? OPAQUE_REF.exec(value) : null;
   if (!match || match[1] !== kind) {
-    errors.push(error('RECOVERY_REFERENCE_INVALID', path, `reference must use ${kind}:<sha256>`));
+    errors.push(error(errorCode, path, `reference must use ${kind}:<sha256>`));
   }
 }
 
@@ -495,6 +495,15 @@ function validateSupportMatrix2(matrix) {
         errors.push(error('SUPPORT_STATE_INVALID', `${path}.state`, 'support state is not controlled'));
       }
       validateStringArray(claim.evidence_refs, `${path}.evidence_refs`, errors, claim.state === 'NOT_RUN');
+      if (Array.isArray(claim.evidence_refs)) {
+        claim.evidence_refs.forEach((ref, index) => validateOpaqueReference(
+          ref,
+          'evidence',
+          `${path}.evidence_refs[${index}]`,
+          errors,
+          'SUPPORT_EVIDENCE_REFERENCE_INVALID',
+        ));
+      }
       if (claim.state === 'VERIFIED_FULL'
         && (!Array.isArray(claim.evidence_refs) || claim.evidence_refs.length === 0)) {
         errors.push(error('SUPPORT_FULL_EVIDENCE_REQUIRED', `${path}.evidence_refs`, 'full claims require execution evidence'));
