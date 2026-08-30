@@ -14,21 +14,21 @@
         "schema": { "const": "TemporaryAllocationIdentity2" },
         "schema_version": { "const": 2 },
         "platform": { "enum": ["windows", "linux"] },
-        "allocation_id": { "type": "string", "minLength": 1 },
-        "owner_id": { "type": "string", "minLength": 1 },
-        "run_id": { "type": "string", "minLength": 1 },
-        "session_id": { "type": "string", "minLength": 1 },
-        "lease_generation": { "type": "integer", "minimum": 1 },
-        "child_id": { "type": "string", "minLength": 1 },
-        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "canonical_root": { "type": "string", "minLength": 1 },
-        "creation_nonce": { "type": "string", "minLength": 1 },
+        "allocation_id": { "$ref": "#/$defs/non_empty_string" },
+        "owner_id": { "$ref": "#/$defs/non_empty_string" },
+        "run_id": { "$ref": "#/$defs/non_empty_string" },
+        "session_id": { "$ref": "#/$defs/non_empty_string" },
+        "lease_generation": { "$ref": "#/$defs/positive_safe_integer" },
+        "child_id": { "$ref": "#/$defs/non_empty_string" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "canonical_root": { "$ref": "#/$defs/non_empty_string" },
+        "creation_nonce": { "$ref": "#/$defs/non_empty_string" },
         "quota": {
           "type": "object",
           "required": ["unit", "limit"],
           "properties": {
             "unit": { "const": "bytes" },
-            "limit": { "type": "integer", "minimum": 1 }
+            "limit": { "$ref": "#/$defs/positive_safe_integer" }
           },
           "additionalProperties": false
         }
@@ -46,8 +46,8 @@
               "type": "object",
               "required": ["volume_serial_number", "file_id"],
               "properties": {
-                "volume_serial_number": { "type": "string", "minLength": 1 },
-                "file_id": { "type": "string", "minLength": 1 }
+                "volume_serial_number": { "$ref": "#/$defs/non_empty_string" },
+                "file_id": { "$ref": "#/$defs/non_empty_string" }
               },
               "additionalProperties": false
             },
@@ -70,8 +70,8 @@
               "type": "object",
               "required": ["device_id", "inode"],
               "properties": {
-                "device_id": { "type": "string", "minLength": 1 },
-                "inode": { "type": "integer", "minimum": 1 }
+                "device_id": { "$ref": "#/$defs/non_empty_string" },
+                "inode": { "$ref": "#/$defs/positive_safe_integer" }
               },
               "additionalProperties": false
             },
@@ -86,13 +86,13 @@
       "type": "object",
       "required": ["path", "windows_file_identity"],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
+        "path": { "$ref": "#/$defs/non_empty_string" },
         "windows_file_identity": {
           "type": "object",
           "required": ["volume_serial_number", "file_id"],
           "properties": {
-            "volume_serial_number": { "type": "string", "minLength": 1 },
-            "file_id": { "type": "string", "minLength": 1 }
+            "volume_serial_number": { "$ref": "#/$defs/non_empty_string" },
+            "file_id": { "$ref": "#/$defs/non_empty_string" }
           },
           "additionalProperties": false
         }
@@ -103,18 +103,24 @@
       "type": "object",
       "required": ["path", "linux_file_identity"],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
+        "path": { "$ref": "#/$defs/non_empty_string" },
         "linux_file_identity": {
           "type": "object",
           "required": ["device_id", "inode"],
           "properties": {
-            "device_id": { "type": "string", "minLength": 1 },
-            "inode": { "type": "integer", "minimum": 1 }
+            "device_id": { "$ref": "#/$defs/non_empty_string" },
+            "inode": { "$ref": "#/$defs/positive_safe_integer" }
           },
           "additionalProperties": false
         }
       },
       "additionalProperties": false
-    }
+    },
+    "non_empty_string": {
+      "type": "string",
+      "not": { "pattern": "^[\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$" }
+    },
+    "positive_safe_integer": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "sha256": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" }
   }
 }

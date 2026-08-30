@@ -21,18 +21,30 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const opaqueRef = (kind, value) => `${kind}:${hash(value)}`;
 const schemaRoot = path.resolve(__dirname, '../skills/dw-collaboration/references/schemas');
 const loadSchema = (name) => JSON.parse(fs.readFileSync(path.join(schemaRoot, name), 'utf8'));
+const schemaNames = [
+  'ProcessIdentity2.schema.json',
+  'HarnessSessionIdentity2.schema.json',
+  'TemporaryAllocationIdentity2.schema.json',
+  'RecoveryRecord2.schema.json',
+  'SupportMatrix2.schema.json',
+];
+const schemaBundle = schemaNames.map(loadSchema);
 
 function validateDraft202012Fixtures(schema, fixtures) {
   const script = [
     'import json, sys',
     'from jsonschema import Draft202012Validator',
+    'from referencing import Registry, Resource',
     'payload = json.load(sys.stdin)',
-    'validator = Draft202012Validator(payload["schema"])',
+    'registry = Registry()',
+    'for candidate in payload["schemas"]:',
+    '    registry = registry.with_resource(candidate["$id"], Resource.from_contents(candidate))',
+    'validator = Draft202012Validator(payload["schema"], registry=registry)',
     'print(json.dumps([validator.is_valid(item) for item in payload["fixtures"]]))',
   ].join('\n');
   const result = childProcess.spawnSync('python', ['-X', 'utf8', '-c', script], {
     encoding: 'utf8',
-    input: JSON.stringify({ schema, fixtures }),
+    input: JSON.stringify({ schema, fixtures, schemas: schemaBundle }),
   });
   assert.strictEqual(result.status, 0, result.stderr || result.error?.message);
   return JSON.parse(result.stdout);
@@ -1265,6 +1277,146 @@ test('schema contracts encode the same critical identity, recovery, and support 
     schemaFixtures.map((fixture) => contracts.validateSupportMatrix2(fixture).valid),
     schemaResults,
   );
+});
+
+test('schema scalar constraints match the bounded runtime identity validators', () => {
+  const schemas = Object.fromEntries(schemaBundle.map((schema) => [schema.title, schema]));
+  const safeInteger = 9007199254740991;
+  const sha = 'a'.repeat(64);
+  const supportMatrix = () => ({
+    schema: 'SupportMatrix2', schema_version: 2, adapter_id: 'windows-local-A', platform: 'windows',
+    observed_at: '2026-08-30T02:00:00Z', overall_state: 'VERIFIED_FULL',
+    claims: { process_identity: { state: 'VERIFIED_FULL', evidence_refs: [`evidence:${sha}`] } },
+  });
+  const recoveryRecord = () => ({
+    schema: 'RecoveryRecord2', schema_version: 2, resource_id: 'resource-A', resource_type: 'process_tree',
+    run_id: 'run-A', session_id: 'session-A', lease_generation: 2, identity: windowsProcess(),
+    current_phase: { phase: 'cleanup', state: 'ACTIVE' },
+    last_valid_observation: {
+      observed_at: '2026-08-30T01:30:00Z', observation_ref: `observation:${sha}`, identity_ref: `identity:${sha}`,
+    },
+    cleanup_authority_ref: `authority:${sha}`, teardown_condition: 'identity_absence_verified', evidence_refs: [`evidence:${sha}`],
+  });
+  const assertParity = (label, schema, runtimeValidator, fixtures, expected) => {
+    assert.deepStrictEqual(fixtures.map((fixture) => runtimeValidator(fixture).valid), expected, `${label} runtime`);
+    assert.deepStrictEqual(validateDraft202012Fixtures(schema, fixtures), expected, `${label} schema`);
+  };
+
+  const externalHarness = harnessSession('agent_session', { process_identity: windowsProcess() });
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.HarnessSessionIdentity2, [externalHarness]), [true]);
+  const externalRecovery = recoveryRecord();
+  externalRecovery.resource_type = 'agent_session';
+  externalRecovery.identity = externalHarness;
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.RecoveryRecord2, [externalRecovery]), [true]);
+
+  const trimmedStringValues = [
+    ['ASCII whitespace', ' \t\n', false],
+    ['NBSP', '\u00a0', false],
+    ['BOM', '\ufeff', false],
+    ['non-whitespace control', '\u0000', true],
+    ['ordinary text', 'value', true],
+  ];
+  const stringTargets = [
+    ['process owner', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ owner_id: value })],
+    ['harness session', schemas.HarnessSessionIdentity2, contracts.validateHarnessSessionIdentity2, (value) => harnessSession('agent_session', { session_id: value })],
+    ['temporary allocation', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => temporaryAllocation({ allocation_id: value })],
+    ['recovery resource', schemas.RecoveryRecord2, contracts.validateRecoveryRecord2, (value) => ({ ...recoveryRecord(), resource_id: value })],
+    ['support adapter', schemas.SupportMatrix2, contracts.validateSupportMatrix2, (value) => ({ ...supportMatrix(), adapter_id: value })],
+  ];
+  for (const [target, schema, validator, fixtureFor] of stringTargets) {
+    assertParity(`${target} JS trim strings`, schema, validator, trimmedStringValues.map(([, value]) => fixtureFor(value)), trimmedStringValues.map(([, , valid]) => valid));
+  }
+
+  const positiveSafeIntegerValues = [
+    ['one', 1, true], ['maximum safe integer', safeInteger, true], ['first unsafe integer', safeInteger + 1, false],
+    ['zero', 0, false], ['negative', -1, false], ['fractional', 1.5, false],
+  ];
+  const positiveIntegerTargets = [
+    ['process pid', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ pid: value })],
+    ['process generation', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ lease_generation: value })],
+    ['Linux process ticks', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => linuxProcess({ linux_identity: { proc_start_ticks: value, boot_id_sha256: sha } })],
+    ['harness generation', schemas.HarnessSessionIdentity2, contracts.validateHarnessSessionIdentity2, (value) => harnessSession('agent_session', { lease_generation: value })],
+    ['temporary generation', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => temporaryAllocation({ lease_generation: value })],
+    ['temporary quota', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => ({ ...temporaryAllocation(), quota: { unit: 'bytes', limit: value } })],
+    ['temporary inode', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => ({ ...temporaryAllocation(), linux_file_identity: { device_id: 'dev-2049', inode: value } })],
+    ['recovery generation', schemas.RecoveryRecord2, contracts.validateRecoveryRecord2, (value) => {
+      const record = recoveryRecord();
+      record.lease_generation = value;
+      record.identity.lease_generation = value;
+      return record;
+    }],
+  ];
+  for (const [target, schema, validator, fixtureFor] of positiveIntegerTargets) {
+    assertParity(`${target} safe integer boundaries`, schema, validator, positiveSafeIntegerValues.map(([, value]) => fixtureFor(value)), positiveSafeIntegerValues.map(([, , valid]) => valid));
+  }
+
+  const exactShaValues = [
+    ['exact lowercase SHA-256', sha, true], ['short SHA-256', sha.slice(1), false], ['long SHA-256', `${sha}a`, false],
+    ['uppercase SHA-256', sha.toUpperCase(), false], ['terminal LF', `${sha}\n`, false], ['terminal CR', `${sha}\r`, false],
+    ['terminal line separator', `${sha}\u2028`, false], ['terminal paragraph separator', `${sha}\u2029`, false],
+    ['surrounding text', `prefix${sha}suffix`, false],
+  ];
+  assertParity('process SHA-256', schemas.ProcessIdentity2, contracts.validateProcessIdentity2,
+    exactShaValues.map(([, value]) => windowsProcess({ executable_path_sha256: value })), exactShaValues.map(([, , valid]) => valid));
+  assertParity('temporary manifest SHA-256', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2,
+    exactShaValues.map(([, value]) => temporaryAllocation({ manifest_sha256: value })), exactShaValues.map(([, , valid]) => valid));
+
+  const referenceTargets = [
+    ['observation reference', 'observation', (record, value) => { record.last_valid_observation.observation_ref = value; }],
+    ['identity reference', 'identity', (record, value) => { record.last_valid_observation.identity_ref = value; }],
+    ['authority reference', 'authority', (record, value) => { record.cleanup_authority_ref = value; }],
+    ['evidence reference', 'evidence', (record, value) => { record.evidence_refs = [value]; }],
+  ];
+  for (const [target, prefix, setReference] of referenceTargets) {
+    const referenceValues = [
+      [`${prefix} exact`, `${prefix}:${sha}`, true], [`${prefix} short`, `${prefix}:${sha.slice(1)}`, false],
+      [`${prefix} uppercase`, `${prefix}:${sha.toUpperCase()}`, false], ['wrong typed prefix', `evidence:${sha}`, prefix === 'evidence'],
+      ['terminal LF', `${prefix}:${sha}\n`, false], ['terminal CR', `${prefix}:${sha}\r`, false],
+      ['terminal line separator', `${prefix}:${sha}\u2028`, false], ['terminal paragraph separator', `${prefix}:${sha}\u2029`, false],
+      ['surrounding text', `prefix ${prefix}:${sha} suffix`, false],
+    ];
+    assertParity(target, schemas.RecoveryRecord2, contracts.validateRecoveryRecord2, referenceValues.map(([, value]) => {
+      const record = recoveryRecord(); setReference(record, value); return record;
+    }), referenceValues.map(([, , valid]) => valid));
+  }
+
+  const filetimeValues = [
+    ['decimal', '134167428000000000', true], ['empty', '', false], ['letters', '12x', false],
+    ['terminal LF', '123\n', false], ['terminal CR', '123\r', false], ['terminal line separator', '123\u2028', false], ['terminal paragraph separator', '123\u2029', false],
+  ];
+  assertParity('Windows FILETIME', schemas.ProcessIdentity2, contracts.validateProcessIdentity2,
+    filetimeValues.map(([, value]) => windowsProcess({ windows_identity: { process_creation_time_filetime: value, process_handle: '0x1' } })), filetimeValues.map(([, , valid]) => valid));
+
+  const capabilityValues = [
+    ['valid', 'process_tree_terminate', true], ['letter first', 'A1_', true], ['numeric first', '1process', false], ['dash', 'process-tree', false],
+    ['constructor', 'constructor', false], ['prototype', 'prototype', false], ['terminal LF', 'process_tree\n', false], ['terminal CR', 'process_tree\r', false],
+    ['terminal line separator', 'process_tree\u2028', false], ['terminal paragraph separator', 'process_tree\u2029', false],
+  ];
+  assertParity('support capability IDs', schemas.SupportMatrix2, contracts.validateSupportMatrix2, capabilityValues.map(([, capability]) => {
+    const matrix = supportMatrix(); matrix.claims = {}; matrix.claims[capability] = { state: 'VERIFIED_FULL', evidence_refs: [`evidence:${sha}`] }; return matrix;
+  }), capabilityValues.map(([, , valid]) => valid));
+
+  const timestampValues = [
+    ['UTC seconds', '2026-08-30T02:00:00Z', true], ['UTC fractional seconds', '2026-08-30T02:00:00.123Z', true],
+    ['offset forbidden', '2026-08-30T02:00:00+00:00', false], ['missing seconds', '2026-08-30T02:00Z', false],
+    ['terminal LF', '2026-08-30T02:00:00Z\n', false], ['terminal CR', '2026-08-30T02:00:00Z\r', false],
+    ['terminal line separator', '2026-08-30T02:00:00Z\u2028', false], ['terminal paragraph separator', '2026-08-30T02:00:00Z\u2029', false],
+  ];
+  const timestampTargets = [
+    ['process start_time', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ start_time: value })],
+    ['recovery observed_at', schemas.RecoveryRecord2, contracts.validateRecoveryRecord2, (value) => ({ ...recoveryRecord(), last_valid_observation: { observed_at: value, observation_ref: `observation:${sha}`, identity_ref: `identity:${sha}` } })],
+    ['support observed_at', schemas.SupportMatrix2, contracts.validateSupportMatrix2, (value) => ({ ...supportMatrix(), observed_at: value })],
+  ];
+  for (const [target, schema, validator, fixtureFor] of timestampTargets) {
+    assertParity(`${target} lexical UTC`, schema, validator, timestampValues.map(([, value]) => fixtureFor(value)), timestampValues.map(([, , valid]) => valid));
+  }
+
+  const terminalEvidence = supportMatrix();
+  terminalEvidence.claims.process_identity.evidence_refs = [`evidence:${sha}\n`];
+  const terminalEvidenceResult = contracts.validateSupportMatrix2(terminalEvidence);
+  assert.strictEqual(terminalEvidenceResult.valid, false);
+  assert(terminalEvidenceResult.errors.some((item) => item.code === 'SUPPORT_EVIDENCE_REFERENCE_INVALID'));
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.SupportMatrix2, [terminalEvidence]), [false]);
 });
 
 test('version-2 factories own schema fields and reject legacy identity input', () => {
