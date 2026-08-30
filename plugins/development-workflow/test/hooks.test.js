@@ -334,12 +334,15 @@ test('collaboration integration exposes one canonical discovery path', () => {
   const agentRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'ai-agent-dev.md'), 'utf8');
   const workflowRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
   const hooks = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
-  const expectedScript = 'node test/runtime-v5.test.js && node test/collaboration-contract.test.js && node test/collaboration-state.test.js && node test/collaboration-receipt.test.js && node test/collaboration-behavior.test.js && node test/host-e2e.test.js && node test/collaboration-platform.test.js && node test/resource-control.test.js && node test/failure-loop-guard-hardening.test.js && node test/resource-aware-queue.test.js && node test/hooks.test.js';
+  const expectedScript = 'npm run test:all';
 
   assert(packageJson.files.includes('skills/dw-collaboration/'));
   assert(packageJson.files.includes('test/'));
   assert.strictEqual(packageJson.scripts.test, expectedScript);
   assert.strictEqual(packageJson.scripts.validate, expectedScript);
+  for (const script of ['test:core', 'test:platform:windows', 'test:platform:linux', 'test:hooks', 'test:package', 'test:all']) {
+    assert.strictEqual(typeof packageJson.scripts[script], 'string', `missing ${script}`);
+  }
   assert.match(hub, /\.\.\/dw-collaboration\/SKILL\.md/);
   assert.match(tooling, /\.\.\/dw-collaboration\/SKILL\.md/);
   assert.match(tooling, /子代理|child|协作/);
@@ -735,6 +738,7 @@ test('domain routing instructions reference existing plugin assets', () => {
 
 test('development-workflow manifests and README agree on version and skill count', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
+  const testManifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'test', 'test-manifest.json'), 'utf8'));
   const pluginJson = JSON.parse(fs.readFileSync(
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
@@ -743,12 +747,14 @@ test('development-workflow manifests and README agree on version and skill count
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
-  assert(packageJson.scripts.test.includes('resource-control.test.js'));
-  assert(packageJson.scripts.test.includes('failure-loop-guard-hardening.test.js'));
-  assert(packageJson.scripts.test.includes('resource-aware-queue.test.js'));
-  assert(packageJson.scripts.validate.includes('resource-control.test.js'));
-  assert(packageJson.scripts.validate.includes('failure-loop-guard-hardening.test.js'));
-  assert(packageJson.scripts.validate.includes('resource-aware-queue.test.js'));
+  const completeTestFiles = testManifest.suites.all.tests.flatMap((test) => test.args || []);
+  for (const testFile of [
+    'test/resource-control.test.js',
+    'test/failure-loop-guard-hardening.test.js',
+    'test/resource-aware-queue.test.js',
+  ]) {
+    assert(completeTestFiles.includes(testFile), `${testFile} must remain in the complete test suite`);
+  }
   for (const relative of [
     'skills/dw-collaboration/scripts/lib/task-resource-tracker.js',
     'skills/dw-collaboration/scripts/lib/failure-loop-guard.js',

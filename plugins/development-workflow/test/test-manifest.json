@@ -1,0 +1,56 @@
+{
+  "suites": {
+    "core": {
+      "tests": [
+        { "name": "runtime v5 contracts", "command": "node", "args": ["test/runtime-v5.test.js"] },
+        { "name": "collaboration contracts", "command": "node", "args": ["test/collaboration-contract.test.js"] },
+        { "name": "collaboration state", "command": "node", "args": ["test/collaboration-state.test.js"] },
+        { "name": "collaboration receipts", "command": "node", "args": ["test/collaboration-receipt.test.js"] },
+        { "name": "collaboration behavior", "command": "node", "args": ["test/collaboration-behavior.test.js"] },
+        { "name": "synthetic host evidence data", "command": "node", "args": ["test/host-evidence-data.test.js"] },
+        { "name": "resource control", "command": "node", "args": ["test/resource-control.test.js"] },
+        { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
+        { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
+        { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] }
+      ]
+    },
+    "platform:windows": {
+      "requiredLifecycle": "windows",
+      "tests": [
+        { "name": "Windows platform lifecycle", "command": "node", "args": ["test/collaboration-platform.test.js"] }
+      ]
+    },
+    "platform:linux": {
+      "requiredLifecycle": "linux",
+      "tests": [
+        { "name": "Linux platform lifecycle", "command": "node", "args": ["test/collaboration-platform.test.js"] }
+      ]
+    },
+    "hooks": {
+      "tests": [
+        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"] }
+      ]
+    },
+    "package": {
+      "tests": [
+        { "name": "published package self-test", "command": "node", "args": ["test/hooks.test.js"] }
+      ]
+    },
+    "all": {
+      "tests": [
+        { "name": "runtime v5 contracts", "command": "node", "args": ["test/runtime-v5.test.js"] },
+        { "name": "collaboration contracts", "command": "node", "args": ["test/collaboration-contract.test.js"] },
+        { "name": "collaboration state", "command": "node", "args": ["test/collaboration-state.test.js"] },
+        { "name": "collaboration receipts", "command": "node", "args": ["test/collaboration-receipt.test.js"] },
+        { "name": "collaboration behavior", "command": "node", "args": ["test/collaboration-behavior.test.js"] },
+        { "name": "synthetic host evidence data", "command": "node", "args": ["test/host-evidence-data.test.js"] },
+        { "name": "platform lifecycle", "command": "node", "args": ["test/collaboration-platform.test.js"] },
+        { "name": "resource control", "command": "node", "args": ["test/resource-control.test.js"] },
+        { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
+        { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
+        { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
+        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"] }
+      ]
+    }
+  }
+}
