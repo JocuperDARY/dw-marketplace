@@ -61,10 +61,14 @@
             "platform": { "const": "linux" },
             "linux_identity": {
               "type": "object",
-              "required": ["proc_start_ticks", "boot_id_sha256"],
+              "required": ["proc_start_ticks", "boot_id_sha256", "process_group_id", "os_session_id", "executable_device_id", "executable_inode"],
               "properties": {
                 "proc_start_ticks": { "$ref": "#/$defs/positive_safe_integer" },
-                "boot_id_sha256": { "$ref": "#/$defs/sha256" }
+                "boot_id_sha256": { "$ref": "#/$defs/sha256" },
+                "process_group_id": { "$ref": "#/$defs/positive_safe_integer" },
+                "os_session_id": { "$ref": "#/$defs/positive_safe_integer" },
+                "executable_device_id": { "$ref": "#/$defs/non_empty_string" },
+                "executable_inode": { "$ref": "#/$defs/positive_safe_integer" }
               },
               "additionalProperties": false
             }

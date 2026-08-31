@@ -65,10 +65,10 @@
     "evidence_ref": { "type": "string", "minLength": 73, "maxLength": 73, "pattern": "^evidence:[0-9a-f]{64}$" }
   },
   "allOf": [
-    { "if": { "properties": { "resource_type": { "const": "process_tree" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" } } } },
-    { "if": { "properties": { "resource_type": { "const": "command_session" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" } } } },
-    { "if": { "properties": { "resource_type": { "const": "agent_session" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "agent_session" } } }] } } } },
-    { "if": { "properties": { "resource_type": { "const": "runtime_thread" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "runtime_thread" } } }] } } } },
-    { "if": { "properties": { "resource_type": { "const": "temporary_allocation" } } }, "then": { "properties": { "identity": { "$ref": "TemporaryAllocationIdentity2.schema.json" } } } }
+    { "if": { "properties": { "resource_type": { "const": "process_tree" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" }, "teardown_condition": { "const": "identity_absence_verified" } } } },
+    { "if": { "properties": { "resource_type": { "const": "command_session" } } }, "then": { "properties": { "identity": { "$ref": "ProcessIdentity2.schema.json" }, "teardown_condition": { "const": "identity_absence_verified" } } } },
+    { "if": { "properties": { "resource_type": { "const": "agent_session" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "agent_session" } } }] }, "teardown_condition": { "const": "harness_closed" } } } },
+    { "if": { "properties": { "resource_type": { "const": "runtime_thread" } } }, "then": { "properties": { "identity": { "allOf": [{ "$ref": "HarnessSessionIdentity2.schema.json" }, { "properties": { "harness_kind": { "const": "runtime_thread" } } }] }, "teardown_condition": { "const": "harness_closed" } } } },
+    { "if": { "properties": { "resource_type": { "const": "temporary_allocation" } } }, "then": { "properties": { "identity": { "$ref": "TemporaryAllocationIdentity2.schema.json" }, "teardown_condition": { "const": "allocation_absence_verified" } } } }
   ]
 }

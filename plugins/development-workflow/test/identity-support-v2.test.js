@@ -13,6 +13,10 @@ const {
   ResourceTrackerError,
   TaskResourceTracker,
 } = require('../skills/dw-collaboration/scripts/lib/task-resource-tracker');
+const {
+  computeDetachedSha256,
+  createDetachedJsonSnapshot,
+} = require('../skills/dw-collaboration/scripts/lib/canonical-json');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -32,12 +36,12 @@ const schemaBundle = schemaNames.map(loadSchema);
 const schemaRequirementsPath = path.resolve(__dirname, 'schema-validation-requirements.txt');
 const compatiblePythonDescriptors = new Map();
 const stableVersionPattern = /^\d+(?:\.\d+)*$/;
-const compatibilityPythonErrorCodes = new Set([
+const compatibilityPythonErrorCodes = [
   'PYTHON_SCHEMA_DEPENDENCY_MISSING',
   'PYTHON_SCHEMA_VERSION_UNSUPPORTED',
   'PYTHON_SCHEMA_API_MISSING',
   'PYTHON_SCHEMA_MALFORMED_OUTPUT',
-]);
+];
 
 function pythonDescriptor(executable, prefixArgs = []) {
   return Object.freeze({ executable, prefixArgs: Object.freeze([...prefixArgs]) });
@@ -54,7 +58,8 @@ function pythonDiscoveryKey() {
 
 function pythonCandidates() {
   if (Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON')) {
-    return { override: true, candidates: [pythonDescriptor(process.env.DW_SCHEMA_PYTHON)] };
+    const override = process.env.DW_SCHEMA_PYTHON;
+    return { override: true, candidates: override === '' ? [] : [pythonDescriptor(override)] };
   }
   return {
     override: false,
@@ -64,10 +69,11 @@ function pythonCandidates() {
   };
 }
 
-function pythonError(code, message, descriptor = null) {
+function pythonError(code, message, descriptor = null, remediation = null) {
   const error = new Error(`${code}: ${message}`);
   error.code = code;
   error.descriptor = descriptor;
+  if (remediation) error.remediation = remediation;
   return error;
 }
 
@@ -76,7 +82,11 @@ function descriptorDisplay(descriptor) {
 }
 
 function installCommand(descriptor) {
-  return `${descriptorDisplay(descriptor)} -m pip install -r ${JSON.stringify(schemaRequirementsPath)}`;
+  const remediation = {
+    executable: descriptor.executable,
+    args: [...descriptor.prefixArgs, '-m', 'pip', 'install', '-r', schemaRequirementsPath],
+  };
+  return `executable ${JSON.stringify(remediation.executable)} with arguments ${remediation.args.map((arg) => JSON.stringify(arg)).join(' ')}`;
 }
 
 function classifyPythonSpawn(result, descriptor, stage) {
@@ -106,7 +116,7 @@ function classifyPythonSpawn(result, descriptor, stage) {
   return { executed: true, result };
 }
 
-function runPython(descriptor, args, input, stage) {
+function runPython(descriptor, args, input, stage, diagnosticDescriptor = descriptor) {
   const result = childProcess.spawnSync(descriptor.executable, [...descriptor.prefixArgs, ...args], {
     encoding: 'utf8',
     input,
@@ -115,7 +125,7 @@ function runPython(descriptor, args, input, stage) {
     maxBuffer: 65536,
     windowsHide: true,
   });
-  return classifyPythonSpawn(result, descriptor, stage);
+  return classifyPythonSpawn(result, diagnosticDescriptor, stage);
 }
 
 function parsePythonJson(stdout, descriptor, stage) {
@@ -127,16 +137,17 @@ function parsePythonJson(stdout, descriptor, stage) {
 }
 
 function selectPythonResolutionError(probes) {
-  let firstCompatibilityError = null;
   let firstExecutedError = null;
   for (const probe of probes) {
     if (!probe.executed) continue;
     firstExecutedError ??= probe.error;
-    if (compatibilityPythonErrorCodes.has(probe.error?.code)) {
-      firstCompatibilityError ??= probe.error;
+  }
+  for (const code of compatibilityPythonErrorCodes) {
+    for (const probe of probes) {
+      if (probe.executed && probe.error?.code === code) return probe.error;
     }
   }
-  return firstCompatibilityError ?? firstExecutedError
+  return firstExecutedError
     ?? pythonError('PYTHON_SCHEMA_NO_INTERPRETER', 'No configured Python interpreter could be executed');
 }
 
@@ -157,7 +168,7 @@ function stableVersionInRange(version, lowerBound, upperBound) {
     && compareVersionSegments(segments, upperBound.split('.').map(Number)) < 0;
 }
 
-const pythonCompatibilityProbe = [
+const pythonMetadataProbe = [
   'import json',
   'from importlib.metadata import PackageNotFoundError, version',
   'try:',
@@ -166,23 +177,38 @@ const pythonCompatibilityProbe = [
   'except PackageNotFoundError as error:',
   '    print(json.dumps({"kind": "missing_dependency", "package": getattr(error, "name", str(error))}))',
   '    raise SystemExit(0)',
-  'try:',
-  '    from jsonschema import Draft202012Validator',
-  '    from referencing import Registry, Resource',
-  '    required = [Draft202012Validator, Registry, Resource, Resource.from_contents, Registry.with_resource]',
-  '    if not all(callable(value) for value in required):',
-  '        raise TypeError("required Draft 2020-12 API surface is not callable")',
-  '    registry = Registry().with_resource("urn:dw:python-probe", Resource.from_contents({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:dw:python-probe"}))',
-  '    Draft202012Validator({"$schema": "https://json-schema.org/draft/2020-12/schema"}, registry=registry)',
-  'except Exception as error:',
-  '    print(json.dumps({"kind": "missing_api", "detail": f"{type(error).__name__}: {error}"}))',
-  '    raise SystemExit(0)',
   'print(json.dumps({"kind": "compatible", "jsonschema": jsonschema_version, "referencing": referencing_version}))',
 ].join('\n');
 
+const pythonExternalRefBehaviorProbe = [
+  'import json',
+  'try:',
+  '    from jsonschema import Draft202012Validator',
+  '    from referencing import Registry, Resource',
+  '    resource = Resource.from_contents({"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "urn:dw:python-probe:integer", "type": "integer"})',
+  '    registry = Registry().with_resource("urn:dw:python-probe:integer", resource)',
+  '    validator = Draft202012Validator({"$schema": "https://json-schema.org/draft/2020-12/schema", "$ref": "urn:dw:python-probe:integer"}, registry=registry)',
+  '    print(json.dumps({"kind": "external_ref_behavior", "external_ref_valid": validator.is_valid(7), "external_ref_invalid": validator.is_valid("not-an-integer")}))',
+  'except Exception as error:',
+  '    print(json.dumps({"kind": "missing_api", "detail": f"{type(error).__name__}: {error}"}))',
+].join('\n');
+
+function dependencyRemediation(descriptor) {
+  return {
+    executable: descriptor.executable,
+    args: [...descriptor.prefixArgs, '-m', 'pip', 'install', '-r', schemaRequirementsPath],
+  };
+}
+
 function probePythonDescriptor(descriptor, prefixArgs = []) {
   const probeDescriptor = pythonDescriptor(descriptor.executable, [...descriptor.prefixArgs, ...prefixArgs]);
-  const execution = runPython(probeDescriptor, ['-X', 'utf8', '-c', pythonCompatibilityProbe], undefined, 'Python compatibility probe');
+  const execution = runPython(
+    probeDescriptor,
+    ['-X', 'utf8', '-c', pythonMetadataProbe],
+    undefined,
+    'Python compatibility metadata probe',
+    descriptor,
+  );
   if (execution.error) return execution;
   let probe;
   try {
@@ -190,27 +216,28 @@ function probePythonDescriptor(descriptor, prefixArgs = []) {
   } catch (error) {
     return {
       executed: true,
-      error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', `Python compatibility probe did not produce JSON: ${error.message}`, probeDescriptor),
+      error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', `Python compatibility metadata probe did not produce JSON: ${error.message}`, descriptor),
     };
   }
   if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
-    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility probe returned a non-object', probeDescriptor) };
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility metadata probe returned a non-object', descriptor) };
   }
   if (probe.kind === 'missing_dependency') {
+    if (typeof probe.package !== 'string' || probe.package.length === 0) {
+      return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility metadata probe payload lacks a valid package field', descriptor) };
+    }
     return {
       executed: true,
       error: pythonError(
         'PYTHON_SCHEMA_DEPENDENCY_MISSING',
-        `Python compatibility probe is missing ${String(probe.package)}; install with ${installCommand(descriptor)}`,
-        probeDescriptor,
+        `Python compatibility metadata probe is missing ${String(probe.package)}; install dependencies using ${installCommand(descriptor)}`,
+        descriptor,
+        dependencyRemediation(descriptor),
       ),
     };
   }
-  if (probe.kind === 'missing_api') {
-    return { executed: true, error: pythonError('PYTHON_SCHEMA_API_MISSING', `Python compatibility probe is incompatible: ${String(probe.detail)}`, probeDescriptor) };
-  }
   if (probe.kind !== 'compatible' || typeof probe.jsonschema !== 'string' || typeof probe.referencing !== 'string') {
-    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility probe returned an unrecognized payload', probeDescriptor) };
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility metadata probe returned an unrecognized payload', descriptor) };
   }
   if (!stableVersionInRange(probe.jsonschema, '4.18.0', '5.0.0')
     || !stableVersionInRange(probe.referencing, '0.28.4', '1.0.0')) {
@@ -218,12 +245,43 @@ function probePythonDescriptor(descriptor, prefixArgs = []) {
       executed: true,
       error: pythonError(
         'PYTHON_SCHEMA_VERSION_UNSUPPORTED',
-        `Python compatibility probe requires jsonschema >=4.18.0,<5.0.0 and referencing >=0.28.4,<1.0.0; received jsonschema=${probe.jsonschema}, referencing=${probe.referencing}`,
-        probeDescriptor,
+        `Python compatibility metadata probe requires jsonschema >=4.18.0,<5.0.0 and referencing >=0.28.4,<1.0.0; received jsonschema=${probe.jsonschema}, referencing=${probe.referencing}`,
+        descriptor,
       ),
     };
   }
-  return { executed: true, descriptor: probeDescriptor };
+  const behaviorExecution = runPython(
+    probeDescriptor,
+    ['-X', 'utf8', '-c', pythonExternalRefBehaviorProbe],
+    undefined,
+    'Python compatibility API behavior probe',
+    descriptor,
+  );
+  if (behaviorExecution.error) return behaviorExecution;
+  let behavior;
+  try {
+    behavior = JSON.parse(behaviorExecution.result.stdout);
+  } catch (error) {
+    return {
+      executed: true,
+      error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', `Python compatibility API behavior probe did not produce JSON: ${error.message}`, descriptor),
+    };
+  }
+  if (!behavior || typeof behavior !== 'object' || Array.isArray(behavior)) {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility API behavior probe returned a non-object', descriptor) };
+  }
+  if (behavior.kind === 'missing_api') {
+    if (typeof behavior.detail !== 'string' || behavior.detail.length === 0) {
+      return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility API behavior probe payload lacks a valid detail field', descriptor) };
+    }
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_API_MISSING', `Python compatibility API behavior probe is incompatible: ${String(behavior.detail)}`, descriptor) };
+  }
+  if (behavior.kind !== 'external_ref_behavior'
+    || behavior.external_ref_valid !== true
+    || behavior.external_ref_invalid !== false) {
+    return { executed: true, error: pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'Python compatibility API behavior probe returned an unrecognized payload', descriptor) };
+  }
+  return { executed: true, descriptor };
 }
 
 function resolveCompatiblePythonDescriptor({ bypassCache = false } = {}) {
@@ -231,6 +289,9 @@ function resolveCompatiblePythonDescriptor({ bypassCache = false } = {}) {
   if (!bypassCache && compatiblePythonDescriptors.has(cacheKey)) return compatiblePythonDescriptors.get(cacheKey);
 
   const { override, candidates } = pythonCandidates();
+  if (override && candidates.length === 0) {
+    throw pythonError('PYTHON_SCHEMA_NO_INTERPRETER', 'DW_SCHEMA_PYTHON is set to an empty executable and will not fall back');
+  }
   const probes = [];
   for (const candidate of candidates) {
     const probe = probePythonDescriptor(candidate);
@@ -304,7 +365,7 @@ test('compatibility probe classifies malformed JSON without stopping discovery',
   }
 });
 
-test('Python resolution prefers the first compatibility error over process failures', () => {
+test('Python resolution ranks API failures above malformed output and process failures', () => {
   const processFailure = pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', 'first candidate failed');
   const apiMissing = pythonError('PYTHON_SCHEMA_API_MISSING', 'second candidate is incompatible');
   const malformedOutput = pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'third candidate was malformed');
@@ -321,8 +382,337 @@ test('Python resolution prefers the first compatibility error over process failu
       { executed: true, error: malformedOutput },
       { executed: true, error: apiMissing },
     ]),
-    malformedOutput,
+    apiMissing,
   );
+});
+
+test('unsupported metadata stops before the dependency API probe', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalOverrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  const originalOverride = process.env.DW_SCHEMA_PYTHON;
+  const originalCacheEntries = [...compatiblePythonDescriptors.entries()];
+  const calls = [];
+  try {
+    process.env.DW_SCHEMA_PYTHON = 'metadata-python';
+    compatiblePythonDescriptors.clear();
+    childProcess.spawnSync = (executable, args, options) => {
+      calls.push({ executable, args, options });
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'compatible', jsonschema: '5.0.0', referencing: '0.28.4' }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    assert.throws(
+      () => resolveCompatiblePythonDescriptor(),
+      (error) => error.code === 'PYTHON_SCHEMA_VERSION_UNSUPPORTED',
+    );
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].executable, 'metadata-python');
+    assert.deepStrictEqual(calls[0].args.slice(0, 3), ['-X', 'utf8', '-c']);
+    assert.deepStrictEqual(calls[0].options, {
+      encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+    });
+    assert.strictEqual(calls[0].args[3].includes('from jsonschema'), false);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    compatiblePythonDescriptors.clear();
+    for (const [key, value] of originalCacheEntries) compatiblePythonDescriptors.set(key, value);
+    if (originalOverrideIsSet) process.env.DW_SCHEMA_PYTHON = originalOverride;
+    else delete process.env.DW_SCHEMA_PYTHON;
+  }
+});
+
+test('compatible metadata without external-ref behavior evidence is rejected', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const calls = [];
+  try {
+    childProcess.spawnSync = (executable, args, options) => {
+      calls.push({ executable, args, options });
+      assert.strictEqual(executable, 'evidence-python');
+      assert.deepStrictEqual(args.slice(0, 3), ['-X', 'utf8', '-c']);
+      assert.deepStrictEqual(options, {
+        encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+      });
+      if (calls.length === 1) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ kind: 'compatible', jsonschema: '4.18.0', referencing: '0.28.4' }),
+          stderr: '',
+          signal: null,
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'external_ref_behavior', external_ref_valid: 'true', external_ref_invalid: false }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    const probe = probePythonDescriptor(pythonDescriptor('evidence-python'));
+    assert.strictEqual(probe.executed, true);
+    assert(probe.error);
+    assert.strictEqual(probe.error.code, 'PYTHON_SCHEMA_MALFORMED_OUTPUT');
+    assert.strictEqual(calls.length, 2);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+  }
+});
+
+test('Python resolution ranks actionable failures before candidate order', () => {
+  const processFailure = pythonError('PYTHON_SCHEMA_PROCESS_FAILURE', 'ordinary process failure');
+  const malformedOutput = pythonError('PYTHON_SCHEMA_MALFORMED_OUTPUT', 'malformed output');
+  const apiMissingFirst = pythonError('PYTHON_SCHEMA_API_MISSING', 'first API failure');
+  const apiMissingSecond = pythonError('PYTHON_SCHEMA_API_MISSING', 'second API failure');
+  const versionUnsupported = pythonError('PYTHON_SCHEMA_VERSION_UNSUPPORTED', 'unsupported version');
+  const dependencyMissing = pythonError('PYTHON_SCHEMA_DEPENDENCY_MISSING', 'missing dependency');
+
+  assert.strictEqual(
+    selectPythonResolutionError([
+      { executed: true, error: processFailure },
+      { executed: true, error: malformedOutput },
+      { executed: true, error: apiMissingFirst },
+      { executed: true, error: versionUnsupported },
+      { executed: true, error: dependencyMissing },
+    ]),
+    dependencyMissing,
+  );
+  assert.strictEqual(
+    selectPythonResolutionError([
+      { executed: true, error: apiMissingFirst },
+      { executed: true, error: apiMissingSecond },
+    ]),
+    apiMissingFirst,
+  );
+});
+
+test('isolated probe errors retain the base descriptor for remediation', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalOverrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  const originalOverride = process.env.DW_SCHEMA_PYTHON;
+  const originalCacheEntries = [...compatiblePythonDescriptors.entries()];
+  const calls = [];
+  try {
+    process.env.DW_SCHEMA_PYTHON = 'base-python';
+    compatiblePythonDescriptors.clear();
+    childProcess.spawnSync = (executable, args, options) => {
+      calls.push({ executable, args, options });
+      assert.strictEqual(executable, 'base-python');
+      assert.deepStrictEqual(options, {
+        encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+      });
+      if (args.includes('-I') && args.includes('-S')) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ kind: 'missing_dependency', package: 'referencing' }),
+          stderr: '',
+          signal: null,
+        };
+      }
+      if (calls.filter((call) => !call.args.includes('-I') && !call.args.includes('-S')).length === 1) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ kind: 'compatible', jsonschema: '4.18.0', referencing: '0.28.4' }),
+          stderr: '',
+          signal: null,
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'external_ref_behavior', external_ref_valid: true, external_ref_invalid: false }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    let captured;
+    assert.throws(
+      () => validateDraft202012Fixtures(loadSchema('SupportMatrix2.schema.json'), [], { isolatedDependencyProbe: true }),
+      (error) => {
+        captured = error;
+        return error.code === 'PYTHON_SCHEMA_DEPENDENCY_MISSING';
+      },
+    );
+    assert.deepStrictEqual(captured.descriptor, pythonDescriptor('base-python'));
+    assert.deepStrictEqual(captured.remediation, {
+      executable: 'base-python', args: ['-m', 'pip', 'install', '-r', schemaRequirementsPath],
+    });
+    assert.strictEqual(calls.length, 3);
+    assert.strictEqual(calls.filter((call) => call.args.includes('-I') && call.args.includes('-S')).length, 1);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    compatiblePythonDescriptors.clear();
+    for (const [key, value] of originalCacheEntries) compatiblePythonDescriptors.set(key, value);
+    if (originalOverrideIsSet) process.env.DW_SCHEMA_PYTHON = originalOverride;
+    else delete process.env.DW_SCHEMA_PYTHON;
+  }
+});
+
+test('dependency remediation is structured and describes executable and arguments separately', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  try {
+    childProcess.spawnSync = (executable, args, options) => {
+      assert.strictEqual(executable, 'remediation-python');
+      assert.deepStrictEqual(args.slice(0, 3), ['-X', 'utf8', '-c']);
+      assert.deepStrictEqual(options, {
+        encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+      });
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'missing_dependency', package: 'jsonschema' }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    const probe = probePythonDescriptor(pythonDescriptor('remediation-python'));
+    assert(probe.error);
+    assert.strictEqual(probe.error.code, 'PYTHON_SCHEMA_DEPENDENCY_MISSING');
+    assert.deepStrictEqual(probe.error.remediation, {
+      executable: 'remediation-python', args: ['-m', 'pip', 'install', '-r', schemaRequirementsPath],
+    });
+    assert.match(probe.error.message, /executable/i);
+    assert.match(probe.error.message, /arguments/i);
+    assert.strictEqual(probe.error.message.includes('remediation-python -m pip install'), false);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+  }
+});
+
+test('candidate discovery skips malformed output and selects the later behavior-proven interpreter', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalOverrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  const originalOverride = process.env.DW_SCHEMA_PYTHON;
+  const originalCacheEntries = [...compatiblePythonDescriptors.entries()];
+  const calls = [];
+  const expectedCandidates = process.platform === 'win32'
+    ? [
+      { executable: 'py', prefixArgs: ['-3'] },
+      { executable: 'python', prefixArgs: [] },
+      { executable: 'python', prefixArgs: [] },
+    ]
+    : [
+      { executable: 'python3', prefixArgs: [] },
+      { executable: 'python', prefixArgs: [] },
+      { executable: 'python', prefixArgs: [] },
+    ];
+  try {
+    delete process.env.DW_SCHEMA_PYTHON;
+    compatiblePythonDescriptors.clear();
+    childProcess.spawnSync = (executable, args, options) => {
+      calls.push({ executable, args, options });
+      const expectedCandidate = expectedCandidates[calls.length - 1];
+      assert(expectedCandidate, 'candidate discovery made an unexpected extra probe');
+      assert.strictEqual(executable, expectedCandidate.executable);
+      assert.deepStrictEqual(args.slice(0, expectedCandidate.prefixArgs.length), expectedCandidate.prefixArgs);
+      assert.deepStrictEqual(
+        args.slice(expectedCandidate.prefixArgs.length, expectedCandidate.prefixArgs.length + 3),
+        ['-X', 'utf8', '-c'],
+      );
+      assert.deepStrictEqual(options, {
+        encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+      });
+      if (calls.length === 1) {
+        return { status: 0, stdout: 'not JSON', stderr: '', signal: null };
+      }
+      if (calls.length === 2) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ kind: 'compatible', jsonschema: '4.18.0', referencing: '0.28.4' }),
+          stderr: '',
+          signal: null,
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'external_ref_behavior', external_ref_valid: true, external_ref_invalid: false }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    assert.deepStrictEqual(resolveCompatiblePythonDescriptor(), pythonDescriptor('python'));
+    assert.strictEqual(calls.length, 3);
+    assert.deepStrictEqual(calls.map((call) => ({
+      executable: call.executable,
+      prefixArgs: call.args.slice(0, expectedCandidates[calls.indexOf(call)].prefixArgs.length),
+    })), expectedCandidates);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    compatiblePythonDescriptors.clear();
+    for (const [key, value] of originalCacheEntries) compatiblePythonDescriptors.set(key, value);
+    if (originalOverrideIsSet) process.env.DW_SCHEMA_PYTHON = originalOverride;
+    else delete process.env.DW_SCHEMA_PYTHON;
+  }
+});
+
+test('bypass discovery begins empty while the following ordinary discovery owns its cache', () => {
+  const originalSpawnSync = childProcess.spawnSync;
+  const originalOverrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  const originalOverride = process.env.DW_SCHEMA_PYTHON;
+  const originalCacheEntries = [...compatiblePythonDescriptors.entries()];
+  const calls = [];
+  try {
+    process.env.DW_SCHEMA_PYTHON = 'cache-python';
+    compatiblePythonDescriptors.clear();
+    childProcess.spawnSync = (executable, args, options) => {
+      calls.push({ executable, args, options });
+      assert.strictEqual(executable, 'cache-python');
+      assert.deepStrictEqual(args.slice(0, 3), ['-X', 'utf8', '-c']);
+      assert.deepStrictEqual(options, {
+        encoding: 'utf8', input: undefined, shell: false, timeout: 10000, maxBuffer: 65536, windowsHide: true,
+      });
+      if (calls.length === 1 || calls.length === 3) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ kind: 'compatible', jsonschema: '4.18.0', referencing: '0.28.4' }),
+          stderr: '',
+          signal: null,
+        };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({ kind: 'external_ref_behavior', external_ref_valid: true, external_ref_invalid: false }),
+        stderr: '',
+        signal: null,
+      };
+    };
+
+    assert.deepStrictEqual(resolveCompatiblePythonDescriptor({ bypassCache: true }), pythonDescriptor('cache-python'));
+    assert.deepStrictEqual(resolveCompatiblePythonDescriptor(), pythonDescriptor('cache-python'));
+    assert.strictEqual(calls.length, 4);
+    assert.deepStrictEqual(resolveCompatiblePythonDescriptor(), pythonDescriptor('cache-python'));
+    assert.strictEqual(calls.length, 4);
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    compatiblePythonDescriptors.clear();
+    for (const [key, value] of originalCacheEntries) compatiblePythonDescriptors.set(key, value);
+    if (originalOverrideIsSet) process.env.DW_SCHEMA_PYTHON = originalOverride;
+    else delete process.env.DW_SCHEMA_PYTHON;
+  }
+});
+
+test('an empty DW_SCHEMA_PYTHON override remains authoritative and returns a stable schema error', () => {
+  const originalOverrideIsSet = Object.hasOwn(process.env, 'DW_SCHEMA_PYTHON');
+  const originalOverride = process.env.DW_SCHEMA_PYTHON;
+  const originalCacheEntries = [...compatiblePythonDescriptors.entries()];
+  try {
+    process.env.DW_SCHEMA_PYTHON = '';
+    compatiblePythonDescriptors.clear();
+    assert.throws(
+      () => resolveCompatiblePythonDescriptor(),
+      (error) => error.code === 'PYTHON_SCHEMA_NO_INTERPRETER'
+        && !/The "file" argument must be of type string/.test(error.message),
+    );
+  } finally {
+    compatiblePythonDescriptors.clear();
+    for (const [key, value] of originalCacheEntries) compatiblePythonDescriptors.set(key, value);
+    if (originalOverrideIsSet) process.env.DW_SCHEMA_PYTHON = originalOverride;
+    else delete process.env.DW_SCHEMA_PYTHON;
+  }
 });
 
 test('packages the exact schema validation requirements', () => {
@@ -379,6 +769,10 @@ function linuxProcess(overrides = {}) {
     linux_identity: {
       proc_start_ticks: 998877,
       boot_id_sha256: hash('boot-id-linux'),
+      process_group_id: 41003,
+      os_session_id: 41003,
+      executable_device_id: 'dev-2049',
+      executable_inode: 889902,
     },
     ...overrides,
   };
@@ -388,6 +782,7 @@ function harnessSession(kind = 'agent_session', overrides = {}) {
   return {
     schema: 'HarnessSessionIdentity2',
     schema_version: 2,
+    harness: 'codex',
     harness_kind: kind,
     session_id: 'session-A',
     owner_id: 'root-A',
@@ -399,6 +794,27 @@ function harnessSession(kind = 'agent_session', overrides = {}) {
     ...(kind === 'agent_session' ? { agent_id: 'agent-A' } : { thread_id: 'thread-A' }),
     ...overrides,
   };
+}
+
+function completeLinuxProcess2(overrides = {}) {
+  const { linux_identity: linuxIdentityOverrides = {}, ...identityOverrides } = overrides;
+  const identity = linuxProcess(identityOverrides);
+  return {
+    ...identity,
+    linux_identity: {
+      ...identity.linux_identity,
+      process_group_id: 41003,
+      os_session_id: 41003,
+      executable_device_id: 'dev-2049',
+      executable_inode: 889902,
+      ...linuxIdentityOverrides,
+    },
+  };
+}
+
+function completeHarnessSession2(kind = 'agent_session', overrides = {}) {
+  const { harness: _ignoredHarness, ...identityOverrides } = overrides;
+  return { ...harnessSession(kind, identityOverrides), harness: 'codex' };
 }
 
 function temporaryAllocation(overrides = {}) {
@@ -454,6 +870,163 @@ function makeTracker() {
     trustedObservationResolver: () => true,
     trustedFilesystemResolver: () => true,
   });
+}
+
+const canonicalSnapshotHash = (value) => computeDetachedSha256(createDetachedJsonSnapshot(value).snapshot);
+
+function stageAPolicyReceipt(policyId, kind, values) {
+  const receipt = {
+    policy_id: policyId,
+    kind,
+    source_kind: 'synthetic_test_fixture',
+    observed_at: '2026-08-30T02:00:00Z',
+    values,
+    evidence_refs: [`${policyId}-evidence`],
+    source_sha256: '0'.repeat(64),
+  };
+  const preimage = clone(receipt);
+  delete preimage.source_sha256;
+  receipt.source_sha256 = canonicalSnapshotHash(preimage);
+  return receipt;
+}
+
+function stageATemporaryManifest(overrides = {}) {
+  const canonicalRoot = overrides.canonical_root_identity?.canonical_path ?? '/tmp/dw/run-A';
+  const childPath = overrides.child_path ?? `${canonicalRoot}/task-A`;
+  const childId = overrides.child_id ?? 'child-A';
+  const manifest = {
+    owner_id: 'root-A',
+    run_id: 'run-A',
+    session_id: 'session-A',
+    lease_generation: 2,
+    canonical_root_identity: {
+      canonical_path: canonicalRoot,
+      path_identity_hash: hash(`${canonicalRoot}:identity`),
+      parent_identity_hash: hash(`${canonicalRoot}:parent`),
+      platform: 'linux',
+    },
+    created_at: '2026-08-30T02:00:00Z',
+    quota_profile_ref: 'stage-a-quota',
+    watermark_policy_ref: 'stage-a-watermark',
+    child_sublease_map: {
+      [childId]: {
+        owner_id: childId,
+        canonical_descendant: childPath,
+        nonce: 'stage-a-child-nonce',
+        lease_generation: 2,
+        soft_quota: 64,
+        hard_quota: 128,
+        teardown_condition: 'task_complete',
+      },
+    },
+    retention_set: [],
+    state: 'ACTIVE',
+    manifest_sha256: '0'.repeat(64),
+    ...overrides,
+  };
+  manifest.manifest_sha256 = contracts.computeTemporaryManifestSha256(manifest);
+  return manifest;
+}
+
+function completeTemporaryAllocation2(manifest, overrides = {}) {
+  const { canonical_root_identity: _ignoredCanonicalRootIdentity, child_sublease: _ignoredChildSublease, ...identityOverrides } = overrides;
+  const childId = identityOverrides.child_id ?? 'child-A';
+  const childSublease = manifest.child_sublease_map[childId];
+  const taskDirectoryPath = identityOverrides.task_directory?.path ?? childSublease.canonical_descendant;
+  return temporaryAllocation({
+    owner_id: manifest.owner_id,
+    run_id: manifest.run_id,
+    session_id: manifest.session_id,
+    lease_generation: manifest.lease_generation,
+    child_id: childId,
+    manifest_sha256: manifest.manifest_sha256,
+    canonical_root: manifest.canonical_root_identity.canonical_path,
+    task_directory: {
+      path: taskDirectoryPath,
+      linux_file_identity: { device_id: 'dev-2049', inode: 889901 },
+    },
+    confirmed_parent_directory: {
+      path: manifest.canonical_root_identity.canonical_path,
+      linux_file_identity: { device_id: 'dev-2049', inode: 889900 },
+    },
+    linux_file_identity: { device_id: 'dev-2049', inode: 889900 },
+    creation_nonce: childSublease.nonce,
+    ...identityOverrides,
+  });
+}
+
+function stageATemporaryObservation(manifest, childId = 'child-A') {
+  const child = manifest.child_sublease_map[childId];
+  return {
+    owner_id: manifest.owner_id,
+    run_id: manifest.run_id,
+    session_id: manifest.session_id,
+    lease_generation: manifest.lease_generation,
+    canonical_root_identity: clone(manifest.canonical_root_identity),
+    child_path: child.canonical_descendant,
+    usage: 32,
+    available: 200,
+    ttl_expired: true,
+    active_handles: 0,
+    quiescent: true,
+    identity_observed: true,
+    reparse_boundary: false,
+    path_rebound: false,
+    retention_set_sealed: true,
+    retention_set_hash: canonicalSnapshotHash(manifest.retention_set),
+    teardown_condition_met: true,
+    precheck_identity_hash: manifest.canonical_root_identity.path_identity_hash,
+    postcheck_identity_hash: manifest.canonical_root_identity.path_identity_hash,
+  };
+}
+
+function stageATemporaryFixture() {
+  const manifest = stageATemporaryManifest();
+  return {
+    manifest,
+    identity: completeTemporaryAllocation2(manifest),
+    observation: stageATemporaryObservation(manifest),
+    policyIndex: {
+      'stage-a-quota': stageAPolicyReceipt('stage-a-quota', 'quota', { soft_quota: 64, hard_quota: 128, unit: 'bytes' }),
+      'stage-a-watermark': stageAPolicyReceipt('stage-a-watermark', 'watermark', { low_watermark: 100, critical_watermark: 50, unit: 'bytes_available' }),
+    },
+  };
+}
+
+function makeStageATemporaryTracker() {
+  return new TaskResourceTracker({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: ({ purpose }) => purpose === 'temporary_reclaim' || purpose === 'temporary_absence',
+    trustedFilesystemResolver: ({ purpose }) => purpose === 'temporary_reclaim',
+  });
+}
+
+function completeRecoveryRecord2(resourceType, identity) {
+  return {
+    schema: 'RecoveryRecord2',
+    schema_version: 2,
+    resource_id: `stage-a-${resourceType}`,
+    resource_type: resourceType,
+    run_id: identity.run_id,
+    session_id: identity.session_id,
+    lease_generation: identity.lease_generation,
+    identity,
+    current_phase: { phase: 'cleanup', state: 'ACTIVE' },
+    last_valid_observation: {
+      observed_at: '2026-08-30T02:00:00Z',
+      observation_ref: opaqueRef('observation', `stage-a-${resourceType}`),
+      identity_ref: opaqueRef('identity', `stage-a-${resourceType}`),
+    },
+    cleanup_authority_ref: opaqueRef('authority', `stage-a-${resourceType}`),
+    teardown_condition: resourceType === 'temporary_allocation'
+      ? 'allocation_absence_verified'
+      : ['agent_session', 'runtime_thread'].includes(resourceType)
+        ? 'harness_closed'
+        : 'identity_absence_verified',
+    evidence_refs: [opaqueRef('evidence', `stage-a-${resourceType}`)],
+  };
 }
 
 function resource(resourceId, type) {
@@ -797,6 +1370,172 @@ test('tracker returns replayable structured holds for rejected version-2 rebinds
     }),
     (error) => error instanceof ResourceTrackerError && error.code === 'RESOURCE_IDENTITY_DRIFT',
   );
+});
+
+test('tracker contains rejected v2 bind evidence while preserving HOLD action through public projections', () => {
+  for (const [label, prebind] of [
+    ['first bind', false],
+    ['rebind', true],
+  ]) {
+    const tracker = makeTracker();
+    const resourceId = `contained-v2-${label.replace(/\s/g, '-')}`;
+    const rejectedEvidence = `rejected-v2-evidence-${label.replace(/\s/g, '-')}`;
+    const scope = tracker.openRootScope({ scopeId: resourceId, purpose: 'contained invalid v2 bind' });
+    scope.register(resource(resourceId, 'process_tree'));
+    if (prebind) {
+      scope.bind(resourceId, {
+        identity: windowsProcess(), generation: 2, evidenceRefs: [`${resourceId}-initial`],
+      });
+    }
+    const invalidIdentity = windowsProcess();
+    delete invalidIdentity.launch_nonce;
+    const held = scope.bind(resourceId, {
+      identity: invalidIdentity, generation: 2, evidenceRefs: [rejectedEvidence],
+    });
+
+    assert.strictEqual(held.action, 'HOLD', label);
+    assert.strictEqual(held.disposition, 'HOLD', label);
+    const resourceAfterBind = scope.getResource(resourceId);
+    assert.strictEqual(resourceAfterBind.state, 'HOLD', label);
+    assert.deepStrictEqual(resourceAfterBind.decision, held, label);
+    assert.strictEqual(resourceAfterBind.evidenceRefs.includes(rejectedEvidence), false, label);
+
+    const close = scope.close('invalid v2 bind evidence containment');
+    assert.strictEqual(close.status, 'HOLD', label);
+    assert.deepStrictEqual(close.decisions, [{
+      resourceId,
+      action: 'HOLD',
+      releaseConfirmed: false,
+    }], label);
+
+    const snapshot = tracker.snapshot();
+    const history = tracker.exportHistory();
+    const ledger = tracker.exportLedgerProjection();
+    const heldEvent = history.findLast((event) => event.kind === 'RESOURCE_HELD');
+    assert.deepStrictEqual(heldEvent.payload.evidenceRefs, [], label);
+    assert.deepStrictEqual(heldEvent.payload.decision, held, label);
+    assert.strictEqual(ledger.hints.find((hint) => hint.trackerEventKind === 'RESOURCE_HELD').decisionAction, 'HOLD', label);
+    for (const projection of [snapshot, history, ledger]) {
+      assert.strictEqual(JSON.stringify(projection).includes(rejectedEvidence), false, label);
+    }
+
+    const replayed = replayTracker(history);
+    const replayedSnapshot = replayed.snapshot();
+    const replayedResource = replayedSnapshot.resources.find((item) => item.resourceId === resourceId);
+    assert.strictEqual(replayedResource.state, 'HOLD', label);
+    assert.deepStrictEqual(replayedResource.decision, held, label);
+    assert.strictEqual(JSON.stringify(replayedSnapshot).includes(rejectedEvidence), false, label);
+  }
+
+  const inputLimitedTracker = new TaskResourceTracker({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: () => true,
+    trustedFilesystemResolver: () => true,
+    limits: { maxInputBytes: 1024 },
+  });
+  const inputLimitedScope = inputLimitedTracker.openRootScope({
+    scopeId: 'contained-v2-input-limit',
+    purpose: 'contained invalid v2 bind input limit',
+  });
+  inputLimitedScope.register(resource('contained-v2-input-limit', 'process_tree'));
+  const oversizedInvalidIdentity = windowsProcess();
+  delete oversizedInvalidIdentity.launch_nonce;
+  assert.throws(
+    () => inputLimitedScope.bind('contained-v2-input-limit', {
+      identity: oversizedInvalidIdentity,
+      generation: 2,
+      evidenceRefs: [`rejected-v2-input-${'x'.repeat(2048)}`],
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'TRACKER_INPUT_LIMIT_REACHED',
+  );
+
+  const duplicateInputLimitedTracker = new TaskResourceTracker({
+    ownerId: 'root-A',
+    runId: 'run-A',
+    generation: 2,
+    trustedObservationResolver: () => true,
+    trustedFilesystemResolver: () => true,
+    limits: { maxInputBytes: 1024 },
+  });
+  const duplicateInputLimitedScope = duplicateInputLimitedTracker.openRootScope({
+    scopeId: 'contained-v2-duplicate-input-limit',
+    purpose: 'contained invalid v2 duplicate bind input limit',
+  });
+  duplicateInputLimitedScope.register(resource('contained-v2-duplicate-input-limit', 'process_tree'));
+  const duplicateInvalidIdentity = windowsProcess();
+  delete duplicateInvalidIdentity.launch_nonce;
+  const duplicateEvidenceRef = 'rejected-v2-duplicate-input';
+  const duplicateEvidenceRefs = Array.from({ length: 64 }, () => duplicateEvidenceRef);
+  assert(duplicateEvidenceRefs.length > Array.from(new Set(duplicateEvidenceRefs)).length);
+  assert.throws(
+    () => duplicateInputLimitedScope.bind('contained-v2-duplicate-input-limit', {
+      identity: duplicateInvalidIdentity,
+      generation: 2,
+      evidenceRefs: duplicateEvidenceRefs,
+    }),
+    (error) => error instanceof ResourceTrackerError && error.code === 'TRACKER_INPUT_LIMIT_REACHED',
+  );
+});
+
+test('tracker enforces maxInputBytes on complete canonical bind observations before HOLD', () => {
+  const acceptedOversizedInputs = [];
+  const cases = [
+    {
+      label: 'invalid identity body',
+      resourceId: 'oversized-invalid-v2-identity',
+      prebind: false,
+      observation() {
+        const identity = windowsProcess();
+        delete identity.launch_nonce;
+        identity.rejected_padding = 'x'.repeat(8192);
+        return { identity, generation: 2, evidenceRefs: ['oversized-invalid-v2-identity'] };
+      },
+    },
+    {
+      label: 'missing identity envelope',
+      resourceId: 'oversized-missing-v2-identity',
+      prebind: true,
+      observation() {
+        return {
+          generation: 2,
+          evidenceRefs: ['oversized-missing-v2-identity'],
+          rejected_padding: 'x'.repeat(8192),
+        };
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const tracker = new TaskResourceTracker({
+      ownerId: 'root-A',
+      runId: 'run-A',
+      generation: 2,
+      trustedObservationResolver: () => true,
+      trustedFilesystemResolver: () => true,
+      limits: { maxInputBytes: 4096 },
+    });
+    const scope = tracker.openRootScope({
+      scopeId: scenario.resourceId,
+      purpose: 'complete bind observation input limit',
+    });
+    scope.register(resource(scenario.resourceId, 'process_tree'));
+    if (scenario.prebind) {
+      scope.bind(scenario.resourceId, {
+        identity: windowsProcess(), generation: 2, evidenceRefs: [`${scenario.resourceId}-initial`],
+      });
+    }
+    try {
+      scope.bind(scenario.resourceId, scenario.observation());
+      acceptedOversizedInputs.push(scenario.label);
+    } catch (error) {
+      assert(error instanceof ResourceTrackerError, scenario.label);
+      assert.strictEqual(error.code, 'TRACKER_INPUT_LIMIT_REACHED', scenario.label);
+    }
+  }
+
+  assert.deepStrictEqual(acceptedOversizedInputs, []);
 });
 
 test('tracker holds non-canonical rebinds after a version-2 bind without retaining rejected identities', () => {
@@ -1376,6 +2115,11 @@ test('recovery records bind phase, observation, resource type, and outer task id
       session_id: identity.session_id,
       lease_generation: identity.lease_generation,
       identity: clone(identity),
+      teardown_condition: resourceType === 'temporary_allocation'
+        ? 'allocation_absence_verified'
+        : ['agent_session', 'runtime_thread'].includes(resourceType)
+          ? 'harness_closed'
+          : 'identity_absence_verified',
     };
     assert.strictEqual(contracts.validateRecoveryRecord2(record).valid, true, resourceType);
     const wrongType = { ...clone(record), resource_type: resourceType === 'agent_session' ? 'process_tree' : 'agent_session' };
@@ -1501,6 +2245,62 @@ test('support matrices require opaque evidence references without changing state
   assert.strictEqual(invalidKeyResult.action_authorized, false);
 });
 
+test('support matrix errors redact untrusted capability IDs before returning diagnostics', () => {
+  const secret = 'sk-proj-1234567890abcdef';
+  const matrixFor = (capabilityId, claim = {
+    state: 'VERIFIED_FULL',
+    evidence_refs: ['evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
+  }) => ({
+    schema: 'SupportMatrix2',
+    schema_version: 2,
+    adapter_id: 'windows-local-A',
+    platform: 'windows',
+    observed_at: '2026-08-30T02:00:00Z',
+    overall_state: 'VERIFIED_FULL',
+    claims: {
+      [capabilityId]: claim,
+    },
+  });
+
+  for (const capabilityId of [
+    'constructor',
+    'prototype',
+    'line\nbreak',
+    `api_key_${secret}`,
+  ]) {
+    const checked = contracts.validateSupportMatrix2(matrixFor(capabilityId));
+    assert.strictEqual(checked.valid, false, capabilityId);
+    assert(checked.errors.some((item) => (
+      item.code === 'SUPPORT_CAPABILITY_INVALID'
+        && item.path === '$.claims.<redacted-key>'
+    )), capabilityId);
+    const serializedErrors = JSON.stringify(checked.errors);
+    assert.strictEqual(serializedErrors.includes(capabilityId), false, capabilityId);
+    assert.strictEqual(serializedErrors.includes(secret), false, capabilityId);
+  }
+
+  const longCapabilityId = 'x'.repeat(65);
+  const longCapability = contracts.validateSupportMatrix2(matrixFor(longCapabilityId, {
+    state: 'UNKNOWN',
+    evidence_refs: ['evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
+  }));
+  assert.strictEqual(longCapability.errors.some((item) => item.code === 'SUPPORT_CAPABILITY_INVALID'), false);
+  assert(longCapability.errors.some((item) => (
+    item.code === 'SUPPORT_STATE_INVALID'
+      && item.path === '$.claims.<redacted-key>.state'
+  )));
+  assert.strictEqual(JSON.stringify(longCapability.errors).includes(longCapabilityId), false);
+
+  const validCapability = contracts.validateSupportMatrix2(matrixFor('process_identity', {
+    state: 'UNKNOWN',
+    evidence_refs: ['evidence:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
+  }));
+  assert(validCapability.errors.some((item) => (
+    item.code === 'SUPPORT_STATE_INVALID'
+      && item.path === '$.claims.process_identity.state'
+  )));
+});
+
 test('schema contracts encode the same critical identity, recovery, and support rules', () => {
   const processSchema = loadSchema('ProcessIdentity2.schema.json');
   for (const field of ['owner_id', 'run_id', 'session_id', 'lease_generation', 'adapter_generation', 'manager_generation']) {
@@ -1589,11 +2389,13 @@ test('schema scalar constraints match the bounded runtime identity validators', 
   const externalRecovery = recoveryRecord();
   externalRecovery.resource_type = 'agent_session';
   externalRecovery.identity = externalHarness;
+  externalRecovery.teardown_condition = 'harness_closed';
   assert.deepStrictEqual(validateDraft202012Fixtures(schemas.RecoveryRecord2, [externalRecovery]), [true]);
 
   const temporaryAllocationRecovery = recoveryRecord();
   temporaryAllocationRecovery.resource_type = 'temporary_allocation';
   temporaryAllocationRecovery.identity = temporaryAllocation();
+  temporaryAllocationRecovery.teardown_condition = 'allocation_absence_verified';
   const incompleteTemporaryAllocationRecovery = clone(temporaryAllocationRecovery);
   delete incompleteTemporaryAllocationRecovery.identity.task_directory;
   assertParity(
@@ -1629,7 +2431,7 @@ test('schema scalar constraints match the bounded runtime identity validators', 
   const positiveIntegerTargets = [
     ['process pid', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ pid: value })],
     ['process generation', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => windowsProcess({ lease_generation: value })],
-    ['Linux process ticks', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => linuxProcess({ linux_identity: { proc_start_ticks: value, boot_id_sha256: sha } })],
+    ['Linux process ticks', schemas.ProcessIdentity2, contracts.validateProcessIdentity2, (value) => linuxProcess({ linux_identity: { ...linuxProcess().linux_identity, proc_start_ticks: value } })],
     ['harness generation', schemas.HarnessSessionIdentity2, contracts.validateHarnessSessionIdentity2, (value) => harnessSession('agent_session', { lease_generation: value })],
     ['temporary generation', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => temporaryAllocation({ lease_generation: value })],
     ['temporary quota', schemas.TemporaryAllocationIdentity2, contracts.validateTemporaryAllocationIdentity2, (value) => ({ ...temporaryAllocation(), quota: { unit: 'bytes', limit: value } })],
@@ -1752,8 +2554,914 @@ test('version-2 factories own schema fields and reject legacy identity input', (
   } }), /RECOVERY_V2_BUILD_REJECTED/);
 });
 
+test('stage A v2 process recovery compares complete Windows and Linux identities without native handles', () => {
+  const decisionFor = (identity, observed, extras = {}) => contracts.decideProcessRecovery2({
+      duplicate_run_lock: false,
+      owner_status: 'owned',
+      expected_identity: identity,
+      observed_identity: observed,
+      expected_generation: 2,
+      observed_generation: 2,
+      expected_scope: { kind: 'scope', value: 'root' },
+      observed_scope: { kind: 'scope', value: 'root' },
+      graceful: { requested: true, exit_observed: false, deadline_reached: true },
+      exact_tree_termination_supported: true,
+      ...extras,
+  });
+  const schemas = Object.fromEntries(schemaBundle.map((schema) => [schema.title, schema]));
+  const assertProcessSchemaValid = (identity, label) => {
+    assert.strictEqual(contracts.validateProcessIdentity2(identity).valid, true, `${label} runtime`);
+    assert.deepStrictEqual(validateDraft202012Fixtures(schemas.ProcessIdentity2, [identity]), [true], `${label} schema`);
+  };
+
+  const windows = windowsProcess();
+  const linux = completeLinuxProcess2();
+  for (const [label, expected, observed] of [
+    ['Windows exact', windows, clone(windows)],
+    ['Linux exact', linux, clone(linux)],
+  ]) {
+    assertProcessSchemaValid(expected, `${label} expected`);
+    assertProcessSchemaValid(observed, `${label} observed`);
+    assert.strictEqual(Object.hasOwn(expected, 'native_handle'), false, `${label} input`);
+    assert.strictEqual(Object.hasOwn(observed, 'native_handle'), false, `${label} observation`);
+    assert.strictEqual(Object.hasOwn(expected.windows_identity || {}, 'process_handle'), expected.platform === 'windows', label);
+    const result = decisionFor(expected, observed);
+    assert.strictEqual(result.action, 'TERMINATE_EXACT_TREE', label);
+    assert.strictEqual(result.identity_confidence, 'MATCH', label);
+    assert.strictEqual(result.action_authorized, false, label);
+    assert.strictEqual(Object.hasOwn(result, 'native_handle'), false, `${label} result`);
+  }
+
+  const substitutions = (platform) => [
+    ['owner_id', 'root-B'], ['run_id', 'run-B'], ['session_id', 'session-B'],
+    ['lease_generation', 3], ['adapter_generation', 3], ['manager_generation', 8], ['pid', 41004],
+    ['start_time', '2026-08-30T01:00:02Z'], ['executable_path_sha256', hash(`${platform}:executable-B`)],
+    ['argv_sha256', hash(`${platform}:argv-B`)], ['parent_identity_sha256', hash(`${platform}:parent-B`)],
+    ['launch_nonce', `${platform}-launch-B`], ['manager_run_id', `${platform}-manager-B`],
+  ];
+  const platformSubstitutions = {
+    windows: [
+      ['windows_identity.process_creation_time_filetime', '134167428000000001'],
+      ['windows_identity.process_handle', '0x0000000000009876'],
+    ],
+    linux: [
+      ['linux_identity.proc_start_ticks', 998878], ['linux_identity.boot_id_sha256', hash('boot-id-linux-B')],
+      ['linux_identity.process_group_id', 41004], ['linux_identity.os_session_id', 41004],
+      ['linux_identity.executable_device_id', 'dev-2050'], ['linux_identity.executable_inode', 889903],
+    ],
+  };
+  const setField = (identity, field, value) => {
+    const [parent, child] = field.split('.');
+    if (child === undefined) identity[parent] = value;
+    else identity[parent][child] = value;
+  };
+  for (const [label, expected] of [['Windows', windows], ['Linux', linux]]) {
+    for (const [field, value] of [...substitutions(expected.platform), ...platformSubstitutions[expected.platform]]) {
+      const observed = clone(expected);
+      setField(observed, field, value);
+      assertProcessSchemaValid(observed, `${label} ${field}`);
+      const result = decisionFor(expected, observed);
+      assert.strictEqual(result.action, 'HOLD', `${label} ${field}`);
+      assert(result.reasons.includes('IDENTITY_MISMATCH'), `${label} ${field}`);
+      assert.strictEqual(result.action_authorized, false, `${label} ${field}`);
+      assert.strictEqual(Object.hasOwn(result, 'native_handle'), false, `${label} ${field} result`);
+    }
+  }
+  const absence = decisionFor(windows, clone(windows), {
+    absence: { process_absent: true, thread_absent: true, port_absent: true },
+  });
+  assert.strictEqual(absence.action, 'OBSERVE_ONLY');
+  assert.strictEqual(absence.action_authorized, false);
+  assert.strictEqual(absence.downstream_release_allowed, true);
+  assert.strictEqual(Object.hasOwn(absence, 'native_handle'), false);
+});
+
+test('stage A v2 harness resources use their closed proof without process recovery', () => {
+  for (const [type, identity, observation] of [
+    ['agent_session', completeHarnessSession2('agent_session'), { child_closed: true }],
+    ['runtime_thread', completeHarnessSession2('runtime_thread'), { absence: { thread_absent: true } }],
+  ]) {
+    const tracker = makeTracker();
+    const scope = tracker.openRootScope({ scopeId: `harness-${type}`, purpose: 'v2 harness closure' });
+    scope.register(resource(`harness-${type}`, type));
+    const bound = scope.bind(`harness-${type}`, { identity, generation: 2, evidenceRefs: [`${type}-bind`] });
+    assert.strictEqual(bound.state, 'ACTIVE', type);
+    const decision = scope.observe(`harness-${type}`, {
+      expected_identity: identity,
+      observed_identity: clone(identity),
+      expected_generation: 2,
+      observed_generation: 2,
+      expected_scope: { kind: 'scope', value: `harness-${type}` },
+      observed_scope: { kind: 'scope', value: `harness-${type}` },
+      ...observation,
+    });
+    assert.strictEqual(decision.action, 'OBSERVE_ONLY', type);
+    assert.strictEqual(decision.downstream_release_allowed, true, type);
+    assert.strictEqual(decision.action_authorized, false, type);
+  }
+
+  for (const [label, type, identity, observation] of [
+    ['agent without proof', 'agent_session', completeHarnessSession2('agent_session'), {}],
+    ['agent with runtime proof', 'agent_session', completeHarnessSession2('agent_session'), { absence: { thread_absent: true } }],
+    ['runtime without proof', 'runtime_thread', completeHarnessSession2('runtime_thread'), {}],
+    ['runtime with agent proof', 'runtime_thread', completeHarnessSession2('runtime_thread'), { child_closed: true }],
+  ]) {
+    const tracker = makeTracker();
+    const scope = tracker.openRootScope({ scopeId: `harness-negative-${label.replace(/\s/g, '-')}`, purpose: 'v2 harness proof isolation' });
+    const resourceId = `harness-negative-${type}-${label.replace(/\s/g, '-')}`;
+    scope.register(resource(resourceId, type));
+    assert.strictEqual(scope.bind(resourceId, { identity, generation: 2, evidenceRefs: [`${resourceId}-bind`] }).state, 'ACTIVE', label);
+    const decision = scope.observe(resourceId, {
+      expected_identity: identity,
+      observed_identity: clone(identity),
+      expected_generation: 2,
+      observed_generation: 2,
+      expected_scope: { kind: 'scope', value: `harness-negative-${label.replace(/\s/g, '-')}` },
+      observed_scope: { kind: 'scope', value: `harness-negative-${label.replace(/\s/g, '-')}` },
+      ...observation,
+    });
+    assert.strictEqual(decision.action, 'OBSERVE_ONLY', label);
+    assert.strictEqual(decision.downstream_release_allowed, false, label);
+    assert.strictEqual(decision.action_authorized, false, label);
+  }
+});
+
+test('stage A v2 temporary allocation reclaim binds every manifest identity field and post-removal observation', () => {
+  const nominal = stageATemporaryFixture();
+  const tracker = makeStageATemporaryTracker();
+  const scope = tracker.openRootScope({ scopeId: 'temporary-nominal', purpose: 'v2 temporary reclaim' });
+  scope.register(resource('temporary-nominal', 'temporary_allocation'));
+  assert.strictEqual(scope.bind('temporary-nominal', {
+    identity: nominal.identity, generation: 2, evidenceRefs: ['temporary-nominal-bind'],
+  }).state, 'ACTIVE');
+  const reclaim = scope.observe('temporary-nominal', {
+    manifest: nominal.manifest,
+    child_id: 'child-A',
+    intent: 'reclaim',
+    observation: nominal.observation,
+    policyIndex: nominal.policyIndex,
+  });
+  assert.strictEqual(reclaim.action, 'RECLAIM_EXACT');
+  assert.deepStrictEqual(reclaim.reasons, ['RECLAIM_PRECONDITIONS_VERIFIED']);
+  assert.strictEqual(reclaim.requires_same_parent_quarantine, true);
+  assert.strictEqual(reclaim.requires_post_removal_absence_check, true);
+  for (const forbiddenReason of [
+    'TEMP_MANIFEST_INVALID', 'POLICY_NOT_OBSERVABLE', 'LEASE_IDENTITY_MISMATCH',
+    'RECLAIM_PRECONDITION_MISSING', 'RECLAIM_TRUST_NOT_PROVEN', 'OBSERVATION_TRUST_NOT_PROVEN',
+  ]) assert.strictEqual(reclaim.reasons.includes(forbiddenReason), false, forbiddenReason);
+  const confirmed = scope.confirmRelease('temporary-nominal', {
+    identity: nominal.identity,
+    generation: 2,
+    absenceVerified: true,
+    evidenceRefs: ['temporary-nominal-absence'],
+  });
+  assert.strictEqual(confirmed.releaseConfirmed, true);
+  assert.deepStrictEqual(confirmed.identity, nominal.identity);
+  assert(confirmed.evidenceRefs.includes('temporary-nominal-bind'));
+  assert(confirmed.evidenceRefs.includes('temporary-nominal-absence'));
+
+  const observeDrift = (label, mutateManifest) => {
+    const base = stageATemporaryFixture();
+    const manifest = clone(base.manifest);
+    const childId = mutateManifest(manifest) ?? 'child-A';
+    manifest.manifest_sha256 = contracts.computeTemporaryManifestSha256(manifest);
+    const identity = clone(base.identity);
+    if (label !== 'hash-drift') identity.manifest_sha256 = manifest.manifest_sha256;
+    const observation = stageATemporaryObservation(manifest, childId);
+    const driftTracker = makeStageATemporaryTracker();
+    const driftScope = driftTracker.openRootScope({ scopeId: `temporary-${label}`, purpose: 'v2 temporary drift' });
+    driftScope.register(resource(`temporary-${label}`, 'temporary_allocation'));
+    assert.strictEqual(driftScope.bind(`temporary-${label}`, {
+      identity, generation: 2, evidenceRefs: [`temporary-${label}-bind`],
+    }).state, 'ACTIVE', label);
+    const held = driftScope.observe(`temporary-${label}`, {
+      manifest,
+      child_id: childId,
+      intent: 'reclaim',
+      observation,
+      policyIndex: base.policyIndex,
+    });
+    assert.strictEqual(held.action, 'HOLD', label);
+    assert.deepStrictEqual(held.reasons, ['TEMP_BOUND_IDENTITY_MISMATCH'], label);
+  };
+
+  observeDrift('hash-drift', (manifest) => { manifest.created_at = '2026-08-30T02:00:01Z'; });
+  observeDrift('owner-drift', (manifest) => { manifest.owner_id = 'other-owner'; });
+  observeDrift('run-drift', (manifest) => { manifest.run_id = 'other-run'; });
+  observeDrift('session-drift', (manifest) => { manifest.session_id = 'other-session'; });
+  observeDrift('generation-drift', (manifest) => {
+    manifest.lease_generation = 3;
+    manifest.child_sublease_map['child-A'].lease_generation = 3;
+  });
+  observeDrift('root-drift', (manifest) => {
+    manifest.canonical_root_identity = {
+      canonical_path: '/tmp/dw/run-B',
+      path_identity_hash: hash('/tmp/dw/run-B:identity'),
+      parent_identity_hash: hash('/tmp/dw/run-B:parent'),
+      platform: 'linux',
+    };
+    manifest.child_sublease_map['child-A'].canonical_descendant = '/tmp/dw/run-B/task-A';
+  });
+  observeDrift('child-drift', (manifest) => {
+    const child = manifest.child_sublease_map['child-A'];
+    delete manifest.child_sublease_map['child-A'];
+    manifest.child_sublease_map['child-B'] = { ...child, owner_id: 'child-B' };
+    return 'child-B';
+  });
+  observeDrift('sublease-drift', (manifest) => { manifest.child_sublease_map['child-A'].nonce = 'changed-child-nonce'; });
+  observeDrift('task-path-drift', (manifest) => { manifest.child_sublease_map['child-A'].canonical_descendant = '/tmp/dw/run-A/task-B'; });
+
+  for (const [label, releaseObservation] of [
+    ['post-removal-identity-drift', (fixture) => ({ ...fixture, identity: { ...fixture.identity, creation_nonce: 'changed-nonce' } })],
+    ['post-removal-generation-drift', (fixture) => ({ ...fixture, generation: 3 })],
+  ]) {
+    const fixture = stageATemporaryFixture();
+    const releaseTracker = makeStageATemporaryTracker();
+    const releaseScope = releaseTracker.openRootScope({ scopeId: `temporary-${label}`, purpose: 'v2 release drift' });
+    releaseScope.register(resource(`temporary-${label}`, 'temporary_allocation'));
+    releaseScope.bind(`temporary-${label}`, { identity: fixture.identity, generation: 2, evidenceRefs: [`${label}-bind`] });
+    assert.strictEqual(releaseScope.observe(`temporary-${label}`, {
+      manifest: fixture.manifest, child_id: 'child-A', intent: 'reclaim', observation: fixture.observation, policyIndex: fixture.policyIndex,
+    }).action, 'RECLAIM_EXACT', label);
+    assert.throws(() => releaseScope.confirmRelease(`temporary-${label}`, {
+      ...releaseObservation({ identity: fixture.identity, generation: 2, absenceVerified: true, evidenceRefs: [`${label}-absence`] }),
+    }), /RESOURCE_IDENTITY_DRIFT/, label);
+  }
+});
+
+test('stage A v2 Linux process and harness identity fields are mandatory and schema-parity ready', () => {
+  const schemas = Object.fromEntries(schemaBundle.map((schema) => [schema.title, schema]));
+  const validLinux = completeLinuxProcess2();
+  const linuxFixtures = [validLinux];
+  for (const field of ['proc_start_ticks', 'boot_id_sha256', 'process_group_id', 'os_session_id', 'executable_device_id', 'executable_inode']) {
+    const invalid = clone(validLinux);
+    delete invalid.linux_identity[field];
+    linuxFixtures.push(invalid);
+  }
+  assert.deepStrictEqual(linuxFixtures.map((identity) => contracts.validateProcessIdentity2(identity).valid), [true, false, false, false, false, false, false]);
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.ProcessIdentity2, linuxFixtures), [true, false, false, false, false, false, false]);
+
+  const harnessFixtures = ['agent_session', 'runtime_thread'].flatMap((resourceType) => {
+    const valid = completeHarnessSession2(resourceType);
+    const missingHarness = clone(valid);
+    delete missingHarness.harness;
+    return [valid, missingHarness];
+  });
+  assert.deepStrictEqual(harnessFixtures.map((identity) => contracts.validateHarnessSessionIdentity2(identity).valid), [true, false, true, false]);
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.HarnessSessionIdentity2, harnessFixtures), [true, false, true, false]);
+
+  const validRecovery = completeRecoveryRecord2('process_tree', validLinux);
+  const missingRecoveryLinuxField = clone(validRecovery);
+  delete missingRecoveryLinuxField.identity.linux_identity.executable_inode;
+  const harnessRecoveryFixtures = ['agent_session', 'runtime_thread'].flatMap((resourceType) => {
+    const valid = completeRecoveryRecord2(resourceType, completeHarnessSession2(resourceType));
+    const missingHarness = clone(valid);
+    delete missingHarness.identity.harness;
+    return [valid, missingHarness];
+  });
+  assert.deepStrictEqual([validRecovery, missingRecoveryLinuxField].map((record) => contracts.validateRecoveryRecord2(record).valid), [true, false]);
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.RecoveryRecord2, [
+    validRecovery, missingRecoveryLinuxField,
+  ]), [true, false]);
+  assert.deepStrictEqual(harnessRecoveryFixtures.map((record) => contracts.validateRecoveryRecord2(record).valid), [true, false, true, false]);
+  assert.deepStrictEqual(validateDraft202012Fixtures(schemas.RecoveryRecord2, harnessRecoveryFixtures), [true, false, true, false]);
+});
+
+test('stage A legacy process recovery behavior stays unchanged while version-2 has its own decision path', () => {
+  const legacy = legacyProcess();
+  const legacyResult = contracts.decideProcessRecovery({
+    duplicate_run_lock: false, owner_status: 'owned', expected_identity: legacy, observed_identity: clone(legacy),
+    expected_generation: 2, observed_generation: 2, expected_scope: { kind: 'scope', value: 'root' }, observed_scope: { kind: 'scope', value: 'root' },
+    graceful: { requested: true, exit_observed: false, deadline_reached: true }, exact_tree_termination_supported: true,
+  });
+  assert.strictEqual(legacyResult.action, 'TERMINATE_EXACT_TREE');
+  assert.strictEqual(Object.hasOwn(legacyResult, 'action_authorized'), false);
+  const completeV2 = completeLinuxProcess2();
+  const legacyV2Result = contracts.decideProcessRecovery({
+    duplicate_run_lock: false, owner_status: 'owned', expected_identity: completeV2, observed_identity: clone(completeV2),
+    expected_generation: 2, observed_generation: 2, expected_scope: { kind: 'scope', value: 'root' }, observed_scope: { kind: 'scope', value: 'root' },
+    graceful: { requested: true, exit_observed: false, deadline_reached: true }, exact_tree_termination_supported: true,
+  });
+  assert.strictEqual(legacyV2Result.action, 'OBSERVE_ONLY');
+  assert.deepStrictEqual(legacyV2Result.reasons, ['IDENTITY_PARTIAL']);
+  assert.strictEqual(legacyV2Result.identity_confidence, 'PARTIAL');
+  assert.strictEqual(Object.hasOwn(legacyV2Result, 'action_authorized'), false);
+  const version2 = contracts.decideProcessRecovery2({
+    duplicate_run_lock: false, owner_status: 'owned', expected_identity: completeV2, observed_identity: clone(completeV2),
+    expected_generation: 2, observed_generation: 2, expected_scope: { kind: 'scope', value: 'root' }, observed_scope: { kind: 'scope', value: 'root' },
+    graceful: { requested: true, exit_observed: false, deadline_reached: true }, exact_tree_termination_supported: true,
+  });
+  assert.strictEqual(version2.action, 'TERMINATE_EXACT_TREE');
+  assert.strictEqual(version2.identity_confidence, 'MATCH');
+  assert.strictEqual(version2.action_authorized, false);
+});
+
+test('stage A review repair R1 rejects malformed version-2 process scopes before recovery actions', () => {
+  const identity = completeLinuxProcess2();
+  const validScope = { kind: 'scope', value: 'root' };
+  const dangerousTails = [
+    ['complete absence', { absence: { process_absent: true, thread_absent: true, port_absent: true } }],
+    ['graceful deadline', {
+      graceful: { requested: true, exit_observed: false, deadline_reached: true },
+      exact_tree_termination_supported: true,
+    }],
+  ];
+  const decisionFor = (scopeFields, tail) => contracts.decideProcessRecovery2({
+    duplicate_run_lock: false,
+    owner_status: 'owned',
+    expected_identity: identity,
+    observed_identity: clone(identity),
+    expected_generation: 2,
+    observed_generation: 2,
+    ...scopeFields,
+    ...tail,
+  });
+  const invalidScopes = [
+    ['empty object', {}],
+    ['null', null],
+    ['array', []],
+    ['string', 'scope'],
+    ['number', 7],
+    ['boolean', false],
+    ['missing kind', { value: 'root' }],
+    ['missing value', { kind: 'scope' }],
+    ['extra key', { kind: 'scope', value: 'root', extra: true }],
+    ['empty kind', { kind: '', value: 'root' }],
+    ['whitespace kind', { kind: '  ', value: 'root' }],
+    ['wrong kind', { kind: 'task', value: 'root' }],
+    ['empty value', { kind: 'scope', value: '' }],
+    ['whitespace value', { kind: 'scope', value: '  ' }],
+    ['non-string value', { kind: 'scope', value: 7 }],
+  ];
+  const assertInvalid = (label, scopeFields, tailLabel) => {
+    const result = decisionFor(scopeFields, tailLabel);
+    assert.strictEqual(result.action, 'HOLD', label);
+    assert.deepStrictEqual(result.reasons, ['SCOPE_IDENTITY_INVALID'], label);
+    assert.strictEqual(result.identity_confidence, 'MATCH', label);
+    assert.strictEqual(result.action_authorized, false, label);
+    assert.notStrictEqual(result.downstream_release_allowed, true, label);
+    assert.notStrictEqual(result.requires_identity_recheck, true, label);
+  };
+
+  for (const [tailLabel, tail] of dangerousTails) {
+    for (const [label, invalid] of invalidScopes) {
+      assertInvalid(`expected ${label} with ${tailLabel}`, { expected_scope: invalid, observed_scope: validScope }, tail);
+      assertInvalid(`observed ${label} with ${tailLabel}`, { expected_scope: validScope, observed_scope: invalid }, tail);
+    }
+    assertInvalid(`expected omitted with ${tailLabel}`, { observed_scope: validScope }, tail);
+    assertInvalid(`observed omitted with ${tailLabel}`, { expected_scope: validScope }, tail);
+  }
+
+  const graceful = decisionFor({ expected_scope: validScope, observed_scope: clone(validScope) }, dangerousTails[1][1]);
+  assert.strictEqual(graceful.action, 'TERMINATE_EXACT_TREE');
+  assert.deepStrictEqual(graceful.reasons, ['EXACT_OWNED_TREE']);
+  assert.strictEqual(graceful.identity_confidence, 'MATCH');
+  assert.strictEqual(graceful.action_authorized, false);
+  const absence = decisionFor({ expected_scope: validScope, observed_scope: clone(validScope) }, dangerousTails[0][1]);
+  assert.strictEqual(absence.action, 'OBSERVE_ONLY');
+  assert.deepStrictEqual(absence.reasons, ['ABSENCE_VERIFIED']);
+  assert.strictEqual(absence.downstream_release_allowed, true);
+  assert.strictEqual(absence.action_authorized, false);
+  for (const [tailLabel, tail] of dangerousTails) {
+    const unequal = decisionFor({ expected_scope: validScope, observed_scope: { kind: 'scope', value: 'other-root' } }, tail);
+    assert.strictEqual(unequal.action, 'HOLD', tailLabel);
+    assert.deepStrictEqual(unequal.reasons, ['SCOPE_IDENTITY_MISMATCH'], tailLabel);
+    assert.strictEqual(unequal.action_authorized, false, tailLabel);
+  }
+});
+
+test('stage A review repair R1 binds temporary allocation platform to the manifest platform vocabulary', () => {
+  const windowsIdentity = (manifest) => {
+    const identity = completeTemporaryAllocation2(manifest, {
+      platform: 'windows',
+      canonical_root: 'C:\\dw\\run-A',
+      task_directory: {
+        path: 'C:\\dw\\run-A\\task-A',
+        windows_file_identity: { volume_serial_number: 'A1B2-C3D4', file_id: '0011223344556677' },
+      },
+      confirmed_parent_directory: {
+        path: 'C:\\dw\\run-A',
+        windows_file_identity: { volume_serial_number: 'A1B2-C3D4', file_id: '0011223344556676' },
+      },
+      windows_file_identity: { volume_serial_number: 'A1B2-C3D4', file_id: '0011223344556676' },
+    });
+    delete identity.linux_file_identity;
+    return identity;
+  };
+  const fixtureFor = (identityPlatform, manifestPlatform) => {
+    const windows = identityPlatform === 'windows';
+    const canonicalRoot = windows ? 'C:\\dw\\run-A' : '/tmp/dw/run-A';
+    const childPath = windows ? 'C:\\dw\\run-A\\task-A' : '/tmp/dw/run-A/task-A';
+    const manifest = stageATemporaryManifest({
+      canonical_root_identity: {
+        canonical_path: canonicalRoot,
+        path_identity_hash: hash(`${canonicalRoot}:identity`),
+        parent_identity_hash: hash(`${canonicalRoot}:parent`),
+        platform: 'linux',
+      },
+    });
+    if (manifestPlatform === undefined) delete manifest.canonical_root_identity.platform;
+    else manifest.canonical_root_identity.platform = manifestPlatform;
+    manifest.child_sublease_map['child-A'].canonical_descendant = childPath;
+    manifest.manifest_sha256 = contracts.computeTemporaryManifestSha256(manifest);
+    const identity = windows ? windowsIdentity(manifest) : completeTemporaryAllocation2(manifest);
+    const observation = stageATemporaryObservation(manifest);
+    return { manifest, identity, observation, policyIndex: stageATemporaryFixture().policyIndex };
+  };
+  const observe = (label, fixture) => {
+    const tracker = makeStageATemporaryTracker();
+    const scope = tracker.openRootScope({ scopeId: `platform-${label}`, purpose: 'platform binding' });
+    scope.register(resource(`platform-${label}`, 'temporary_allocation'));
+    assert.strictEqual(scope.bind(`platform-${label}`, {
+      identity: fixture.identity, generation: 2, evidenceRefs: [`platform-${label}-bind`],
+    }).state, 'ACTIVE', label);
+    return scope.observe(`platform-${label}`, {
+      manifest: fixture.manifest,
+      child_id: 'child-A',
+      intent: 'reclaim',
+      observation: fixture.observation,
+      policyIndex: fixture.policyIndex,
+    });
+  };
+
+  for (const [label, identityPlatform, manifestPlatform] of [
+    ['windows-win32', 'windows', 'win32'],
+    ['linux-linux', 'linux', 'linux'],
+  ]) {
+    const result = observe(label, fixtureFor(identityPlatform, manifestPlatform));
+    assert.strictEqual(result.action, 'RECLAIM_EXACT', label);
+  }
+
+  const negativeCases = [
+    ['linux-win32', 'linux', 'win32'],
+    ['windows-linux', 'windows', 'linux'],
+    ...['darwin', 'freebsd', undefined, '', 7].flatMap((manifestPlatform) => [
+      [`windows-${String(manifestPlatform)}`, 'windows', manifestPlatform],
+      [`linux-${String(manifestPlatform)}`, 'linux', manifestPlatform],
+    ]),
+  ];
+  for (const [label, identityPlatform, manifestPlatform] of negativeCases) {
+    const result = observe(label, fixtureFor(identityPlatform, manifestPlatform));
+    assert.strictEqual(result.action, 'HOLD', label);
+    assert.deepStrictEqual(result.reasons, ['TEMP_BOUND_IDENTITY_MISMATCH'], label);
+    assert.strictEqual(result.action_authorized, false, label);
+    assert.strictEqual(result.downstream_release_allowed, false, label);
+    assert.notStrictEqual(result.action, 'RECLAIM_EXACT', label);
+  }
+});
+
+const malformedMissingDependencyPackages = [
+  ['missing package field', undefined],
+  ['null package', null],
+  ['object package', {}],
+  ['array package', []],
+  ['numeric package', 7],
+  ['empty package', ''],
+];
+for (const [label, packageName] of malformedMissingDependencyPackages) {
+  test(`compatibility metadata missing_dependency with ${label} is malformed`, () => {
+    const originalSpawnSync = childProcess.spawnSync;
+    let calls = 0;
+    try {
+      childProcess.spawnSync = () => {
+        calls += 1;
+        assert.strictEqual(calls, 1, 'metadata probe made an unexpected extra call');
+        const payload = { kind: 'missing_dependency' };
+        if (packageName !== undefined) payload.package = packageName;
+        return { status: 0, stdout: JSON.stringify(payload), stderr: '', signal: null };
+      };
+
+      const probe = probePythonDescriptor(pythonDescriptor('malformed-metadata-python'));
+      assert.strictEqual(probe.executed, true);
+      assert(probe.error);
+      assert.strictEqual(calls, 1);
+      assert.strictEqual(probe.error.code, 'PYTHON_SCHEMA_MALFORMED_OUTPUT');
+      assert.deepStrictEqual(probe.error.descriptor, pythonDescriptor('malformed-metadata-python'));
+      assert.strictEqual(Object.hasOwn(probe.error, 'remediation'), false);
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+    }
+  });
+}
+
+const malformedMissingApiDetails = [
+  ['missing detail field', undefined],
+  ['null detail', null],
+  ['object detail', {}],
+  ['array detail', []],
+  ['numeric detail', 7],
+  ['empty detail', ''],
+];
+for (const [label, detail] of malformedMissingApiDetails) {
+  test(`compatibility behavior missing_api with ${label} is malformed`, () => {
+    const originalSpawnSync = childProcess.spawnSync;
+    let calls = 0;
+    try {
+      childProcess.spawnSync = () => {
+        calls += 1;
+        assert(calls <= 2, 'behavior probe made an unexpected third call');
+        if (calls === 1) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ kind: 'compatible', jsonschema: '4.18.0', referencing: '0.28.4' }),
+            stderr: '',
+            signal: null,
+          };
+        }
+        const payload = { kind: 'missing_api' };
+        if (detail !== undefined) payload.detail = detail;
+        return { status: 0, stdout: JSON.stringify(payload), stderr: '', signal: null };
+      };
+
+      const probe = probePythonDescriptor(pythonDescriptor('malformed-behavior-python'));
+      assert.strictEqual(probe.executed, true);
+      assert(probe.error);
+      assert.strictEqual(calls, 2);
+      assert.strictEqual(probe.error.code, 'PYTHON_SCHEMA_MALFORMED_OUTPUT');
+      assert.deepStrictEqual(probe.error.descriptor, pythonDescriptor('malformed-behavior-python'));
+      assert.strictEqual(Object.hasOwn(probe.error, 'remediation'), false);
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+    }
+  });
+}
+
+test('stage B recovery scanning accepts only bounded plain JSON-like graphs', () => {
+  const recover = (value) => {
+    try {
+      return contracts.validateRecoveryRecord2(value);
+    } catch (caught) {
+      return { threw: caught };
+    }
+  };
+  const recovery = () => completeRecoveryRecord2('temporary_allocation', temporaryAllocation());
+  const recoveryScannerErrorCodes = new Set([
+    'RECOVERY_GRAPH_INVALID',
+    'RECOVERY_GRAPH_CYCLE',
+    'RECOVERY_NODE_LIMIT_EXCEEDED',
+    'RECOVERY_DEPTH_LIMIT_EXCEEDED',
+    'RECOVERY_STRING_SIZE_LIMIT_EXCEEDED',
+    'RECOVERY_KEY_SIZE_LIMIT_EXCEEDED',
+    'RECOVERY_OBJECT_KEY_LIMIT_EXCEEDED',
+    'RECOVERY_AGGREGATE_SIZE_LIMIT_EXCEEDED',
+  ]);
+  const graphErrors = (value) => value.errors.filter((item) => recoveryScannerErrorCodes.has(item.code));
+  const expectGraphError = (label, candidate, expected) => {
+    const checked = recover(candidate);
+    assert.strictEqual(Object.hasOwn(checked, 'threw'), false, label);
+    assert.deepStrictEqual(graphErrors(checked), [expected], label);
+    assert.strictEqual(checked.errors.some((item) => item.code === 'IDENTITY_SHAPE_INVALID'), false, label);
+    return checked;
+  };
+  const expectNoGraphError = (label, candidate) => {
+    const checked = recover(candidate);
+    assert.strictEqual(Object.hasOwn(checked, 'threw'), false, label);
+    assert.deepStrictEqual(graphErrors(checked), [], label);
+    return checked;
+  };
+  const graphError = (code, path, message) => ({ code, path, message });
+  const withDepth = (count) => {
+    let child = 'safe';
+    for (let index = 0; index < count; index += 1) child = { next: child };
+    const record = recovery();
+    record.graph = child;
+    return record;
+  };
+
+  const shared = recovery();
+  shared.identity.confirmed_parent_directory = shared.identity.task_directory;
+  assert.strictEqual(expectNoGraphError('shared DAG temporary recovery remains valid', shared).valid, true);
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('depth eight is accepted', withDepth(7))), []);
+
+  const exactString = recovery();
+  exactString.resource_id = 'x'.repeat(4096);
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('exact string byte limit is accepted', exactString)), []);
+  const multibyteExact = recovery();
+  multibyteExact.resource_id = `${'中'.repeat(1365)}a`;
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('exact multibyte string byte limit is accepted', multibyteExact)), []);
+
+  const cyclic = recovery();
+  cyclic.current_phase.self = cyclic.current_phase;
+  expectGraphError('cycle', cyclic, graphError(
+    'RECOVERY_GRAPH_CYCLE', '$.current_phase.self', 'recovery graph contains an active-ancestor cycle',
+  ));
+  const accessor = recovery();
+  let getterCount = 0;
+  Object.defineProperty(accessor.current_phase, 'unreadable', {
+    enumerable: true,
+    get() { getterCount += 1; return 'must not be read'; },
+  });
+  expectGraphError('accessor', accessor, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const symbolic = recovery();
+  symbolic.current_phase[Symbol('hidden')] = 'symbol';
+  expectGraphError('symbol', symbolic, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const nonenumerable = recovery();
+  Object.defineProperty(nonenumerable.current_phase, 'hidden', { enumerable: false, value: 'hidden' });
+  expectGraphError('nonenumerable', nonenumerable, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const nullPrototype = recovery();
+  nullPrototype.current_phase = Object.assign(Object.create(null), { phase: 'cleanup', state: 'ACTIVE' });
+  expectGraphError('null prototype', nullPrototype, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const customPrototype = recovery();
+  customPrototype.current_phase = Object.assign(Object.create({ inherited: true }), { phase: 'cleanup', state: 'ACTIVE' });
+  expectGraphError('custom prototype', customPrototype, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const throwingProxy = recovery();
+  throwingProxy.current_phase = new Proxy({}, { ownKeys() { throw new Error('proxy reflection must not escape'); } });
+  expectGraphError('throwing proxy', throwingProxy, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.current_phase', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const sparseArray = recovery();
+  sparseArray.evidence_refs = new Array(1);
+  expectGraphError('sparse array', sparseArray, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.evidence_refs', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const extraArray = recovery();
+  extraArray.evidence_refs.extra = 'extra';
+  expectGraphError('extra array property', extraArray, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.evidence_refs', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const accessorArray = recovery();
+  Object.defineProperty(accessorArray.evidence_refs, '0', {
+    enumerable: true,
+    get() { getterCount += 1; return opaqueRef('evidence', 'must-not-read'); },
+  });
+  expectGraphError('array accessor', accessorArray, graphError(
+    'RECOVERY_GRAPH_INVALID', '$.evidence_refs', 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+  const hugeArray = recovery();
+  hugeArray.evidence_refs = new Array(257);
+  Object.defineProperty(hugeArray.evidence_refs, '0', {
+    enumerable: true,
+    get() { getterCount += 1; return opaqueRef('evidence', 'huge-array'); },
+  });
+  expectGraphError('huge array', hugeArray, graphError(
+    'RECOVERY_NODE_LIMIT_EXCEEDED', '$.evidence_refs', 'recovery graph exceeds maximum node count',
+  ));
+  const rootString = expectNoGraphError('finite root string is JSON-like', 'not a recovery record');
+  assert.deepStrictEqual(rootString.errors, [graphError(
+    'IDENTITY_SHAPE_INVALID', '$', 'value must be a plain object',
+  )]);
+  expectGraphError('depth over limit', withDepth(8), graphError(
+    'RECOVERY_DEPTH_LIMIT_EXCEEDED', '$.graph.next.next.next.next.next.next.next.next', 'recovery graph exceeds maximum depth',
+  ));
+  const overString = recovery();
+  overString.resource_id = 'x'.repeat(4097);
+  expectGraphError('string over limit', overString, graphError(
+    'RECOVERY_STRING_SIZE_LIMIT_EXCEEDED', '$.resource_id', 'recovery string exceeds maximum UTF-8 byte length',
+  ));
+  const multibyteOver = recovery();
+  multibyteOver.resource_id = `${'中'.repeat(1365)}ab`;
+  expectGraphError('multibyte string over limit', multibyteOver, graphError(
+    'RECOVERY_STRING_SIZE_LIMIT_EXCEEDED', '$.resource_id', 'recovery string exceeds maximum UTF-8 byte length',
+  ));
+  const overKey = recovery();
+  overKey['k'.repeat(129)] = 'safe';
+  expectGraphError('key over limit', overKey, graphError(
+    'RECOVERY_KEY_SIZE_LIMIT_EXCEEDED', '$.*', 'recovery object key exceeds maximum UTF-8 byte length',
+  ));
+
+  for (const [label, value] of [
+    ['undefined', undefined], ['function', () => {}], ['bigint', 1n], ['symbol', Symbol('value')],
+    ['NaN', Number.NaN], ['positive infinity', Infinity], ['negative infinity', -Infinity],
+  ]) {
+    const invalid = recovery();
+    invalid.badValue = value;
+    expectGraphError(`nested ${label}`, invalid, graphError(
+      'RECOVERY_GRAPH_INVALID', '$.badValue', 'recovery graph is not plain descriptor-only JSON-like data',
+    ));
+  }
+  assert.strictEqual(getterCount, 0, 'scanner never invokes getters');
+
+  const ordinaryNodesAtLimit = { items: Array(253).fill(null), tail: {} };
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('ordinary graph has 256 nodes', ordinaryNodesAtLimit)), []);
+  expectGraphError('ordinary graph has 257 nodes', { items: Array(253).fill(null), tail: { value: null } }, graphError(
+    'RECOVERY_NODE_LIMIT_EXCEEDED', '$.tail.value', 'recovery graph exceeds maximum node count',
+  ));
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('fast array has 256 nodes', { items: Array(254).fill(null) })), []);
+  expectGraphError('fast array has 257 nodes', { items: Array(255).fill(null) }, graphError(
+    'RECOVERY_NODE_LIMIT_EXCEEDED', '$.items', 'recovery graph exceeds maximum node count',
+  ));
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('object has 32 keys', Object.fromEntries(Array.from({ length: 32 }, (_, index) => [`k${index}`, null])))), []);
+  expectGraphError('object has 33 keys', Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`k${index}`, null])), graphError(
+    'RECOVERY_OBJECT_KEY_LIMIT_EXCEEDED', '$', 'recovery object exceeds maximum key count',
+  ));
+
+  const ascii128 = 'k'.repeat(128);
+  const ascii129 = 'k'.repeat(129);
+  const multibyte128 = `${'中'.repeat(42)}ab`;
+  const multibyte129 = `${'中'.repeat(42)}abc`;
+  for (const [label, key] of [['ASCII 128', ascii128], ['multibyte 128', multibyte128]]) {
+    assert.deepStrictEqual(graphErrors(expectNoGraphError(label, { [key]: null })), [], label);
+  }
+  for (const [label, key] of [['ASCII 129', ascii129], ['multibyte 129', multibyte129]]) {
+    expectGraphError(label, { [key]: null }, graphError(
+      'RECOVERY_KEY_SIZE_LIMIT_EXCEEDED', '$.*', 'recovery object key exceeds maximum UTF-8 byte length',
+    ));
+  }
+
+  const aggregateStringAtLimit = { parts: [...Array(7).fill('x'.repeat(4096)), 'x'.repeat(4091)] };
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('aggregate string is exactly 32768 bytes', aggregateStringAtLimit)), []);
+  expectGraphError('aggregate string exceeds 32768 bytes', { parts: [...Array(7).fill('x'.repeat(4096)), 'x'.repeat(4092)] }, graphError(
+    'RECOVERY_AGGREGATE_SIZE_LIMIT_EXCEEDED', '$.parts[7]', 'recovery graph exceeds maximum aggregate UTF-8 byte length',
+  ));
+  const aggregateKeyAtLimit = {
+    parts: Array(7).fill('x'.repeat(4096)),
+    child: { overflow: 'x'.repeat(4078) },
+  };
+  assert.deepStrictEqual(graphErrors(expectNoGraphError('aggregate key is exactly 32768 bytes', aggregateKeyAtLimit)), []);
+  expectGraphError('aggregate key exceeds 32768 bytes', {
+    parts: Array(7).fill('x'.repeat(4096)),
+    child: { overflowX: 'x'.repeat(4078) },
+  }, graphError(
+    'RECOVERY_AGGREGATE_SIZE_LIMIT_EXCEEDED', '$.child.overflowX', 'recovery graph exceeds maximum aggregate UTF-8 byte length',
+  ));
+
+  const unsafeKeyCases = [
+    ['api key', 'api_key'], ['bearer', 'bearer'], ['bare credential', 'bareCredentialValue12345678'],
+    ['safe 65', `a${'b'.repeat(64)}`],
+  ];
+  for (const [label, key] of unsafeKeyCases) {
+    const unsafe = recovery();
+    unsafe[key] = undefined;
+    const checked = expectGraphError(label, unsafe, graphError(
+      'RECOVERY_GRAPH_INVALID', '$.<redacted-key>', 'recovery graph is not plain descriptor-only JSON-like data',
+    ));
+    assert.strictEqual(JSON.stringify(checked.errors).includes(key), false, label);
+  }
+  const safe64 = `a${'b'.repeat(63)}`;
+  const safeKey = recovery();
+  safeKey[safe64] = undefined;
+  expectGraphError('safe 64-byte identifier remains diagnostic', safeKey, graphError(
+    'RECOVERY_GRAPH_INVALID', `$.${safe64}`, 'recovery graph is not plain descriptor-only JSON-like data',
+  ));
+
+  const schemaValidRuntimeOverbudget = recovery();
+  schemaValidRuntimeOverbudget.resource_id = 'x'.repeat(4097);
+  assert.deepStrictEqual(validateDraft202012Fixtures(loadSchema('RecoveryRecord2.schema.json'), [schemaValidRuntimeOverbudget]), [true]);
+  assert.strictEqual(recover(schemaValidRuntimeOverbudget).valid, false);
+
+  const sensitive = recovery();
+  const secret = 'sk-proj-1234567890abcdef';
+  sensitive.api_key = secret;
+  const sensitiveResult = recover(sensitive);
+  assert(sensitiveResult.errors.some((item) => item.code === 'RECOVERY_SENSITIVE_CONTENT'));
+  assert.deepStrictEqual(graphErrors(sensitiveResult), []);
+  assert.strictEqual(JSON.stringify(sensitiveResult.errors).includes('api_key'), false);
+  assert.strictEqual(JSON.stringify(sensitiveResult.errors).includes(secret), false);
+  const hugeResult = recover(schemaValidRuntimeOverbudget);
+  assert.strictEqual(JSON.stringify(hugeResult.errors).includes(schemaValidRuntimeOverbudget.resource_id), false);
+
+  const originalArrayIsArray = Array.isArray;
+  try {
+    Array.isArray = () => { throw new Error('scanner must use captured Array.isArray'); };
+    const intrinsicCycle = recovery();
+    intrinsicCycle.current_phase.self = intrinsicCycle.current_phase;
+    expectGraphError('captured Array.isArray', intrinsicCycle, graphError(
+      'RECOVERY_GRAPH_CYCLE', '$.current_phase.self', 'recovery graph contains an active-ancestor cycle',
+    ));
+  } finally {
+    Array.isArray = originalArrayIsArray;
+  }
+});
+
+test('stage B support matrices derive overall state only from fully valid claims', () => {
+  const evidence = opaqueRef('evidence', 'stage-b-support');
+  const matrixFor = (overallState, states) => ({
+    schema: 'SupportMatrix2',
+    schema_version: 2,
+    adapter_id: 'stage-b-adapter',
+    platform: 'windows',
+    observed_at: '2026-08-30T02:00:00Z',
+    overall_state: overallState,
+    claims: Object.fromEntries(states.map((state, index) => [["skillDiscovery", "childLifecycle"][index] || `capability_${index}`, {
+      state,
+      evidence_refs: state === 'NOT_RUN' ? [] : [evidence],
+    }])),
+  });
+  const expectedStates = [
+    [['VERIFIED_FULL'], 'VERIFIED_FULL'],
+    [['VERIFIED_DEGRADED'], 'VERIFIED_DEGRADED'],
+    [['UNVERIFIED'], 'UNVERIFIED'],
+    [['NOT_RUN'], 'NOT_RUN'],
+    [['FAILED'], 'FAILED'],
+    [['VERIFIED_FULL', 'NOT_RUN'], 'UNVERIFIED'],
+    [['VERIFIED_DEGRADED', 'NOT_RUN'], 'UNVERIFIED'],
+    [['VERIFIED_DEGRADED', 'VERIFIED_FULL'], 'VERIFIED_DEGRADED'],
+    [['FAILED', 'VERIFIED_FULL'], 'FAILED'],
+  ];
+  const supportStates = ['VERIFIED_FULL', 'VERIFIED_DEGRADED', 'UNVERIFIED', 'NOT_RUN', 'FAILED'];
+  const schemaFixtures = [];
+  const runtimeVector = [];
+  for (const [states, expected] of expectedStates) {
+    for (const overallState of supportStates) {
+      const candidate = matrixFor(overallState, states);
+      const validation = contracts.validateSupportMatrix2(candidate);
+      const shouldPass = overallState === expected;
+      assert.strictEqual(validation.valid, shouldPass, `${states.join(',')} ${overallState} runtime`);
+      assert.strictEqual(validation.effective_state, shouldPass ? expected : 'UNVERIFIED', `${states.join(',')} ${overallState} effective`);
+      if (!shouldPass) {
+        assert(validation.errors.some((item) => item.code === 'SUPPORT_OVERALL_STATE_MISMATCH' && item.path === '$.overall_state'));
+      }
+      schemaFixtures.push(candidate);
+      runtimeVector.push(shouldPass);
+    }
+  }
+  assert.strictEqual(schemaFixtures.length, 45);
+  assert.deepStrictEqual(validateDraft202012Fixtures(loadSchema('SupportMatrix2.schema.json'), schemaFixtures), runtimeVector);
+
+  const invalidClaim = matrixFor('VERIFIED_DEGRADED', ['VERIFIED_DEGRADED']);
+  invalidClaim.claims.skillDiscovery.state = 'UNKNOWN';
+  const invalidClaimResult = contracts.validateSupportMatrix2(invalidClaim);
+  assert.strictEqual(invalidClaimResult.valid, false);
+  assert.strictEqual(invalidClaimResult.effective_state, 'UNVERIFIED');
+  assert.strictEqual(invalidClaimResult.errors.some((item) => item.code === 'SUPPORT_OVERALL_STATE_MISMATCH'), false);
+
+  const schema = loadSchema('SupportMatrix2.schema.json');
+  const claimRules = schema.$defs.support_claim.allOf;
+  assert(claimRules.some((rule) => rule.if.properties.state.const === 'NOT_RUN'
+    && rule.then.properties.evidence_refs.maxItems === 0));
+  assert(claimRules.some((rule) => rule.if.properties.state.not
+    && rule.then.properties.evidence_refs.minItems === 1));
+  for (const name of ['claims_all_full', 'claims_all_not_run', 'claims_all_full_or_degraded', 'claims_all_nonfailed']) {
+    assert(schema.$defs[name], name);
+  }
+});
+
+test('stage B recovery teardown conditions match every supported resource type', () => {
+  const expected = [
+    ['process_tree', windowsProcess(), 'identity_absence_verified'],
+    ['command_session', windowsProcess(), 'identity_absence_verified'],
+    ['agent_session', completeHarnessSession2('agent_session'), 'harness_closed'],
+    ['runtime_thread', completeHarnessSession2('runtime_thread'), 'harness_closed'],
+    ['temporary_allocation', temporaryAllocation(), 'allocation_absence_verified'],
+  ];
+  for (const [resourceType, identity, condition] of expected) {
+    const valid = completeRecoveryRecord2(resourceType, identity);
+    assert.strictEqual(valid.teardown_condition, condition, resourceType);
+    assert.strictEqual(contracts.validateRecoveryRecord2(valid).valid, true, `${resourceType} valid`);
+    assert.deepStrictEqual(validateDraft202012Fixtures(loadSchema('RecoveryRecord2.schema.json'), [valid]), [true], `${resourceType} schema valid`);
+    for (const wrongCondition of ['identity_absence_verified', 'harness_closed', 'allocation_absence_verified']) {
+      if (wrongCondition === condition) continue;
+      const wrong = clone(valid);
+      wrong.teardown_condition = wrongCondition;
+      const wrongResult = contracts.validateRecoveryRecord2(wrong);
+      assert.strictEqual(wrongResult.valid, false, `${resourceType} ${wrongCondition} controlled condition`);
+      assert(wrongResult.errors.some((item) => item.code === 'RECOVERY_TEARDOWN_CONDITION_MISMATCH'
+        && item.path === '$.teardown_condition'), resourceType);
+      assert.strictEqual(wrongResult.errors.some((item) => item.code === 'RECOVERY_TEARDOWN_CONDITION_INVALID'), false, resourceType);
+      assert.deepStrictEqual(validateDraft202012Fixtures(loadSchema('RecoveryRecord2.schema.json'), [wrong]), [false], `${resourceType} ${wrongCondition} schema`);
+    }
+  }
+  const uncontrolled = completeRecoveryRecord2('process_tree', windowsProcess());
+  uncontrolled.teardown_condition = 'task_complete';
+  const uncontrolledResult = contracts.validateRecoveryRecord2(uncontrolled);
+  assert.strictEqual(uncontrolledResult.valid, false);
+  assert(uncontrolledResult.errors.some((item) => item.code === 'RECOVERY_TEARDOWN_CONDITION_INVALID'));
+  assert.strictEqual(uncontrolledResult.errors.some((item) => item.code === 'RECOVERY_TEARDOWN_CONDITION_MISMATCH'), false);
+  assert.deepStrictEqual(validateDraft202012Fixtures(loadSchema('RecoveryRecord2.schema.json'), [uncontrolled]), [false]);
+
+  const schema = loadSchema('RecoveryRecord2.schema.json');
+  assert.strictEqual(schema.allOf.length, 5);
+  for (const [resourceType, , condition] of expected) {
+    const branch = schema.allOf.find((entry) => entry.if.properties.resource_type.const === resourceType);
+    assert(branch, resourceType);
+    assert.strictEqual(branch.then.properties.teardown_condition.const, condition, resourceType);
+  }
+});
+
+const requestedTestNames = process.argv.slice(2);
+let selectedTests = tests;
+if (requestedTestNames.length > 0) {
+  const uniqueRequestedNames = new Set(requestedTestNames);
+  if (uniqueRequestedNames.size !== requestedTestNames.length) {
+    process.stderr.write('test selection failed: duplicate exact test name requested\n');
+    process.exitCode = 2;
+  } else {
+    selectedTests = [];
+    for (const requestedName of requestedTestNames) {
+      const matches = tests.filter(({ name }) => name === requestedName);
+      if (matches.length !== 1) {
+        process.stderr.write(`test selection failed: ${JSON.stringify(requestedName)} matched ${matches.length} registered tests; expected exactly 1\n`);
+        process.exitCode = 2;
+      } else {
+        selectedTests.push(matches[0]);
+      }
+    }
+  }
+}
+if (process.exitCode === 2) process.exit(process.exitCode);
+
 let failed = 0;
-for (const { name, fn } of tests) {
+for (const { name, fn } of selectedTests) {
   try {
     fn();
     process.stdout.write(`ok - ${name}\n`);
@@ -1763,4 +3471,4 @@ for (const { name, fn } of tests) {
   }
 }
 if (failed > 0) process.exitCode = 1;
-else process.stdout.write(`${tests.length} identity/support v2 tests passed.\n`);
+else process.stdout.write(`${selectedTests.length} identity/support v2 tests passed.\n`);

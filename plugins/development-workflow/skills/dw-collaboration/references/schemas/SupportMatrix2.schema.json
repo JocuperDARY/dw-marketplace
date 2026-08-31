@@ -30,12 +30,24 @@
   "additionalProperties": false,
   "allOf": [
     {
-      "if": { "properties": { "overall_state": { "const": "VERIFIED_FULL" } } },
-      "then": { "properties": { "claims": { "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_full" } } } } }
+      "if": { "required": ["overall_state"], "properties": { "overall_state": { "const": "VERIFIED_FULL" } } },
+      "then": { "properties": { "claims": { "$ref": "#/$defs/claims_all_full" } } }
     },
     {
-      "if": { "properties": { "overall_state": { "const": "NOT_RUN" } } },
-      "then": { "properties": { "claims": { "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_not_run" } } } } }
+      "if": { "required": ["overall_state"], "properties": { "overall_state": { "const": "NOT_RUN" } } },
+      "then": { "properties": { "claims": { "$ref": "#/$defs/claims_all_not_run" } } }
+    },
+    {
+      "if": { "required": ["overall_state"], "properties": { "overall_state": { "const": "VERIFIED_DEGRADED" } } },
+      "then": { "properties": { "claims": { "allOf": [{ "$ref": "#/$defs/claims_all_full_or_degraded" }, { "not": { "$ref": "#/$defs/claims_all_full" } }] } } }
+    },
+    {
+      "if": { "required": ["overall_state"], "properties": { "overall_state": { "const": "FAILED" } } },
+      "then": { "properties": { "claims": { "not": { "$ref": "#/$defs/claims_all_nonfailed" } } } }
+    },
+    {
+      "if": { "required": ["overall_state"], "properties": { "overall_state": { "const": "UNVERIFIED" } } },
+      "then": { "properties": { "claims": { "allOf": [{ "$ref": "#/$defs/claims_all_nonfailed" }, { "not": { "$ref": "#/$defs/claims_all_not_run" } }, { "not": { "$ref": "#/$defs/claims_all_full_or_degraded" } }] } } }
     }
   ],
   "$defs": {
@@ -65,8 +77,9 @@
       },
       "additionalProperties": false,
       "allOf": [
-        { "if": { "properties": { "state": { "const": "VERIFIED_FULL" } } }, "then": { "properties": { "evidence_refs": { "minItems": 1 } } } },
-        { "if": { "properties": { "state": { "const": "NOT_RUN" } } }, "then": { "properties": { "evidence_refs": { "maxItems": 0 } } } }
+        { "if": { "required": ["state"], "properties": { "state": { "const": "VERIFIED_FULL" } } }, "then": { "properties": { "evidence_refs": { "minItems": 1 } } } },
+        { "if": { "required": ["state"], "properties": { "state": { "const": "NOT_RUN" } } }, "then": { "properties": { "evidence_refs": { "maxItems": 0 } } } },
+        { "if": { "required": ["state"], "properties": { "state": { "not": { "const": "NOT_RUN" } } } }, "then": { "properties": { "evidence_refs": { "minItems": 1 } } } }
       ]
     },
     "support_claim_full": {
@@ -80,6 +93,34 @@
         { "$ref": "#/$defs/support_claim" },
         { "properties": { "state": { "const": "NOT_RUN" }, "evidence_refs": { "maxItems": 0 } } }
       ]
+    },
+    "claims_all_full": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "allOf": [{ "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, { "not": { "pattern": "[\\r\\n\\u2028\\u2029]" } }, { "not": { "enum": ["constructor", "prototype"] } }] },
+      "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_full" } },
+      "additionalProperties": false
+    },
+    "claims_all_not_run": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "allOf": [{ "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, { "not": { "pattern": "[\\r\\n\\u2028\\u2029]" } }, { "not": { "enum": ["constructor", "prototype"] } }] },
+      "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "$ref": "#/$defs/support_claim_not_run" } },
+      "additionalProperties": false
+    },
+    "claims_all_full_or_degraded": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "allOf": [{ "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, { "not": { "pattern": "[\\r\\n\\u2028\\u2029]" } }, { "not": { "enum": ["constructor", "prototype"] } }] },
+      "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "allOf": [{ "$ref": "#/$defs/support_claim" }, { "properties": { "state": { "enum": ["VERIFIED_FULL", "VERIFIED_DEGRADED"] } } }] } },
+      "additionalProperties": false
+    },
+    "claims_all_nonfailed": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "allOf": [{ "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, { "not": { "pattern": "[\\r\\n\\u2028\\u2029]" } }, { "not": { "enum": ["constructor", "prototype"] } }] },
+      "patternProperties": { "^[A-Za-z][A-Za-z0-9_]*$": { "allOf": [{ "$ref": "#/$defs/support_claim" }, { "properties": { "state": { "not": { "const": "FAILED" } } } }] } },
+      "additionalProperties": false
     }
   }
 }

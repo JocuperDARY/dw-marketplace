@@ -8,6 +8,7 @@ const {
 const {
   ContractError,
   decideProcessRecovery,
+  decideProcessRecovery2,
   decideTemporaryLease,
 } = require('./contracts');
 const {
@@ -25,6 +26,10 @@ const HARNESS_RESOURCE_TYPES = new Set([
   'agent_session',
   'runtime_thread',
 ]);
+const TEMPORARY_MANIFEST_PLATFORM = Object.freeze({
+  windows: 'win32',
+  linux: 'linux',
+});
 const PROCESS_V2_EXCLUSIVE_KEYS = new Set([
   'platform',
   'owner_id',
@@ -42,6 +47,7 @@ const PROCESS_V2_EXCLUSIVE_KEYS = new Set([
   'linux_identity',
 ]);
 const HARNESS_V2_EXCLUSIVE_KEYS = new Set([
+  'harness',
   'harness_kind',
   'session_id',
   'owner_id',
@@ -149,13 +155,15 @@ function requireEvidenceRefs(value, code = 'EVIDENCE_REFS_INVALID') {
   return Array.from(new Set(value));
 }
 
-function normalizeBindObservation(observation) {
+function normalizeBindObservation(observation, assertInputSize) {
   const snapshot = detached(observation);
+  assertInputSize(snapshot);
   if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
     throw new ResourceTrackerError('RESOURCE_OBSERVATION_INVALID');
   }
   const generation = requireGeneration(snapshot.generation);
-  const evidenceRefs = requireEvidenceRefs(snapshot.evidenceRefs);
+  const inputEvidenceRefs = snapshot.evidenceRefs;
+  const evidenceRefs = requireEvidenceRefs(inputEvidenceRefs);
   if (!hasOwn(snapshot, 'identity')) {
     throw new ContractError(
       'CANONICAL_REJECTED',
@@ -163,7 +171,7 @@ function normalizeBindObservation(observation) {
       'bind observation rejected by canonical JSON contract',
     );
   }
-  return { generation, evidenceRefs, identity: snapshot.identity };
+  return { generation, evidenceRefs, inputEvidenceRefs, identity: snapshot.identity };
 }
 
 function normalizeBindObservationFailure(error) {
@@ -299,6 +307,16 @@ function structuredIdentityHold(errors, disposition = 'HOLD') {
     disposition,
     action_authorized: false,
     errors,
+  });
+}
+
+function invalidV2BindHoldDecision(validation) {
+  return detached({
+    ...detached(validation),
+    valid: false,
+    disposition: 'HOLD',
+    action: 'HOLD',
+    action_authorized: false,
   });
 }
 
@@ -660,7 +678,10 @@ class TaskResourceTracker {
     let normalizedObservation;
     let observationError = null;
     try {
-      normalizedObservation = normalizeBindObservation(observation);
+      normalizedObservation = normalizeBindObservation(
+        observation,
+        (snapshot) => this.#assertInputSize(snapshot),
+      );
     } catch (error) {
       observationError = error;
     }
@@ -675,7 +696,7 @@ class TaskResourceTracker {
         [],
       );
     }
-    const { identity, generation, evidenceRefs } = normalizedObservation;
+    const { identity, generation, evidenceRefs, inputEvidenceRefs } = normalizedObservation;
     const signature = detached({
       resourceId,
       type: record.type,
@@ -699,17 +720,17 @@ class TaskResourceTracker {
       if (sameValue(record.bindSignature, signature)) return cloneRecord(record);
       if (identityValidation !== null) {
         if (!identityValidation.valid) {
-          return this.#holdInvalidV2Identity(record, scopeId, identityValidation, evidenceRefs);
+          return this.#holdInvalidV2Identity(record, scopeId, identityValidation, inputEvidenceRefs);
         }
         return this.#holdInvalidV2Identity(record, scopeId, structuredIdentityHold([
           trackerIdentityError('RESOURCE_IDENTITY_DRIFT', '$.identity', 'version-2 identity must remain unchanged after binding'),
-        ]), evidenceRefs);
+        ]), inputEvidenceRefs);
       }
       this.#markIdentityDrift(record, 'BINDING_CHANGED');
     }
     if (identityValidation === null) identityValidation = this.#validateIdentity(record, identity, generation);
     if (identityValidation !== null && !identityValidation.valid) {
-      return this.#holdInvalidV2Identity(record, scopeId, identityValidation, evidenceRefs);
+      return this.#holdInvalidV2Identity(record, scopeId, identityValidation, inputEvidenceRefs);
     }
     const eventPayload = { scopeId, resourceId, observation: { identity, generation, evidenceRefs } };
     this.#assertInputSize(eventPayload);
@@ -811,13 +832,20 @@ class TaskResourceTracker {
   }
 
   #holdInvalidV2Identity(record, scopeId, validation, evidenceRefs) {
-    const decision = detached(validation);
+    this.#assertInputSize({
+      scopeId,
+      resourceId: record.resourceId,
+      reason: 'V2_IDENTITY_VALIDATION_FAILED',
+      validation,
+      evidenceRefs,
+    });
+    const decision = invalidV2BindHoldDecision(validation);
     const eventPayload = {
       scopeId,
       resourceId: record.resourceId,
       reason: 'V2_IDENTITY_VALIDATION_FAILED',
       decision,
-      evidenceRefs,
+      evidenceRefs: [],
     };
     this.#assertInputSize(eventPayload);
     this.#requireHistoryCapacity([{ kind: 'RESOURCE_HELD', payload: eventPayload }]);
@@ -826,7 +854,6 @@ class TaskResourceTracker {
       record.state = 'HOLD';
       record.releaseConfirmed = false;
       record.decision = decision;
-      record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...evidenceRefs]));
       this.#touch();
       this.#assertStateWithinLimit();
       this.#record('RESOURCE_HELD', eventPayload);
@@ -848,12 +875,33 @@ class TaskResourceTracker {
       purpose = 'temporary_reclaim';
       safeObservation = jsonObservation(observation, ['trustedFilesystemResolver']);
       if (!this.#temporaryObservationMatches(record, safeObservation)) {
-        decision = { action: 'HOLD', reasons: ['TEMP_BOUND_IDENTITY_MISMATCH'] };
+        decision = {
+          action: 'HOLD',
+          reasons: ['TEMP_BOUND_IDENTITY_MISMATCH'],
+          action_authorized: false,
+          downstream_release_allowed: false,
+        };
       } else {
         decision = decideTemporaryLease({
           ...safeObservation,
           trustedFilesystemResolver: this.#trustedFilesystemResolver,
         });
+      }
+    } else if (PROCESS_V2_RESOURCE_TYPES.has(record.type) && hasExplicitV2IdentityMarker(record.identity)) {
+      purpose = 'process_recovery';
+      safeObservation = jsonObservation(observation);
+      if (!this.#processObservationMatches(record, safeObservation)) {
+        decision = { action: 'HOLD', reasons: ['TRACKER_BINDING_MISMATCH'] };
+      } else {
+        decision = decideProcessRecovery2(safeObservation);
+      }
+    } else if (HARNESS_RESOURCE_TYPES.has(record.type) && hasExplicitV2IdentityMarker(record.identity)) {
+      purpose = 'harness_closure';
+      safeObservation = jsonObservation(observation);
+      if (!this.#v2HarnessObservationMatches(record, safeObservation)) {
+        decision = { action: 'HOLD', reasons: ['TRACKER_BINDING_MISMATCH'], action_authorized: false };
+      } else {
+        decision = this.#decideHarnessClosure(record, safeObservation);
       }
     } else if (PROCESS_RESOURCE_TYPES.has(record.type)) {
       purpose = 'process_recovery';
@@ -926,13 +974,54 @@ class TaskResourceTracker {
   #temporaryObservationMatches(record, input) {
     const identity = record.identity;
     const manifest = input.manifest;
+    const isV2Identity = identity && identity.schema === 'TemporaryAllocationIdentity2'
+      && identity.schema_version === 2;
+    if (!isV2Identity) {
+      return input.child_id === identity.child_id
+        && manifest && manifest.manifest_sha256 === identity.manifest_sha256
+        && manifest.owner_id === identity.owner_id
+        && manifest.run_id === identity.run_id
+        && manifest.session_id === identity.session_id
+        && manifest.lease_generation === identity.lease_generation
+        && sameValue(manifest.canonical_root_identity, identity.canonical_root_identity);
+    }
+    const child = manifest && manifest.child_sublease_map && manifest.child_sublease_map[input.child_id];
     return input.child_id === identity.child_id
       && manifest && manifest.manifest_sha256 === identity.manifest_sha256
       && manifest.owner_id === identity.owner_id
       && manifest.run_id === identity.run_id
       && manifest.session_id === identity.session_id
       && manifest.lease_generation === identity.lease_generation
-      && sameValue(manifest.canonical_root_identity, identity.canonical_root_identity);
+      && manifest.canonical_root_identity && manifest.canonical_root_identity.canonical_path === identity.canonical_root
+      && manifest.canonical_root_identity.platform === TEMPORARY_MANIFEST_PLATFORM[identity.platform]
+      && identity.confirmed_parent_directory && identity.confirmed_parent_directory.path === identity.canonical_root
+      && child && child.owner_id === input.child_id
+      && child.lease_generation === identity.lease_generation
+      && child.canonical_descendant === identity.task_directory.path
+      && child.nonce === identity.creation_nonce;
+  }
+
+  #v2HarnessObservationMatches(record, observation) {
+    const expectedScope = { kind: 'scope', value: record.scopeId };
+    return observation.expected_generation === record.boundGeneration
+      && observation.observed_generation === record.boundGeneration
+      && sameValue(observation.expected_identity, record.identity)
+      && sameValue(observation.observed_identity, record.identity)
+      && sameValue(observation.expected_scope, expectedScope)
+      && sameValue(observation.observed_scope, expectedScope);
+  }
+
+  #decideHarnessClosure(record, observation) {
+    const proofVerified = record.type === 'agent_session'
+      ? observation.child_closed === true
+      : Boolean(observation.absence && observation.absence.thread_absent === true);
+    return {
+      action: 'OBSERVE_ONLY',
+      reasons: [proofVerified ? 'HARNESS_CLOSURE_PROOF_VERIFIED' : 'HARNESS_CLOSURE_PROOF_MISSING'],
+      identity_confidence: 'MATCH',
+      downstream_release_allowed: proofVerified,
+      action_authorized: false,
+    };
   }
 
   #typeReleaseProofMatches(record, observation) {
@@ -1371,10 +1460,15 @@ class TaskResourceTracker {
       }
       case 'RESOURCE_HELD': {
         const record = this.#requireOwnedResource(payload.scopeId, payload.resourceId);
+        const rejectedV2Bind = payload.reason === 'V2_IDENTITY_VALIDATION_FAILED';
         record.state = 'HOLD';
         record.releaseConfirmed = false;
-        if (payload.decision !== undefined) record.decision = detached(payload.decision);
-        if (Array.isArray(payload.evidenceRefs)) {
+        if (payload.decision !== undefined) {
+          record.decision = rejectedV2Bind
+            ? invalidV2BindHoldDecision(payload.decision)
+            : detached(payload.decision);
+        }
+        if (!rejectedV2Bind && Array.isArray(payload.evidenceRefs)) {
           record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...payload.evidenceRefs]));
         }
         this.#touch();

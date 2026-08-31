@@ -15,6 +15,21 @@ const SECRET_TOKEN = /(?:sk-(?:proj-)?[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|eyJ[
 const UTC_TIMESTAMP = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.(\d+))?Z$/;
 const SENSITIVE_KEY = /(?:^|_)(?:user_?prompt|model_?(?:reply|response)|command_?output|stdout|stderr|api_?key|access_?token|credential|secret|password)(?:$|_)/i;
 const SENSITIVE_VALUE = /(?:^|[\s,;:{[(])(?:api[_-]?key|access[_-]?token|credential|secret|password|bearer)(?:\s|=|:|$)/i;
+const SAFE_DIAGNOSTIC_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const RECOVERY_GRAPH_MAX_DEPTH = 8;
+const RECOVERY_GRAPH_MAX_NODES = 256;
+const RECOVERY_GRAPH_MAX_OBJECT_KEYS = 32;
+const RECOVERY_GRAPH_MAX_KEY_BYTES = 128;
+const RECOVERY_GRAPH_MAX_STRING_BYTES = 4096;
+const RECOVERY_GRAPH_MAX_TOTAL_BYTES = 32768;
+const reflectOwnKeys = Reflect.ownKeys;
+const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+const getPrototypeOf = Object.getPrototypeOf;
+const objectPrototype = Object.prototype;
+const arrayPrototype = Array.prototype;
+const arrayIsArray = Array.isArray;
+const utf8ByteLength = Buffer.byteLength.bind(Buffer);
 
 const PROCESS_BASE_KEYS = Object.freeze([
   'schema',
@@ -37,6 +52,7 @@ const PROCESS_BASE_KEYS = Object.freeze([
 const HARNESS_KEYS = Object.freeze([
   'schema',
   'schema_version',
+  'harness',
   'harness_kind',
   'session_id',
   'owner_id',
@@ -96,6 +112,13 @@ const FORBIDDEN_CAPABILITY_IDS = new Set(['constructor', 'prototype']);
 const RECOVERY_PHASES = new Set(['execution', 'cleanup']);
 const RECOVERY_PHASE_STATES = new Set(['ACTIVE', 'HOLD', 'COMPLETE']);
 const TEARDOWN_CONDITIONS = new Set(['identity_absence_verified', 'harness_closed', 'allocation_absence_verified']);
+const RECOVERY_TEARDOWN_BY_TYPE = Object.freeze({
+  process_tree: 'identity_absence_verified',
+  command_session: 'identity_absence_verified',
+  agent_session: 'harness_closed',
+  runtime_thread: 'harness_closed',
+  temporary_allocation: 'allocation_absence_verified',
+});
 
 class IdentitySupportV2Error extends Error {
   constructor(code, validation) {
@@ -133,6 +156,20 @@ function error(code, path, message) {
   return Object.freeze({ code, path, message });
 }
 
+function safeDiagnosticKey(key) {
+  return typeof key === 'string'
+    && SAFE_DIAGNOSTIC_KEY.test(key)
+    && !SENSITIVE_KEY.test(key)
+    && !SENSITIVE_VALUE.test(key)
+    && !SECRET_TOKEN.test(key)
+    ? key
+    : '<redacted-key>';
+}
+
+function propertyPath(path, key) {
+  return `${path}.${safeDiagnosticKey(key)}`;
+}
+
 function result(errors, extras = {}) {
   const valid = errors.length === 0;
   return Object.freeze({
@@ -165,7 +202,7 @@ function requireExactKeys(value, allowedKeys, requiredKeys, errors, path = '$') 
   }
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      errors.push(error('IDENTITY_ADDITIONAL_PROPERTY', `${path}.${key}`, 'unsupported property'));
+      errors.push(error('IDENTITY_ADDITIONAL_PROPERTY', propertyPath(path, key), 'unsupported property'));
     }
   }
   return true;
@@ -271,13 +308,21 @@ function validateProcessIdentity2(identity) {
     if (!Object.hasOwn(identity, 'linux_identity')) {
       errors.push(error('PROCESS_PLATFORM_FIELDS_MISSING', '$.linux_identity', 'Linux identity fields are required'));
     } else if (requireExactKeys(identity.linux_identity,
-      ['proc_start_ticks', 'boot_id_sha256'],
-      ['proc_start_ticks', 'boot_id_sha256'], errors, '$.linux_identity')) {
+      ['proc_start_ticks', 'boot_id_sha256', 'process_group_id', 'os_session_id', 'executable_device_id', 'executable_inode'],
+      ['proc_start_ticks', 'boot_id_sha256', 'process_group_id', 'os_session_id', 'executable_device_id', 'executable_inode'], errors, '$.linux_identity')) {
       if (!isPositiveInteger(identity.linux_identity.proc_start_ticks)) {
         errors.push(error('PROCESS_PLATFORM_FIELD_INVALID', '$.linux_identity.proc_start_ticks', 'proc start ticks must be a positive safe integer'));
       }
       if (!SHA256.test(identity.linux_identity.boot_id_sha256 || '')) {
         errors.push(error('IDENTITY_HASH_INVALID', '$.linux_identity.boot_id_sha256', 'boot ID must be a lowercase SHA-256 value'));
+      }
+      for (const field of ['process_group_id', 'os_session_id', 'executable_inode']) {
+        if (!isPositiveInteger(identity.linux_identity[field])) {
+          errors.push(error('PROCESS_PLATFORM_FIELD_INVALID', `$.linux_identity.${field}`, `${field} must be a positive safe integer`));
+        }
+      }
+      if (!isNonEmptyString(identity.linux_identity.executable_device_id)) {
+        errors.push(error('PROCESS_PLATFORM_FIELD_INVALID', '$.linux_identity.executable_device_id', 'executable device ID must be non-empty'));
       }
     }
     if (Object.hasOwn(identity, 'windows_identity')) {
@@ -295,7 +340,7 @@ function validateHarnessSessionIdentity2(identity) {
   if (!['agent_session', 'runtime_thread'].includes(identity.harness_kind)) {
     errors.push(error('HARNESS_KIND_INVALID', '$.harness_kind', 'unsupported harness kind'));
   }
-  requireStrings(identity, ['session_id', 'owner_id', 'run_id', 'harness_instance_id', 'launch_nonce'], errors);
+  requireStrings(identity, ['harness', 'session_id', 'owner_id', 'run_id', 'harness_instance_id', 'launch_nonce'], errors);
   requirePositiveIntegers(identity, ['lease_generation', 'adapter_generation'], errors);
   if (identity.harness_kind === 'agent_session') {
     if (!isNonEmptyString(identity.agent_id)) errors.push(error('HARNESS_AGENT_ID_REQUIRED', '$.agent_id', 'agent session requires agent_id'));
@@ -388,21 +433,168 @@ function validateResourceIdentity2(resourceType, identity) {
   return result([error('RESOURCE_IDENTITY_TYPE_UNSUPPORTED', '$.resource_type', 'resource type has no version-2 identity validator')]);
 }
 
-function findSensitiveContent(value, path = '$', matches = []) {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => findSensitiveContent(item, `${path}[${index}]`, matches));
-    return matches;
-  }
-  if (isPlainObject(value)) {
-    for (const [key, item] of Object.entries(value)) {
-      const childPath = `${path}.${key}`;
-      if (SENSITIVE_KEY.test(key)) matches.push(childPath);
-      findSensitiveContent(item, childPath, matches);
+function scanRecoveryGraph(root) {
+  const sensitivePaths = [];
+  let graphError = null;
+  let nodes = 0;
+  let aggregateBytes = 0;
+  let currentPath = '$';
+  const activeAncestors = new Set();
+  const stack = [{ kind: 'enter', value: root, path: '$', depth: 0, root: true }];
+
+  const reject = (code, path, message) => {
+    if (graphError === null) graphError = error(code, path, message);
+  };
+  const addBytes = (count, path) => {
+    aggregateBytes += count;
+    if (aggregateBytes > RECOVERY_GRAPH_MAX_TOTAL_BYTES) {
+      reject('RECOVERY_AGGREGATE_SIZE_LIMIT_EXCEEDED', path, 'recovery graph exceeds maximum aggregate UTF-8 byte length');
     }
-    return matches;
+  };
+  const inspectString = (value, path) => {
+    if (value.length > RECOVERY_GRAPH_MAX_STRING_BYTES) {
+      reject('RECOVERY_STRING_SIZE_LIMIT_EXCEEDED', path, 'recovery string exceeds maximum UTF-8 byte length');
+      return;
+    }
+    const bytes = utf8ByteLength(value, 'utf8');
+    if (bytes > RECOVERY_GRAPH_MAX_STRING_BYTES) {
+      reject('RECOVERY_STRING_SIZE_LIMIT_EXCEEDED', path, 'recovery string exceeds maximum UTF-8 byte length');
+      return;
+    }
+    addBytes(bytes, path);
+    if (!graphError && (SENSITIVE_VALUE.test(value) || SECRET_TOKEN.test(value))) sensitivePaths.push(path);
+  };
+  const inspectKey = (key, path) => {
+    if (key.length > RECOVERY_GRAPH_MAX_KEY_BYTES) {
+      reject('RECOVERY_KEY_SIZE_LIMIT_EXCEEDED', `${path}.*`, 'recovery object key exceeds maximum UTF-8 byte length');
+      return;
+    }
+    const bytes = utf8ByteLength(key, 'utf8');
+    if (bytes > RECOVERY_GRAPH_MAX_KEY_BYTES) {
+      reject('RECOVERY_KEY_SIZE_LIMIT_EXCEEDED', `${path}.*`, 'recovery object key exceeds maximum UTF-8 byte length');
+      return;
+    }
+    const keyPath = propertyPath(path, key);
+    addBytes(bytes, keyPath);
+    if (!graphError && (SENSITIVE_KEY.test(key) || SENSITIVE_VALUE.test(key) || SECRET_TOKEN.test(key))) {
+      sensitivePaths.push(keyPath);
+    }
+  };
+
+  try {
+    while (stack.length > 0 && !graphError) {
+      const frame = stack.pop();
+      currentPath = frame.path;
+      if (frame.kind === 'exit') {
+        activeAncestors.delete(frame.value);
+        continue;
+      }
+      if (frame.depth > RECOVERY_GRAPH_MAX_DEPTH) {
+        reject('RECOVERY_DEPTH_LIMIT_EXCEEDED', frame.path, 'recovery graph exceeds maximum depth');
+        break;
+      }
+      nodes += 1;
+      if (nodes > RECOVERY_GRAPH_MAX_NODES) {
+        reject('RECOVERY_NODE_LIMIT_EXCEEDED', frame.path, 'recovery graph exceeds maximum node count');
+        break;
+      }
+      const { value, path, depth } = frame;
+      if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+        if (typeof value === 'number' && !Number.isFinite(value)) {
+          reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+        }
+        continue;
+      }
+      if (typeof value === 'string') {
+        inspectString(value, path);
+        continue;
+      }
+      if (typeof value !== 'object') {
+        reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+        continue;
+      }
+      if (activeAncestors.has(value)) {
+        reject('RECOVERY_GRAPH_CYCLE', path, 'recovery graph contains an active-ancestor cycle');
+        break;
+      }
+
+      const isArray = arrayIsArray(value);
+      const prototype = getPrototypeOf(value);
+      if (isArray ? prototype !== arrayPrototype : prototype !== objectPrototype) {
+        reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+        break;
+      }
+      activeAncestors.add(value);
+      stack.push({ kind: 'exit', value });
+
+      if (isArray) {
+        const lengthDescriptor = getOwnPropertyDescriptor(value, 'length');
+        if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value')
+          || typeof lengthDescriptor.value !== 'number' || !Number.isSafeInteger(lengthDescriptor.value)
+          || lengthDescriptor.value < 0 || lengthDescriptor.enumerable !== false) {
+          reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+          break;
+        }
+        const length = lengthDescriptor.value;
+        if (length > RECOVERY_GRAPH_MAX_NODES - nodes) {
+          reject('RECOVERY_NODE_LIMIT_EXCEEDED', path, 'recovery graph exceeds maximum node count');
+          break;
+        }
+        const keys = reflectOwnKeys(value);
+        if (keys.some((key) => typeof key !== 'string') || keys.length !== length + 1) {
+          reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+          break;
+        }
+        const descriptors = getOwnPropertyDescriptors(value);
+        if (!Object.hasOwn(descriptors, 'length') || Object.keys(descriptors).length !== length + 1) {
+          reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+          break;
+        }
+        for (let index = length - 1; index >= 0; index -= 1) {
+          const key = String(index);
+          const descriptor = descriptors[key];
+          if (!descriptor || descriptor.enumerable !== true || !Object.hasOwn(descriptor, 'value')) {
+            reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+            break;
+          }
+          stack.push({ kind: 'enter', value: descriptor.value, path: `${path}[${index}]`, depth: depth + 1, root: false });
+        }
+        continue;
+      }
+
+      const keys = reflectOwnKeys(value);
+      if (keys.some((key) => typeof key !== 'string')) {
+        reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+        break;
+      }
+      if (keys.length > RECOVERY_GRAPH_MAX_OBJECT_KEYS) {
+        reject('RECOVERY_OBJECT_KEY_LIMIT_EXCEEDED', path, 'recovery object exceeds maximum key count');
+        break;
+      }
+      const descriptors = getOwnPropertyDescriptors(value);
+      if (Object.keys(descriptors).length !== keys.length) {
+        reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+        break;
+      }
+      for (let index = keys.length - 1; index >= 0; index -= 1) {
+        const key = keys[index];
+        const descriptor = descriptors[key];
+        if (!descriptor || descriptor.enumerable !== true || !Object.hasOwn(descriptor, 'value')) {
+          reject('RECOVERY_GRAPH_INVALID', path, 'recovery graph is not plain descriptor-only JSON-like data');
+          break;
+        }
+        inspectKey(key, path);
+        if (graphError) break;
+        stack.push({ kind: 'enter', value: descriptor.value, path: propertyPath(path, key), depth: depth + 1, root: false });
+      }
+    }
+  } catch {
+    reject('RECOVERY_GRAPH_INVALID', currentPath, 'recovery graph is not plain descriptor-only JSON-like data');
   }
-  if (typeof value === 'string' && (SENSITIVE_VALUE.test(value) || SECRET_TOKEN.test(value))) matches.push(path);
-  return matches;
+  return Object.freeze({
+    sensitivePaths: Object.freeze(sensitivePaths),
+    graphError,
+  });
 }
 
 function validateStringArray(value, path, errors, allowEmpty = false) {
@@ -414,9 +606,13 @@ function validateStringArray(value, path, errors, allowEmpty = false) {
 
 function validateRecoveryRecord2(record) {
   const errors = [];
-  const sensitivePaths = findSensitiveContent(record);
-  for (const path of sensitivePaths) {
+  const scan = scanRecoveryGraph(record);
+  for (const path of scan.sensitivePaths) {
     errors.push(error('RECOVERY_SENSITIVE_CONTENT', path, 'sensitive content is forbidden in recovery records'));
+  }
+  if (scan.graphError) {
+    errors.push(scan.graphError);
+    return result(errors);
   }
   if (!requireExactKeys(record, RECOVERY_KEYS, RECOVERY_KEYS, errors)) return result(errors);
   requireSchema(record, 'RecoveryRecord2', errors);
@@ -458,6 +654,9 @@ function validateRecoveryRecord2(record) {
   validateOpaqueReference(record.cleanup_authority_ref, 'authority', '$.cleanup_authority_ref', errors);
   if (!TEARDOWN_CONDITIONS.has(record.teardown_condition)) {
     errors.push(error('RECOVERY_TEARDOWN_CONDITION_INVALID', '$.teardown_condition', 'teardown condition must be controlled'));
+  } else if (RECOVERY_TEARDOWN_BY_TYPE[record.resource_type]
+    && record.teardown_condition !== RECOVERY_TEARDOWN_BY_TYPE[record.resource_type]) {
+    errors.push(error('RECOVERY_TEARDOWN_CONDITION_MISMATCH', '$.teardown_condition', 'teardown condition does not match resource type'));
   }
   validateStringArray(record.evidence_refs, '$.evidence_refs', errors);
   if (Array.isArray(record.evidence_refs)) {
@@ -486,7 +685,9 @@ function validateSupportMatrix2(matrix) {
     errors.push(error('SUPPORT_CLAIMS_INVALID', '$.claims', 'at least one support claim is required'));
   } else {
     Object.entries(matrix.claims).forEach(([capabilityId, claim]) => {
-      const path = `$.claims.${capabilityId}`;
+      const path = isCapabilityId(capabilityId)
+        ? propertyPath('$.claims', capabilityId)
+        : '$.claims.<redacted-key>';
       if (!requireExactKeys(claim, SUPPORT_CLAIM_KEYS, SUPPORT_CLAIM_KEYS, errors, path)) return;
       if (!isCapabilityId(capabilityId)) {
         errors.push(error('SUPPORT_CAPABILITY_INVALID', path, 'capability ID must use the controlled key grammar'));
@@ -515,17 +716,28 @@ function validateSupportMatrix2(matrix) {
       }
     });
   }
-  if (matrix.overall_state === 'VERIFIED_FULL'
-    && isPlainObject(matrix.claims)
-    && Object.values(matrix.claims).some((claim) => !isPlainObject(claim) || claim.state !== 'VERIFIED_FULL'
-      || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length === 0)) {
-    errors.push(error('SUPPORT_FULL_WITH_INCOMPLETE_CLAIM', '$.overall_state', 'full support requires every claim to be fully verified'));
-  }
-  if (matrix.overall_state === 'NOT_RUN'
-    && isPlainObject(matrix.claims)
-    && Object.values(matrix.claims).some((claim) => !isPlainObject(claim) || claim.state !== 'NOT_RUN'
-      || !Array.isArray(claim.evidence_refs) || claim.evidence_refs.length !== 0)) {
-    errors.push(error('SUPPORT_NOT_RUN_WITH_EXECUTED_CLAIM', '$.overall_state', 'NOT_RUN requires every claim to be NOT_RUN'));
+  if (errors.length === 0) {
+    const states = Object.values(matrix.claims).map((claim) => claim.state);
+    const effective = states.includes('FAILED')
+      ? 'FAILED'
+      : states.every((state) => state === 'NOT_RUN')
+        ? 'NOT_RUN'
+        : states.includes('UNVERIFIED')
+          ? 'UNVERIFIED'
+          : states.includes('NOT_RUN')
+            ? 'UNVERIFIED'
+            : states.includes('VERIFIED_DEGRADED')
+              ? 'VERIFIED_DEGRADED'
+              : 'VERIFIED_FULL';
+    if (matrix.overall_state !== effective) {
+      if (matrix.overall_state === 'VERIFIED_FULL') {
+        errors.push(error('SUPPORT_FULL_WITH_INCOMPLETE_CLAIM', '$.overall_state', 'full support requires every claim to be fully verified'));
+      }
+      if (matrix.overall_state === 'NOT_RUN') {
+        errors.push(error('SUPPORT_NOT_RUN_WITH_EXECUTED_CLAIM', '$.overall_state', 'NOT_RUN requires every claim to be NOT_RUN'));
+      }
+      errors.push(error('SUPPORT_OVERALL_STATE_MISMATCH', '$.overall_state', 'overall state does not match validated claims'));
+    }
   }
   const effectiveState = errors.length > 0
     ? 'UNVERIFIED'
