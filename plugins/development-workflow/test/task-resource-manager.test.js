@@ -4,6 +4,7 @@
 const assert = require('assert');
 const path = require('path');
 const {
+  canonicalizeDetachedSnapshot,
   computeDetachedSha256,
   createDetachedJsonSnapshot,
 } = require('../skills/dw-collaboration/scripts/lib/canonical-json');
@@ -763,6 +764,252 @@ test('startCommand does not allocate or spawn again for an already successful co
   await expectHoldAsync(() => manager.startCommand(input), 'successful duplicate');
   assert.strictEqual(fixture.calls.allocateTemporaryRoot, 1);
   assert.strictEqual(fixture.calls.spawnManaged, 1);
+});
+
+test('observe obtains one fresh trusted process observation without exposing private command state or taking a system action', async () => {
+  const subjects = [];
+  const makeFixture = ({ observe, limits, producerBehavior } = {}) => {
+    const trustedResolutionCalls = { observation: 0 };
+    const fixture = startFixture({
+      limits,
+      trustedProducer: (candidate, context) => {
+        if (context.resolutionType === 'observation') {
+          trustedResolutionCalls.observation += 1;
+          return producerBehavior ? producerBehavior(candidate, context) : true;
+        }
+        return true;
+      },
+    });
+    const observationRequests = [];
+    fixture.platformAdapter.observeProcess = (request) => {
+      fixture.calls.observeProcess += 1;
+      observationRequests.push(request);
+      return observe ? observe(request) : {
+        identity: processIdentityFor(request),
+        evidenceRefs: [EVIDENCE_REF],
+        requestSha256: request.requestSha256,
+      };
+    };
+    const subject = { fixture, manager: fixture.manager(), observationRequests, trustedResolutionCalls };
+    subjects.push(subject);
+    return subject;
+  };
+  const captureStart = async (subject, input) => {
+    const started = await subject.manager.startCommand(input);
+    subject.started = started;
+    subject.startOnlyCalls = { ...subject.fixture.calls };
+    subject.startTrustedResolutionCalls = subject.trustedResolutionCalls.observation;
+    return started;
+  };
+  const assertCallVector = (subject, observationCalls) => {
+    assert.deepStrictEqual(subject.fixture.calls, {
+      ...subject.startOnlyCalls,
+      observeProcess: subject.startOnlyCalls.observeProcess + observationCalls,
+    });
+  };
+  const valid = makeFixture();
+  const started = await captureStart(valid, commandInput({ commandId: 'observe-valid' }));
+  assert.strictEqual(
+    typeof valid.manager.observe,
+    'function',
+    'RED: TaskResourceManager.observe() must obtain one newly trusted process observation',
+  );
+  for (const resourceId of [
+    null,
+    1,
+    started.commandId,
+    'command:observe-valid:session',
+    'command:observe-valid:temporary',
+    'command:unknown:process-tree',
+  ]) {
+    await expectHoldAsync(() => valid.manager.observe(resourceId), `preflight ${String(resourceId)}`);
+  }
+  assertCallVector(valid, 0);
+  const observed = await valid.manager.observe(started.resourceId);
+  assert.deepStrictEqual(observed, {
+    status: 'OBSERVED',
+    resourceId: started.resourceId,
+    decision: {
+      action: 'REQUEST_GRACEFUL',
+      reasons: ['GRACEFUL_NOT_REQUESTED'],
+      identity_confidence: 'MATCH',
+      action_authorized: false,
+    },
+  });
+  assert(Object.isFrozen(observed));
+  assert(Object.isFrozen(observed.decision));
+  assert(Object.isFrozen(observed.decision.reasons));
+  assertCallVector(valid, 1);
+  const request = valid.observationRequests[0];
+  const spawnRequest = valid.fixture.actions.find((entry) => entry.kind === 'spawn').request;
+  assert(Object.isFrozen(request));
+  assert.deepStrictEqual(Object.keys(request).sort(), [
+    'commandId', 'expectedGeneration', 'expectedIdentity', 'expectedScope', 'launchNonce',
+    'provenance', 'requestSha256', 'resourceIds', 'spawnRequestSha256', 'type',
+  ].sort());
+  assert.strictEqual(request.type, 'TaskResourceProcessObservationRequest1');
+  assert.strictEqual(request.commandId, 'observe-valid');
+  assert.deepStrictEqual(request.resourceIds, {
+    temporaryAllocation: 'command:observe-valid:temporary',
+    commandSession: 'command:observe-valid:session',
+    processTree: started.resourceId,
+  });
+  assert.strictEqual(request.spawnRequestSha256, spawnRequest.requestSha256);
+  assert.strictEqual(request.launchNonce, spawnRequest.launchNonce);
+  assert.deepStrictEqual(request.expectedIdentity, processIdentityFor(spawnRequest));
+  assert.strictEqual(request.expectedGeneration, 1);
+  assert.deepStrictEqual(request.expectedScope, { kind: 'scope', value: 'command:observe-valid' });
+  assert.deepStrictEqual(request.provenance, {
+    ownerId: 'owner-A', runId: 'run-3-1', sessionId: 'session-A', managerRunId: 'manager-run-A',
+    managerGeneration: 1, adapterGeneration: 1, platform: 'windows',
+  });
+  assert(Object.isFrozen(request.resourceIds));
+  assert(Object.isFrozen(request.expectedIdentity));
+  assert(Object.isFrozen(request.expectedIdentity.windows_identity));
+  assert(Object.isFrozen(request.expectedScope));
+  assert(Object.isFrozen(request.provenance));
+  assert.strictEqual(request.requestSha256, recomputeRequestSha256(request));
+  assert(!/node\.exe|--version|authority:|adapterId|tracker|trusted/i.test(JSON.stringify(request)));
+  assert.strictEqual(JSON.stringify(observed), JSON.stringify(createDetachedJsonSnapshot(observed).snapshot));
+  assert(!/node\.exe|--version|authority:|adapter|tracker|trusted/i.test(JSON.stringify(observed)));
+
+  const drift = makeFixture({ observe: (request) => ({
+    identity: processIdentityFor(request, { pid: 41003 }),
+    evidenceRefs: [EVIDENCE_REF],
+    requestSha256: request.requestSha256,
+  }) });
+  const driftStart = await captureStart(drift, commandInput({ commandId: 'observe-drift' }));
+  assert.deepStrictEqual(await drift.manager.observe(driftStart.resourceId), {
+    status: 'HOLD',
+    resourceId: driftStart.resourceId,
+    decision: {
+      action: 'HOLD',
+      reasons: ['IDENTITY_MISMATCH'],
+      identity_confidence: 'MISMATCH',
+      action_authorized: false,
+    },
+  });
+  assertCallVector(drift, 1);
+
+  for (const [label, observe] of [
+    ['duplicate evidence', (request) => ({ identity: processIdentityFor(request), evidenceRefs: [EVIDENCE_REF, EVIDENCE_REF], requestSha256: request.requestSha256 })],
+  ]) {
+    const rejected = makeFixture({ observe });
+    const rejectedStart = await captureStart(rejected, commandInput({ commandId: `observe-${label.replaceAll(' ', '-')}` }));
+    await expectHoldAsync(() => rejected.manager.observe(rejectedStart.resourceId), label);
+    assertCallVector(rejected, 1);
+    await expectHoldAsync(() => rejected.manager.observe(rejectedStart.resourceId), `${label} held record`);
+    assertCallVector(rejected, 1);
+  }
+
+  let rejectedHash = null;
+  const trustReject = makeFixture({
+    producerBehavior: (candidate) => candidate.requestSha256 !== rejectedHash,
+    observe: (request) => {
+      rejectedHash = request.requestSha256;
+      return { identity: processIdentityFor(request), evidenceRefs: [EVIDENCE_REF], requestSha256: request.requestSha256 };
+    },
+  });
+  const trustStart = await captureStart(trustReject, commandInput({ commandId: 'observe-trust' }));
+  await expectHoldAsync(() => trustReject.manager.observe(trustStart.resourceId), 'trusted producer rejection');
+  assertCallVector(trustReject, 1);
+
+  let releaseObservation;
+  let pendingRequest = null;
+  const concurrent = makeFixture({ observe: (request) => {
+    pendingRequest = request;
+    return new Promise((resolve) => { releaseObservation = resolve; });
+  } });
+  const concurrentStart = await captureStart(concurrent, commandInput({ commandId: 'observe-concurrent' }));
+  const first = concurrent.manager.observe(concurrentStart.resourceId);
+  await Promise.resolve();
+  assertCallVector(concurrent, 1);
+  await expectHoldAsync(() => concurrent.manager.observe(concurrentStart.resourceId), 'concurrent second');
+  await expectHoldAsync(() => concurrent.manager.observe(concurrentStart.resourceId), 'concurrent third');
+  assertCallVector(concurrent, 1);
+  releaseObservation({ identity: processIdentityFor(pendingRequest), evidenceRefs: [EVIDENCE_REF], requestSha256: pendingRequest.requestSha256 });
+  assert.strictEqual((await first).status, 'OBSERVED');
+
+  const provenanceDrift = makeFixture({ observe: (request) => ({
+    identity: processIdentityFor(request, { owner_id: 'other-owner' }),
+    evidenceRefs: [EVIDENCE_REF],
+    requestSha256: request.requestSha256,
+  }) });
+  const provenanceStart = await captureStart(
+    provenanceDrift,
+    commandInput({ commandId: 'observe-provenance-drift' }),
+  );
+  let provenanceDriftResult;
+  try {
+    provenanceDriftResult = { kind: 'result', value: await provenanceDrift.manager.observe(provenanceStart.resourceId) };
+  } catch (error) {
+    provenanceDriftResult = { kind: 'error', code: error.code };
+  }
+  assertCallVector(provenanceDrift, 1);
+
+  const wrongHash = makeFixture({ observe: (request) => ({
+    identity: processIdentityFor(request),
+    evidenceRefs: [EVIDENCE_REF],
+    requestSha256: 'f'.repeat(64),
+  }) });
+  const wrongHashStart = await captureStart(wrongHash, commandInput({ commandId: 'observe-wrong-hash' }));
+  await expectHoldAsync(() => wrongHash.manager.observe(wrongHashStart.resourceId), 'wrong request hash');
+  assertCallVector(wrongHash, 1);
+  const wrongHashResult = {
+    outcome: 'HOLD',
+    observeCalls: wrongHash.fixture.calls.observeProcess - wrongHash.startOnlyCalls.observeProcess,
+    trustedResolutionCalls: wrongHash.trustedResolutionCalls.observation - wrongHash.startTrustedResolutionCalls,
+  };
+
+  const maxInputBytes = 8192;
+  const oversizedEvidenceRefs = Array.from(
+    { length: 128 },
+    (_, index) => `evidence:${index.toString(16).padStart(64, '0')}`,
+  );
+  let oversizedResponse = null;
+  const oversized = makeFixture({
+    limits: { tracker: { maxScopes: 3, maxInputBytes } },
+    observe: (request) => ({ ...oversizedResponse, requestSha256: request.requestSha256 }),
+  });
+  const oversizedStart = await captureStart(oversized, commandInput({ commandId: 'observe-oversized' }));
+  const oversizedSpawnRequest = oversized.fixture.actions.find((entry) => entry.kind === 'spawn').request;
+  oversizedResponse = {
+    identity: processIdentityFor(oversizedSpawnRequest),
+    evidenceRefs: oversizedEvidenceRefs,
+    requestSha256: 'f'.repeat(64),
+  };
+  const oversizedSnapshot = createDetachedJsonSnapshot(oversizedResponse).snapshot;
+  assert(Buffer.byteLength(canonicalizeDetachedSnapshot(oversizedSnapshot), 'utf8') > maxInputBytes);
+  await expectHoldAsync(() => oversized.manager.observe(oversizedStart.resourceId), 'oversized observation response');
+  assertCallVector(oversized, 1);
+  const oversizedResult = {
+    outcome: 'HOLD',
+    observeCalls: oversized.fixture.calls.observeProcess - oversized.startOnlyCalls.observeProcess,
+    trustedResolutionCalls: oversized.trustedResolutionCalls.observation - oversized.startTrustedResolutionCalls,
+  };
+
+  for (const subject of subjects) assertCallVector(subject, 1);
+  assert.deepStrictEqual(
+    { provenanceDriftResult, wrongHashResult, oversizedResult },
+    {
+      provenanceDriftResult: {
+        kind: 'result',
+        value: {
+          status: 'HOLD',
+          resourceId: provenanceStart.resourceId,
+          decision: {
+            action: 'HOLD',
+            reasons: ['IDENTITY_MISMATCH'],
+            identity_confidence: 'MISMATCH',
+            action_authorized: false,
+          },
+        },
+      },
+      wrongHashResult: { outcome: 'HOLD', observeCalls: 1, trustedResolutionCalls: 0 },
+      oversizedResult: { outcome: 'HOLD', observeCalls: 1, trustedResolutionCalls: 0 },
+    },
+  );
+
 });
 
 (async () => {

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const {
+  canonicalizeDetachedSnapshot,
   computeDetachedSha256,
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
@@ -53,6 +54,7 @@ const FAILURE_LOOP_LIMITS = Object.freeze([
 ]);
 const COMMAND_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const CONTROL_CHARACTER = /[\0\r\n]/;
+const DEFAULT_TRACKER_MAX_INPUT_BYTES = 64 * 1024;
 
 class TaskResourceManagerError extends Error {
   constructor() {
@@ -219,6 +221,19 @@ function normalizeAdapterResponse(value) {
   return freezeContext(response);
 }
 
+function normalizeObservationResponse(value, request, maxInputBytes) {
+  const response = readExactDataObject(detachedSnapshot(value), ADAPTER_RESPONSE_KEYS);
+  if (typeof response.requestSha256 !== 'string' || !SHA256.test(response.requestSha256)
+    || response.requestSha256 !== request.requestSha256) throw hold();
+  if (!Array.isArray(response.evidenceRefs) || response.evidenceRefs.length === 0
+    || response.evidenceRefs.some((reference) => typeof reference !== 'string'
+      || !/^evidence:[0-9a-f]{64}$/.test(reference))
+    || new Set(response.evidenceRefs).size !== response.evidenceRefs.length
+    || Buffer.byteLength(canonicalizeDetachedSnapshot(response), 'utf8') > maxInputBytes
+    || !validateResourceIdentity2('process_tree', response.identity).valid) throw hold();
+  return freezeContext(response);
+}
+
 function sameProvenance(identity, provenance) {
   return identity && identity.owner_id === provenance.ownerId
     && identity.run_id === provenance.runId
@@ -372,6 +387,12 @@ class TaskResourceManager {
         authorization: normalizeAuthorization(options.authorization),
         limits: normalizeLimits(options.limits),
       });
+      const trackerMaxInputBytes = input.limits.tracker?.maxInputBytes
+        ?? DEFAULT_TRACKER_MAX_INPUT_BYTES;
+      const trackerLimits = detachedSnapshot({
+        ...(input.limits.tracker || {}),
+        maxInputBytes: trackerMaxInputBytes,
+      });
       const authorizationSha256 = computeDetachedSha256(input.authorization);
       const probeContext = freezeContext({
         type: 'TaskResourceCapabilityProbe1',
@@ -417,7 +438,7 @@ class TaskResourceManager {
         generation: provenance.managerGeneration,
         trustedObservationResolver,
         trustedFilesystemResolver,
-        limits: input.limits.tracker,
+        limits: trackerLimits,
       });
       const rootScope = tracker.openRootScope({
         scopeId: provenance.managerRunId,
@@ -435,6 +456,7 @@ class TaskResourceManager {
         requiredReferences,
         rootScope,
         tracker,
+        trackerMaxInputBytes,
         trustedFilesystemResolver,
         trustedObservationResolver,
       }));
@@ -460,6 +482,8 @@ class TaskResourceManager {
         pendingAction: null,
         allocationResponse: null,
         spawnResponse: null,
+        observationResponse: null,
+        observationAttempt: undefined,
       };
       state.commands.set(command.commandId, record);
 
@@ -610,6 +634,80 @@ class TaskResourceManager {
         record.status = 'HOLD';
       }
       throw hold();
+    }
+  }
+
+  async observe(resourceId) {
+    const state = PRIVATE_STATE.get(this);
+    if (!state || typeof resourceId !== 'string') throw hold();
+    let record = null;
+    for (const candidate of state.commands.values()) {
+      if (candidate.resourceIds !== null && candidate.resourceIds.processTree === resourceId) {
+        record = candidate;
+        break;
+      }
+    }
+    if (!record || record.status !== 'STARTED' || record.scope === null
+      || record.spawnResponse === null || record.pendingAction !== null
+      || record.observationAttempt !== undefined) throw hold();
+
+    const attempt = Symbol('TaskResourceManager.observe');
+    record.observationAttempt = attempt;
+    try {
+      const provenance = adapterProvenance(state.provenance);
+      const request = createAdapterRequest('TaskResourceProcessObservationRequest1', {
+        commandId: record.command.commandId,
+        resourceIds: record.resourceIds,
+        spawnRequestSha256: record.spawnResponse.requestSha256,
+        launchNonce: record.spawnResponse.identity.launch_nonce,
+        expectedIdentity: record.spawnResponse.identity,
+        expectedGeneration: state.provenance.managerGeneration,
+        expectedScope: { kind: 'scope', value: record.scope.scopeId },
+        provenance,
+      });
+      record.pendingAction = freezeContext({
+        action: 'observeProcess',
+        requestSha256: request.requestSha256,
+        resourceIds: record.resourceIds,
+        launchNonce: record.spawnResponse.identity.launch_nonce,
+      });
+      record.phase = 'OBSERVING';
+      const response = normalizeObservationResponse(
+        await state.adapter.observeProcess(request),
+        request,
+        state.trackerMaxInputBytes,
+      );
+      if (state.trustedObservationResolver(response) !== true) throw hold();
+      record.observationResponse = response;
+      record.pendingAction = null;
+      record.phase = 'OBSERVATION_CONFIRMED';
+      const decision = detachedSnapshot(record.scope.observe(record.resourceIds.processTree, {
+        duplicate_run_lock: false,
+        owner_status: 'owned',
+        orphaned: false,
+        expected_identity: record.spawnResponse.identity,
+        observed_identity: response.identity,
+        expected_generation: state.provenance.managerGeneration,
+        observed_generation: response.identity.lease_generation,
+        expected_scope: { kind: 'scope', value: record.scope.scopeId },
+        observed_scope: { kind: 'scope', value: record.scope.scopeId },
+        graceful: { requested: false, deadline_reached: false, exit_observed: false },
+        exact_tree_termination_supported: false,
+        absence: { process_absent: false, thread_absent: false, port_absent: false },
+        evidence_refs: response.evidenceRefs,
+      }));
+      if (decision.action === 'HOLD') {
+        record.status = 'HOLD';
+        record.phase = 'OBSERVATION_HOLD';
+        return detachedSnapshot({ status: 'HOLD', resourceId, decision });
+      }
+      record.phase = 'OBSERVED';
+      return detachedSnapshot({ status: 'OBSERVED', resourceId, decision });
+    } catch (_) {
+      record.status = 'HOLD';
+      throw hold();
+    } finally {
+      if (record.observationAttempt === attempt) record.observationAttempt = undefined;
     }
   }
 }
