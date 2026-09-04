@@ -53,8 +53,18 @@ const FAILURE_LOOP_LIMITS = Object.freeze([
   'maxEvidenceRefsPerFailure', 'maxOperationBindings', 'maxStateBytes',
 ]);
 const COMMAND_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const PROCESS_TREE_RESOURCE_ID =
+  /^command:[A-Za-z0-9][A-Za-z0-9_-]{0,127}:process-tree$/;
 const CONTROL_CHARACTER = /[\0\r\n]/;
 const DEFAULT_TRACKER_MAX_INPUT_BYTES = 64 * 1024;
+const STOP_REASON_CODES = new Set([
+  'user_requested', 'task_completed', 'task_failed', 'timeout_elapsed', 'manager_close',
+  'recovery_resume',
+]);
+const ACTION_DISPOSITIONS = new Set([
+  'COMPLETED', 'UNSUPPORTED', 'IDENTITY_INSUFFICIENT', 'AUTHORIZATION_BLOCKED', 'FAILED',
+]);
+const STOP_ACTION_TIMEOUT_MS = 30_000;
 
 class TaskResourceManagerError extends Error {
   constructor() {
@@ -232,6 +242,76 @@ function normalizeObservationResponse(value, request, maxInputBytes) {
     || Buffer.byteLength(canonicalizeDetachedSnapshot(response), 'utf8') > maxInputBytes
     || !validateResourceIdentity2('process_tree', response.identity).valid) throw hold();
   return freezeContext(response);
+}
+
+function requireEvidenceResponse(response, maxInputBytes) {
+  if (!Array.isArray(response.evidenceRefs) || response.evidenceRefs.length === 0
+    || response.evidenceRefs.some((reference) => typeof reference !== 'string'
+      || !/^evidence:[0-9a-f]{64}$/.test(reference))
+    || new Set(response.evidenceRefs).size !== response.evidenceRefs.length
+    || Buffer.byteLength(canonicalizeDetachedSnapshot(response), 'utf8') > maxInputBytes) throw hold();
+}
+
+function normalizeStopActionResponse(value, request, maxInputBytes) {
+  const response = readExactDataObject(detachedSnapshot(value), [
+    'disposition', 'targetIdentitySha256', 'identityRevalidated', 'evidenceRefs', 'requestSha256',
+  ]);
+  if (!ACTION_DISPOSITIONS.has(response.disposition)
+    || response.targetIdentitySha256 !== computeDetachedSha256(request.expectedIdentity)
+    || typeof response.identityRevalidated !== 'boolean'
+    || response.requestSha256 !== request.requestSha256) throw hold();
+  requireEvidenceResponse(response, maxInputBytes);
+  return detachedSnapshot(response);
+}
+
+function normalizeStopObservationResponse(value, request, maxInputBytes) {
+  const response = readExactDataObject(detachedSnapshot(value), [
+    'identity', 'graceful', 'exactTreeTerminationSupported', 'evidenceRefs', 'requestSha256',
+  ]);
+  const graceful = readExactDataObject(response.graceful, [
+    'requested', 'deadlineReached', 'exitObserved',
+  ]);
+  if (response.requestSha256 !== request.requestSha256
+    || !validateResourceIdentity2('process_tree', response.identity).valid
+    || typeof graceful.requested !== 'boolean' || typeof graceful.deadlineReached !== 'boolean'
+    || typeof graceful.exitObserved !== 'boolean' || graceful.requested !== true
+    || typeof response.exactTreeTerminationSupported !== 'boolean') throw hold();
+  requireEvidenceResponse(response, maxInputBytes);
+  return detachedSnapshot(response);
+}
+
+function normalizeAbsenceResponse(value, request, maxInputBytes) {
+  const response = readExactDataObject(detachedSnapshot(value), [
+    'disposition', 'targetIdentitySha256', 'absence', 'evidenceRefs', 'requestSha256',
+  ]);
+  const absence = readExactDataObject(response.absence, [
+    'processAbsent', 'threadAbsent', 'portAbsent',
+  ]);
+  if (!(ACTION_DISPOSITIONS.has(response.disposition) || response.disposition === 'ABSENT_CONFIRMED')
+    || response.targetIdentitySha256 !== request.expectedIdentitySha256
+    || response.requestSha256 !== request.requestSha256
+    || typeof absence.processAbsent !== 'boolean' || typeof absence.threadAbsent !== 'boolean'
+    || typeof absence.portAbsent !== 'boolean') throw hold();
+  if (response.disposition === 'ABSENT_CONFIRMED'
+    && (!absence.processAbsent || !absence.threadAbsent || !absence.portAbsent)) throw hold();
+  requireEvidenceResponse(response, maxInputBytes);
+  return detachedSnapshot(response);
+}
+
+function stopResult(status, resourceId, decision) {
+  return detachedSnapshot({ status, resourceId, decision });
+}
+
+function publicStopDecision(action, reasons, extra = {}) {
+  return detachedSnapshot({ action, reasons, action_authorized: false, ...extra });
+}
+
+function stopHold(record, resourceId, reason) {
+  const result = stopResult('HOLD', resourceId, publicStopDecision('HOLD', [reason]));
+  record.status = 'HOLD';
+  record.phase = 'STOP_HOLD';
+  record.stopResult = result;
+  return result;
 }
 
 function sameProvenance(identity, provenance) {
@@ -708,6 +788,280 @@ class TaskResourceManager {
       throw hold();
     } finally {
       if (record.observationAttempt === attempt) record.observationAttempt = undefined;
+    }
+  }
+
+  async stop(resourceId, options) {
+    const state = PRIVATE_STATE.get(this);
+    if (!state || typeof resourceId !== 'string'
+      || !PROCESS_TREE_RESOURCE_ID.test(resourceId)) throw hold();
+    let record = null;
+    for (const candidate of state.commands.values()) {
+      if (candidate.resourceIds !== null && candidate.resourceIds.processTree === resourceId) {
+        record = candidate;
+        break;
+      }
+    }
+    let reasonCode;
+    try {
+      reasonCode = readExactDataObject(options, ['reason']).reason;
+    } catch (_) {
+      throw hold();
+    }
+    if (!STOP_REASON_CODES.has(reasonCode) || !record || record.scope === null
+      || record.spawnResponse === null || record.pendingAction !== null
+      || record.observationAttempt !== undefined || record.stopAttempt !== undefined) throw hold();
+    if (record.stopReasonCode !== undefined && record.stopReasonCode !== reasonCode) throw hold();
+    if (record.status === 'STOPPED' && record.stopResult !== undefined) return record.stopResult;
+    if (record.status === 'HOLD') {
+      if (record.stopResult !== undefined) return record.stopResult;
+      throw hold();
+    }
+    if (!['STARTED', 'STOP_REQUESTED', 'WAITING'].includes(record.status)) throw hold();
+
+    const attempt = Symbol('TaskResourceManager.stop');
+    record.stopAttempt = attempt;
+    try {
+      const supportMatrix = state.capabilityEnvelope.supportMatrix;
+      const provenance = adapterProvenance(state.provenance);
+      const boundIdentity = record.spawnResponse.identity;
+      const expectedScope = detachedSnapshot({ kind: 'scope', value: record.scope.scopeId });
+      const actionTimeoutMs = Math.min(record.command.timeoutMs, STOP_ACTION_TIMEOUT_MS);
+      requirePositiveInteger(actionTimeoutMs);
+      const savePending = (action, request, phase) => {
+        record.pendingAction = freezeContext({
+          action,
+          requestSha256: request.requestSha256,
+          resourceIds: record.resourceIds,
+          launchNonce: boundIdentity.launch_nonce,
+        });
+        record.phase = phase;
+      };
+      const clearPending = () => { record.pendingAction = null; };
+      const trusted = (response) => state.trustedObservationResolver(response) === true;
+      const storeWaiting = (decision, phase) => {
+        const result = stopResult('WAITING', resourceId, publicStopDecision(
+          decision.action,
+          decision.reasons,
+        ));
+        record.status = 'WAITING';
+        record.phase = phase;
+        record.stopResult = result;
+        return result;
+      };
+      const trackerObservation = (response, graceful, absence) => detachedSnapshot(
+        record.scope.observe(record.resourceIds.processTree, {
+          duplicate_run_lock: false,
+          owner_status: 'owned',
+          orphaned: false,
+          expected_identity: boundIdentity,
+          observed_identity: response.identity,
+          expected_generation: state.provenance.managerGeneration,
+          observed_generation: response.identity.lease_generation,
+          expected_scope: expectedScope,
+          observed_scope: expectedScope,
+          graceful,
+          exact_tree_termination_supported: supportMatrix.claims.process_tree_terminate?.state === 'VERIFIED_FULL'
+            && response.exactTreeTerminationSupported === true,
+          absence,
+          evidence_refs: response.evidenceRefs,
+        }),
+      );
+      const verifyAbsence = async (terminalAction, terminalActionRequestSha256) => {
+        const request = createAdapterRequest('TaskResourceProcessAbsenceVerificationRequest1', {
+          commandId: record.command.commandId,
+          resourceIds: record.resourceIds,
+          spawnRequestSha256: record.spawnResponse.requestSha256,
+          gracefulRequestSha256: record.gracefulStopResponse.requestSha256,
+          terminalAction,
+          terminalActionRequestSha256,
+          launchNonce: boundIdentity.launch_nonce,
+          expectedIdentity: boundIdentity,
+          expectedIdentitySha256: computeDetachedSha256(boundIdentity),
+          expectedGeneration: state.provenance.managerGeneration,
+          expectedScope,
+          actionTimeoutMs,
+          provenance,
+        });
+        savePending('verifyProcessAbsent', request, 'VERIFYING_PROCESS_ABSENCE');
+        const response = normalizeAbsenceResponse(
+          await state.adapter.verifyProcessAbsent(request), request, state.trackerMaxInputBytes,
+        );
+        if (!trusted(response)) throw hold();
+        record.absenceResponse = response;
+        clearPending();
+        if (response.disposition === 'ABSENT_CONFIRMED') {
+          const finalObservation = detachedSnapshot({
+            identity: boundIdentity,
+            evidenceRefs: response.evidenceRefs,
+            exactTreeTerminationSupported: false,
+          });
+          const decision = trackerObservation(
+            finalObservation,
+            { requested: true, deadline_reached: false, exit_observed: true },
+            {
+              process_absent: response.absence.processAbsent,
+              thread_absent: response.absence.threadAbsent,
+              port_absent: response.absence.portAbsent,
+            },
+          );
+          if (decision.action !== 'OBSERVE_ONLY'
+            || !decision.reasons.includes('ABSENCE_VERIFIED')
+            || decision.identity_confidence !== 'MATCH'
+            || decision.downstream_release_allowed !== true) return stopHold(record, resourceId, 'ABSENCE_PROOF_REJECTED');
+          const result = stopResult('STOPPED', resourceId, decision);
+          record.status = 'STOPPED';
+          record.phase = 'STOPPED';
+          record.stopResult = result;
+          return result;
+        }
+        if (response.disposition === 'COMPLETED') {
+          record.status = 'WAITING';
+          record.phase = 'ABSENCE_PENDING';
+          record.absencePending = true;
+          return storeWaiting(publicStopDecision('WAIT_BOUNDED', ['EXIT_ABSENCE_NOT_VERIFIED']), 'ABSENCE_PENDING');
+        }
+        return stopHold(record, resourceId, `ABSENCE_${response.disposition}`);
+      };
+
+      if (record.stopReasonCode === undefined) {
+        requireVerifiedCapability(supportMatrix, 'process_identity');
+        requireVerifiedCapability(supportMatrix, 'resource_observation');
+        requireVerifiedCapability(supportMatrix, 'request_shutdown');
+        const request = createAdapterRequest('TaskResourceGracefulStopRequest1', {
+          commandId: record.command.commandId,
+          resourceIds: record.resourceIds,
+          spawnRequestSha256: record.spawnResponse.requestSha256,
+          launchNonce: boundIdentity.launch_nonce,
+          expectedIdentity: boundIdentity,
+          expectedGeneration: state.provenance.managerGeneration,
+          expectedScope,
+          actionTimeoutMs,
+          reasonCode,
+          provenance,
+        });
+        record.stopReasonCode = reasonCode;
+        savePending('requestGracefulStop', request, 'REQUESTING_GRACEFUL_STOP');
+        const response = normalizeStopActionResponse(
+          await state.adapter.requestGracefulStop(request), request, state.trackerMaxInputBytes,
+        );
+        if (!trusted(response)) throw hold();
+        record.gracefulStopResponse = response;
+        clearPending();
+        if (response.disposition !== 'COMPLETED') {
+          return stopHold(record, resourceId, `GRACEFUL_STOP_${response.disposition}`);
+        }
+        if (response.identityRevalidated !== true) throw hold();
+        record.status = 'STOP_REQUESTED';
+        record.phase = 'GRACEFUL_STOP_CONFIRMED';
+        const result = stopResult('STOP_REQUESTED', resourceId, publicStopDecision(
+          'WAIT_BOUNDED', ['GRACEFUL_REQUEST_ACKNOWLEDGED'],
+        ));
+        record.stopResult = result;
+        return result;
+      }
+
+      if (record.absencePending === true) {
+        return await verifyAbsence(
+          record.absenceTerminalAction,
+          record.absenceTerminalActionRequestSha256,
+        );
+      }
+
+      requireVerifiedCapability(supportMatrix, 'process_identity');
+      requireVerifiedCapability(supportMatrix, 'resource_observation');
+      const request = createAdapterRequest('TaskResourceStopObservationRequest1', {
+        commandId: record.command.commandId,
+        resourceIds: record.resourceIds,
+        spawnRequestSha256: record.spawnResponse.requestSha256,
+        gracefulRequestSha256: record.gracefulStopResponse.requestSha256,
+        launchNonce: boundIdentity.launch_nonce,
+        expectedIdentity: boundIdentity,
+        expectedGeneration: state.provenance.managerGeneration,
+        expectedScope,
+        actionTimeoutMs,
+        boundedWaitMs: actionTimeoutMs,
+        provenance,
+      });
+      savePending('observeProcess', request, 'STOP_OBSERVING');
+      const response = normalizeStopObservationResponse(
+        await state.adapter.observeProcess(request), request, state.trackerMaxInputBytes,
+      );
+      if (!trusted(response)) throw hold();
+      record.stopObservationResponse = response;
+      clearPending();
+      const decision = trackerObservation(
+        response,
+        {
+          requested: true,
+          deadline_reached: response.graceful.deadlineReached,
+          exit_observed: response.graceful.exitObserved,
+        },
+        { process_absent: false, thread_absent: false, port_absent: false },
+      );
+      if (decision.action === 'HOLD') return stopHold(record, resourceId, decision.reasons[0] || 'STOP_OBSERVATION_HOLD');
+      if (decision.action === 'WAIT_BOUNDED') {
+        if (response.graceful.exitObserved === true) {
+          record.absenceTerminalAction = 'graceful_exit';
+          record.absenceTerminalActionRequestSha256 = request.requestSha256;
+          return await verifyAbsence('graceful_exit', request.requestSha256);
+        }
+        return storeWaiting(decision, 'WAITING_FOR_GRACEFUL_EXIT');
+      }
+      if (decision.action !== 'TERMINATE_EXACT_TREE') {
+        return stopHold(record, resourceId, 'STOP_DECISION_UNSUPPORTED');
+      }
+      if (state.authorization.allowForceTermination !== true) {
+        return stopHold(record, resourceId, 'FORCE_TERMINATION_NOT_AUTHORIZED_AT_OPEN');
+      }
+      requireVerifiedCapability(supportMatrix, 'process_tree_terminate');
+      if (response.exactTreeTerminationSupported !== true
+        || decision.identity_confidence !== 'MATCH'
+        || decision.requires_identity_recheck !== true
+        || decision.requires_absence_verification !== true) {
+        return stopHold(record, resourceId, 'FORCE_TERMINATION_NOT_SAFE');
+      }
+      const terminationRequest = createAdapterRequest('TaskResourceTerminateOwnedTreeRequest1', {
+        commandId: record.command.commandId,
+        resourceIds: record.resourceIds,
+        spawnRequestSha256: record.spawnResponse.requestSha256,
+        gracefulRequestSha256: record.gracefulStopResponse.requestSha256,
+        observationRequestSha256: request.requestSha256,
+        launchNonce: boundIdentity.launch_nonce,
+        expectedIdentity: boundIdentity,
+        confirmedIdentity: response.identity,
+        expectedGeneration: state.provenance.managerGeneration,
+        expectedScope,
+        actionTimeoutMs,
+        forceAuthorization: {
+          allowedAtOpen: true,
+          authorizationSha256: state.provenance.authorizationSha256,
+        },
+        reasonCode,
+        provenance,
+      });
+      savePending('terminateOwnedTree', terminationRequest, 'TERMINATING_EXACT_TREE');
+      const terminationResponse = normalizeStopActionResponse(
+        await state.adapter.terminateOwnedTree(terminationRequest),
+        terminationRequest,
+        state.trackerMaxInputBytes,
+      );
+      if (!trusted(terminationResponse)) throw hold();
+      record.terminationResponse = terminationResponse;
+      clearPending();
+      if (terminationResponse.disposition !== 'COMPLETED') {
+        return stopHold(record, resourceId, `EXACT_TREE_TERMINATION_${terminationResponse.disposition}`);
+      }
+      if (terminationResponse.identityRevalidated !== true) throw hold();
+      record.absenceTerminalAction = 'force_termination';
+      record.absenceTerminalActionRequestSha256 = terminationRequest.requestSha256;
+      return await verifyAbsence('force_termination', terminationRequest.requestSha256);
+    } catch (_) {
+      record.status = 'HOLD';
+      record.stopResult = undefined;
+      throw hold();
+    } finally {
+      if (record.stopAttempt === attempt) record.stopAttempt = undefined;
     }
   }
 }
