@@ -1,12 +1,13 @@
 'use strict';
 
+const crypto = require('crypto');
 const path = require('path');
 
 const {
   computeDetachedSha256,
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
-const { validateSupportMatrix2 } = require('./identity-support-v2');
+const { validateResourceIdentity2, validateSupportMatrix2 } = require('./identity-support-v2');
 const { TaskResourceTracker } = require('./task-resource-tracker');
 
 const CONSTRUCTOR_TOKEN = Symbol('TaskResourceManager.constructor');
@@ -34,6 +35,10 @@ const PROVENANCE_KEYS = Object.freeze([
   'authorizationSha256',
 ]);
 const ENVELOPE_KEYS = Object.freeze(['type', 'provenance', 'supportMatrix']);
+const COMMAND_KEYS = Object.freeze([
+  'commandId', 'executable', 'args', 'cwd', 'timeoutMs', 'temporaryRoot',
+]);
+const ADAPTER_RESPONSE_KEYS = Object.freeze(['identity', 'evidenceRefs', 'requestSha256']);
 const LIMIT_NAMESPACES = Object.freeze(['tracker', 'recovery', 'failureLoop']);
 const TRACKER_LIMITS = Object.freeze([
   'maxScopes', 'maxResources', 'maxHistoryEvents', 'maxInputBytes', 'maxEventBytes',
@@ -46,6 +51,8 @@ const FAILURE_LOOP_LIMITS = Object.freeze([
   'maxFailures', 'maxRecordsPerGeneration', 'maxGenerationsPerFailure',
   'maxEvidenceRefsPerFailure', 'maxOperationBindings', 'maxStateBytes',
 ]);
+const COMMAND_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const CONTROL_CHARACTER = /[\0\r\n]/;
 
 class TaskResourceManagerError extends Error {
   constructor() {
@@ -132,6 +139,123 @@ function normalizeDataRoot(value) {
   const resolved = path.resolve(value);
   if (resolved === path.parse(resolved).root) throw hold();
   return resolved;
+}
+
+function normalizeNonRootAbsolutePath(value) {
+  if (typeof value !== 'string' || CONTROL_CHARACTER.test(value) || !path.isAbsolute(value)) throw hold();
+  const resolved = path.resolve(value);
+  if (resolved === path.parse(resolved).root) throw hold();
+  return resolved;
+}
+
+function normalizeCommandArgs(value) {
+  const normalized = detachedSnapshot(value);
+  if (!Array.isArray(normalized)
+    || normalized.some((item) => typeof item !== 'string' || CONTROL_CHARACTER.test(item))) throw hold();
+  return normalized;
+}
+
+function normalizeCommandInput(value) {
+  const input = readExactDataObject(value, COMMAND_KEYS);
+  if (typeof input.commandId !== 'string' || !COMMAND_ID.test(input.commandId)
+    || typeof input.executable !== 'string' || input.executable.length === 0
+    || CONTROL_CHARACTER.test(input.executable)
+    || !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1) throw hold();
+  return freezeContext({
+    commandId: input.commandId,
+    executable: input.executable,
+    args: normalizeCommandArgs(input.args),
+    cwd: normalizeNonRootAbsolutePath(input.cwd),
+    timeoutMs: input.timeoutMs,
+    temporaryRoot: input.temporaryRoot === null ? null : normalizeNonRootAbsolutePath(input.temporaryRoot),
+  });
+}
+
+function requireVerifiedCapability(supportMatrix, capability) {
+  const claim = supportMatrix && supportMatrix.claims && supportMatrix.claims[capability];
+  if (!claim || claim.state !== 'VERIFIED_FULL') throw hold();
+}
+
+function randomOpaqueValue() {
+  try { return crypto.randomBytes(32).toString('hex'); } catch (_) { throw hold(); }
+}
+
+function isStrictPathDescendant(parent, child) {
+  if (typeof parent !== 'string' || typeof child !== 'string'
+    || !path.isAbsolute(child) || path.resolve(child) !== child) return false;
+  const relative = path.relative(parent, child);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function resourceIdsFor(commandId, needsTemporaryAllocation) {
+  return freezeContext({
+    temporaryAllocation: needsTemporaryAllocation ? `command:${commandId}:temporary` : null,
+    commandSession: `command:${commandId}:session`,
+    processTree: `command:${commandId}:process-tree`,
+  });
+}
+
+function adapterProvenance(provenance) {
+  return freezeContext({
+    ownerId: provenance.ownerId,
+    runId: provenance.runId,
+    sessionId: provenance.sessionId,
+    managerRunId: provenance.managerRunId,
+    managerGeneration: provenance.managerGeneration,
+    adapterGeneration: provenance.adapterGeneration,
+    platform: provenance.platform,
+  });
+}
+
+function createAdapterRequest(type, fields) {
+  const preimage = detachedSnapshot({ type, ...fields });
+  return detachedSnapshot({ ...preimage, requestSha256: computeDetachedSha256(preimage) });
+}
+
+function normalizeAdapterResponse(value) {
+  const response = readExactDataObject(detachedSnapshot(value), ADAPTER_RESPONSE_KEYS);
+  if (typeof response.requestSha256 !== 'string' || !SHA256.test(response.requestSha256)) throw hold();
+  return freezeContext(response);
+}
+
+function sameProvenance(identity, provenance) {
+  return identity && identity.owner_id === provenance.ownerId
+    && identity.run_id === provenance.runId
+    && identity.session_id === provenance.sessionId
+    && identity.lease_generation === provenance.managerGeneration
+    && identity.platform === provenance.platform;
+}
+
+function verifyTemporaryResponse(response, request, provenance) {
+  const identity = response.identity;
+  if (!validateResourceIdentity2('temporary_allocation', identity).valid
+    || response.requestSha256 !== request.requestSha256
+    || !sameProvenance(identity, provenance)
+    || identity.canonical_root !== request.temporaryRoot
+    || !identity.confirmed_parent_directory
+    || identity.confirmed_parent_directory.path !== request.temporaryRoot
+    || !identity.task_directory
+    || !isStrictPathDescendant(request.temporaryRoot, identity.task_directory.path)
+    || identity.allocation_id !== request.allocationId
+    || identity.child_id !== request.resourceIds.commandSession
+    || identity.creation_nonce !== request.creationNonce) throw hold();
+}
+
+function verifyProcessResponse(response, request, provenance) {
+  const identity = response.identity;
+  if (!validateResourceIdentity2('process_tree', identity).valid
+    || response.requestSha256 !== request.requestSha256
+    || !sameProvenance(identity, provenance)
+    || identity.adapter_generation !== provenance.adapterGeneration
+    || identity.manager_generation !== provenance.managerGeneration
+    || identity.manager_run_id !== provenance.managerRunId
+    || identity.launch_nonce !== request.launchNonce) throw hold();
+}
+
+function requireActiveBind(scope, resourceId, identity, generation, evidenceRefs) {
+  const result = scope.bind(resourceId, { identity, generation, evidenceRefs });
+  if (!result || result.state !== 'ACTIVE') throw hold();
 }
 
 function normalizeHarness(value) {
@@ -303,6 +427,7 @@ class TaskResourceManager {
         adapter: input.adapter,
         authorization: input.authorization,
         capabilityEnvelope: envelope,
+        commands: new Map(),
         dataRoot: input.dataRoot,
         harness: input.harness,
         limits: input.limits,
@@ -314,6 +439,176 @@ class TaskResourceManager {
         trustedObservationResolver,
       }));
     } catch (_) {
+      throw hold();
+    }
+  }
+
+  async startCommand(value) {
+    let command;
+    let state;
+    let record;
+    try {
+      command = normalizeCommandInput(value);
+      state = PRIVATE_STATE.get(this);
+      if (!state || state.commands.has(command.commandId)) throw hold();
+      record = {
+        status: 'STARTING',
+        command,
+        scope: null,
+        resourceIds: null,
+        phase: 'INPUT_ACCEPTED',
+        pendingAction: null,
+        allocationResponse: null,
+        spawnResponse: null,
+      };
+      state.commands.set(command.commandId, record);
+
+      requireVerifiedCapability(state.capabilityEnvelope.supportMatrix, 'process_identity');
+      if (command.temporaryRoot !== null) {
+        requireVerifiedCapability(state.capabilityEnvelope.supportMatrix, 'temporary_lease');
+      }
+      if (state.provenance.adapterGeneration !== state.provenance.managerGeneration) throw hold();
+
+      const scope = state.rootScope.openChild({
+        scopeId: `command:${command.commandId}`,
+        purpose: 'managed_command',
+      });
+      const resourceIds = resourceIdsFor(command.commandId, command.temporaryRoot !== null);
+      record.scope = scope;
+      record.resourceIds = resourceIds;
+      record.phase = 'REGISTERING';
+      if (resourceIds.temporaryAllocation !== null) {
+        scope.register({
+          resourceId: resourceIds.temporaryAllocation,
+          type: 'temporary_allocation',
+          purpose: 'task_temporary_directory',
+          teardownCondition: 'allocation_absence_verified',
+          quota: null,
+          evidenceRefs: state.requiredReferences,
+        });
+      }
+      scope.register({
+        resourceId: resourceIds.commandSession,
+        type: 'command_session',
+        purpose: 'managed_command_session',
+        teardownCondition: 'identity_absence_verified',
+        quota: { timeoutMs: command.timeoutMs },
+        evidenceRefs: state.requiredReferences,
+        parentResourceId: resourceIds.temporaryAllocation,
+      });
+      scope.register({
+        resourceId: resourceIds.processTree,
+        type: 'process_tree',
+        purpose: 'managed_command_process_tree',
+        teardownCondition: 'identity_absence_verified',
+        quota: { timeoutMs: command.timeoutMs },
+        evidenceRefs: state.requiredReferences,
+        parentResourceId: resourceIds.commandSession,
+      });
+      record.phase = 'REGISTERED';
+
+      const provenance = adapterProvenance(state.provenance);
+      const launchNonce = randomOpaqueValue();
+      let temporaryAllocationIdentity = null;
+      if (command.temporaryRoot !== null) {
+        const allocationId = randomOpaqueValue();
+        const creationNonce = randomOpaqueValue();
+        const allocationRequest = createAdapterRequest('TaskResourceTemporaryAllocationRequest1', {
+          commandId: command.commandId,
+          executable: command.executable,
+          args: command.args,
+          cwd: command.cwd,
+          timeoutMs: command.timeoutMs,
+          temporaryRoot: command.temporaryRoot,
+          resourceIds,
+          allocationId,
+          creationNonce,
+          launchNonce,
+          provenance,
+        });
+        record.pendingAction = freezeContext({
+          action: 'allocateTemporaryRoot',
+          requestSha256: allocationRequest.requestSha256,
+          resourceIds,
+          launchNonce,
+          allocationId,
+          creationNonce,
+        });
+        record.phase = 'ALLOCATING_TEMPORARY_ROOT';
+        const allocationResponse = normalizeAdapterResponse(
+          await state.adapter.allocateTemporaryRoot(allocationRequest),
+        );
+        if (state.trustedFilesystemResolver(allocationResponse) !== true) throw hold();
+        verifyTemporaryResponse(allocationResponse, allocationRequest, provenance);
+        record.allocationResponse = allocationResponse;
+        record.pendingAction = null;
+        record.phase = 'TEMPORARY_ROOT_CONFIRMED';
+        requireActiveBind(
+          scope,
+          resourceIds.temporaryAllocation,
+          allocationResponse.identity,
+          provenance.managerGeneration,
+          allocationResponse.evidenceRefs,
+        );
+        record.phase = 'TEMPORARY_ROOT_BOUND';
+        temporaryAllocationIdentity = allocationResponse.identity;
+      }
+
+      const spawnRequest = createAdapterRequest('TaskResourceSpawnRequest1', {
+        commandId: command.commandId,
+        executable: command.executable,
+        args: command.args,
+        cwd: command.cwd,
+        timeoutMs: command.timeoutMs,
+        temporaryRoot: command.temporaryRoot,
+        resourceIds,
+        allocationId: null,
+        creationNonce: null,
+        launchNonce,
+        temporaryAllocationIdentity,
+        provenance,
+      });
+      record.pendingAction = freezeContext({
+        action: 'spawnManaged',
+        requestSha256: spawnRequest.requestSha256,
+        resourceIds,
+        launchNonce,
+        allocationId: null,
+        creationNonce: null,
+      });
+      record.phase = 'SPAWNING';
+      const spawnResponse = normalizeAdapterResponse(await state.adapter.spawnManaged(spawnRequest));
+      if (state.trustedObservationResolver(spawnResponse) !== true) throw hold();
+      verifyProcessResponse(spawnResponse, spawnRequest, provenance);
+      record.spawnResponse = spawnResponse;
+      record.pendingAction = null;
+      record.phase = 'SPAWN_CONFIRMED';
+      requireActiveBind(
+        scope,
+        resourceIds.commandSession,
+        spawnResponse.identity,
+        provenance.managerGeneration,
+        spawnResponse.evidenceRefs,
+      );
+      requireActiveBind(
+        scope,
+        resourceIds.processTree,
+        spawnResponse.identity,
+        provenance.managerGeneration,
+        spawnResponse.evidenceRefs,
+      );
+      record.phase = 'BOUND';
+      record.status = 'STARTED';
+      record.phase = 'STARTED';
+      return Object.freeze({
+        status: 'STARTED',
+        commandId: command.commandId,
+        resourceId: resourceIds.processTree,
+      });
+    } catch (_) {
+      if (state && command && record && state.commands.get(command.commandId) === record) {
+        record.status = 'HOLD';
+      }
       throw hold();
     }
   }
