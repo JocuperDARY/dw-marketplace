@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const api = require('./host-e2e');
+const api = require('./host-evidence-data');
 
 const HOSTS = ['claude-code', 'codex', 'grok-build'];
 const NOW = '2026-08-29T01:00:00Z';
@@ -13,7 +13,7 @@ const roots = [];
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const seal = (value, field = 'content_sha256') => { value[field] = api.computeRecordSha256(value, field); return value; };
 const expectCode = (fn, code) => assert.throws(fn, (error) => error && error.code === code, `expected ${code}`);
-function makeRoot() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-host-e2e-')); roots.push(root); return root; }
+function makeRoot() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-host-evidence-data-')); roots.push(root); return root; }
 function write(root, name, value) { fs.writeFileSync(path.join(root, name), `${JSON.stringify(value, null, 2)}\n`, 'utf8'); }
 function makePolicy(live = [], expires = '2026-08-29T02:00:00Z') {
   return seal({
@@ -77,7 +77,7 @@ try {
   const tamperedRoot = makeRoot(); const tampered = clone(verifiedReceipts); tampered.codex.capabilities.push('forged');
   writeSet(tamperedRoot, makePolicy(['codex']), tampered, { codex: makeProbe('codex') });
   expectCode(() => api.validateEvidenceRoot(tamperedRoot, { now: NOW }), 'RECEIPT_HASH_INVALID');
-  console.log('host evidence validator contract passed');
+  console.log('synthetic host evidence data validator contract passed');
 } finally {
   for (const root of roots) { const resolved = path.resolve(root); if (resolved.startsWith(path.resolve(os.tmpdir()) + path.sep)) fs.rmSync(resolved, { recursive: true, force: true }); }
 }

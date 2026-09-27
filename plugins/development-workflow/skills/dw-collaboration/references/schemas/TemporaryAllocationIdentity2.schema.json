@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "TemporaryAllocationIdentity2.schema.json",
+  "title": "TemporaryAllocationIdentity2",
+  "oneOf": [
+    { "$ref": "#/$defs/windows" },
+    { "$ref": "#/$defs/linux" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["schema", "schema_version", "platform", "allocation_id", "owner_id", "run_id", "session_id", "lease_generation", "child_id", "manifest_sha256", "canonical_root", "task_directory", "confirmed_parent_directory", "quota", "creation_nonce"],
+      "properties": {
+        "schema": { "const": "TemporaryAllocationIdentity2" },
+        "schema_version": { "const": 2 },
+        "platform": { "enum": ["windows", "linux"] },
+        "allocation_id": { "$ref": "#/$defs/non_empty_string" },
+        "owner_id": { "$ref": "#/$defs/non_empty_string" },
+        "run_id": { "$ref": "#/$defs/non_empty_string" },
+        "session_id": { "$ref": "#/$defs/non_empty_string" },
+        "lease_generation": { "$ref": "#/$defs/positive_safe_integer" },
+        "child_id": { "$ref": "#/$defs/non_empty_string" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "canonical_root": { "$ref": "#/$defs/non_empty_string" },
+        "creation_nonce": { "$ref": "#/$defs/non_empty_string" },
+        "quota": {
+          "type": "object",
+          "required": ["unit", "limit"],
+          "properties": {
+            "unit": { "const": "bytes" },
+            "limit": { "$ref": "#/$defs/positive_safe_integer" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "windows": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["windows_file_identity", "task_directory", "confirmed_parent_directory"],
+          "properties": {
+            "platform": { "const": "windows" },
+            "windows_file_identity": {
+              "type": "object",
+              "required": ["volume_serial_number", "file_id"],
+              "properties": {
+                "volume_serial_number": { "$ref": "#/$defs/non_empty_string" },
+                "file_id": { "$ref": "#/$defs/non_empty_string" }
+              },
+              "additionalProperties": false
+            },
+            "task_directory": { "$ref": "#/$defs/windows_directory" },
+            "confirmed_parent_directory": { "$ref": "#/$defs/windows_directory" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "linux": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["linux_file_identity", "task_directory", "confirmed_parent_directory"],
+          "properties": {
+            "platform": { "const": "linux" },
+            "linux_file_identity": {
+              "type": "object",
+              "required": ["device_id", "inode"],
+              "properties": {
+                "device_id": { "$ref": "#/$defs/non_empty_string" },
+                "inode": { "$ref": "#/$defs/positive_safe_integer" }
+              },
+              "additionalProperties": false
+            },
+            "task_directory": { "$ref": "#/$defs/linux_directory" },
+            "confirmed_parent_directory": { "$ref": "#/$defs/linux_directory" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "windows_directory": {
+      "type": "object",
+      "required": ["path", "windows_file_identity"],
+      "properties": {
+        "path": { "$ref": "#/$defs/non_empty_string" },
+        "windows_file_identity": {
+          "type": "object",
+          "required": ["volume_serial_number", "file_id"],
+          "properties": {
+            "volume_serial_number": { "$ref": "#/$defs/non_empty_string" },
+            "file_id": { "$ref": "#/$defs/non_empty_string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "linux_directory": {
+      "type": "object",
+      "required": ["path", "linux_file_identity"],
+      "properties": {
+        "path": { "$ref": "#/$defs/non_empty_string" },
+        "linux_file_identity": {
+          "type": "object",
+          "required": ["device_id", "inode"],
+          "properties": {
+            "device_id": { "$ref": "#/$defs/non_empty_string" },
+            "inode": { "$ref": "#/$defs/positive_safe_integer" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "non_empty_string": {
+      "type": "string",
+      "not": { "pattern": "^[\\u0009\\u000A\\u000B\\u000C\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$" }
+    },
+    "positive_safe_integer": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "sha256": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" }
+  }
+}

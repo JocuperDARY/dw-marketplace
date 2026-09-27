@@ -6,12 +6,78 @@ const {
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
 const {
+  ContractError,
   decideProcessRecovery,
+  decideProcessRecovery2,
   decideTemporaryLease,
 } = require('./contracts');
 const {
   validateProcessIdentity,
 } = require('./state-machines');
+const {
+  validateResourceIdentity2,
+} = require('./identity-support-v2');
+
+const PROCESS_V2_RESOURCE_TYPES = new Set([
+  'process_tree',
+  'command_session',
+]);
+const HARNESS_RESOURCE_TYPES = new Set([
+  'agent_session',
+  'runtime_thread',
+]);
+const TEMPORARY_MANIFEST_PLATFORM = Object.freeze({
+  windows: 'win32',
+  linux: 'linux',
+});
+const PROCESS_V2_EXCLUSIVE_KEYS = new Set([
+  'platform',
+  'owner_id',
+  'run_id',
+  'session_id',
+  'lease_generation',
+  'adapter_generation',
+  'manager_generation',
+  'executable_path_sha256',
+  'argv_sha256',
+  'parent_identity_sha256',
+  'launch_nonce',
+  'manager_run_id',
+  'windows_identity',
+  'linux_identity',
+]);
+const HARNESS_V2_EXCLUSIVE_KEYS = new Set([
+  'harness',
+  'harness_kind',
+  'session_id',
+  'owner_id',
+  'run_id',
+  'lease_generation',
+  'adapter_generation',
+  'harness_instance_id',
+  'launch_nonce',
+  'agent_id',
+  'thread_id',
+  'process_identity',
+]);
+const TEMPORARY_V2_EXCLUSIVE_KEYS = new Set([
+  'platform',
+  'allocation_id',
+  'canonical_root',
+  'task_directory',
+  'confirmed_parent_directory',
+  'quota',
+  'creation_nonce',
+  'windows_file_identity',
+  'linux_file_identity',
+]);
+const V2_EXCLUSIVE_KEYS_BY_RESOURCE_TYPE = new Map([
+  ['process_tree', PROCESS_V2_EXCLUSIVE_KEYS],
+  ['command_session', PROCESS_V2_EXCLUSIVE_KEYS],
+  ['agent_session', HARNESS_V2_EXCLUSIVE_KEYS],
+  ['runtime_thread', HARNESS_V2_EXCLUSIVE_KEYS],
+  ['temporary_allocation', TEMPORARY_V2_EXCLUSIVE_KEYS],
+]);
 
 const PROCESS_RESOURCE_TYPES = new Set([
   'agent_session',
@@ -89,6 +155,62 @@ function requireEvidenceRefs(value, code = 'EVIDENCE_REFS_INVALID') {
   return Array.from(new Set(value));
 }
 
+function normalizeBindObservation(observation, assertInputSize) {
+  const snapshot = detached(observation);
+  assertInputSize(snapshot);
+  if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new ResourceTrackerError('RESOURCE_OBSERVATION_INVALID');
+  }
+  const generation = requireGeneration(snapshot.generation);
+  const inputEvidenceRefs = snapshot.evidenceRefs;
+  const evidenceRefs = requireEvidenceRefs(inputEvidenceRefs);
+  if (!hasOwn(snapshot, 'identity')) {
+    throw new ContractError(
+      'CANONICAL_REJECTED',
+      '$.observation',
+      'bind observation rejected by canonical JSON contract',
+    );
+  }
+  return { generation, evidenceRefs, inputEvidenceRefs, identity: snapshot.identity };
+}
+
+function normalizeBindObservationFailure(error) {
+  if (error instanceof ContractError) {
+    return {
+      exception: new ContractError(
+        'CANONICAL_REJECTED',
+        '$.observation',
+        'bind observation rejected by canonical JSON contract',
+      ),
+      decisionError: trackerIdentityError(
+        'CANONICAL_REJECTED',
+        '$.observation',
+        'bind observation rejected by canonical JSON contract',
+      ),
+    };
+  }
+  const controlled = {
+    RESOURCE_OBSERVATION_INVALID: {
+      path: '$.observation',
+      message: 'bind observation must be a non-array object',
+    },
+    GENERATION_INVALID: {
+      path: '$.generation',
+      message: 'generation must be a positive safe integer',
+    },
+    EVIDENCE_REFS_INVALID: {
+      path: '$.evidenceRefs',
+      message: 'evidenceRefs must contain non-empty strings',
+    },
+  };
+  if (!(error instanceof ResourceTrackerError) || !hasOwn(controlled, error.code)) return null;
+  const normalized = controlled[error.code];
+  return {
+    exception: new ResourceTrackerError(error.code),
+    decisionError: trackerIdentityError(error.code, normalized.path, normalized.message),
+  };
+}
+
 function sameValue(left, right) {
   try {
     return canonicalize(left) === canonicalize(right);
@@ -159,6 +281,43 @@ function validateTemporaryIdentity(identity) {
     && SHA256.test(identity.manifest_sha256 || '')
     && identity.canonical_root_identity && typeof identity.canonical_root_identity === 'object'
     && typeof identity.child_id === 'string' && identity.child_id !== '';
+}
+
+function hasV2IdentityIntent(resourceType, identity) {
+  return identity && typeof identity === 'object' && !Array.isArray(identity)
+    && (hasOwn(identity, 'schema') || hasOwn(identity, 'schema_version')
+      || Object.keys(identity).some((key) => {
+        const exclusiveKeys = V2_EXCLUSIVE_KEYS_BY_RESOURCE_TYPE.get(resourceType);
+        return exclusiveKeys !== undefined && exclusiveKeys.has(key);
+      }));
+}
+
+function hasExplicitV2IdentityMarker(identity) {
+  return identity && typeof identity === 'object' && !Array.isArray(identity)
+    && (hasOwn(identity, 'schema') || hasOwn(identity, 'schema_version'));
+}
+
+function trackerIdentityError(code, path, message) {
+  return { code, path, message };
+}
+
+function structuredIdentityHold(errors, disposition = 'HOLD') {
+  return detached({
+    valid: false,
+    disposition,
+    action_authorized: false,
+    errors,
+  });
+}
+
+function invalidV2BindHoldDecision(validation) {
+  return detached({
+    ...detached(validation),
+    valid: false,
+    disposition: 'HOLD',
+    action: 'HOLD',
+    action_authorized: false,
+  });
 }
 
 const TRACKER_SCOPE_OPERATIONS = new WeakMap();
@@ -514,10 +673,30 @@ class TaskResourceTracker {
   #bind(scopeId, resourceId, observation = {}) {
     const record = this.#requireOwnedResource(scopeId, resourceId);
     this.#requireScopeMutable(scopeId);
-    const generation = requireGeneration(observation.generation);
-    const identity = detached(observation.identity);
-    this.#validateIdentity(record, identity, generation);
-    const evidenceRefs = requireEvidenceRefs(observation.evidenceRefs);
+    const boundIdentityRequiresV2 = record.identity !== null
+      && hasExplicitV2IdentityMarker(record.identity);
+    let normalizedObservation;
+    let observationError = null;
+    try {
+      normalizedObservation = normalizeBindObservation(
+        observation,
+        (snapshot) => this.#assertInputSize(snapshot),
+      );
+    } catch (error) {
+      observationError = error;
+    }
+    if (observationError !== null) {
+      const failure = normalizeBindObservationFailure(observationError);
+      if (failure === null) throw observationError;
+      if (!boundIdentityRequiresV2) throw failure.exception;
+      return this.#holdInvalidV2Identity(
+        record,
+        scopeId,
+        structuredIdentityHold([failure.decisionError]),
+        [],
+      );
+    }
+    const { identity, generation, evidenceRefs, inputEvidenceRefs } = normalizedObservation;
     const signature = detached({
       resourceId,
       type: record.type,
@@ -528,12 +707,30 @@ class TaskResourceTracker {
       generation,
       identity,
     });
+    const legacyProcessIdentity = PROCESS_RESOURCE_TYPES.has(record.type)
+      && !hasExplicitV2IdentityMarker(identity)
+      && validateProcessIdentity(identity).valid;
+    const requiresV2Validation = boundIdentityRequiresV2
+      || hasExplicitV2IdentityMarker(identity)
+      || (hasV2IdentityIntent(record.type, identity) && !legacyProcessIdentity);
+    let identityValidation = requiresV2Validation
+      ? this.#validateIdentity(record, identity, generation, true)
+      : null;
     if (record.bindSignature !== null) {
       if (sameValue(record.bindSignature, signature)) return cloneRecord(record);
+      if (identityValidation !== null) {
+        if (!identityValidation.valid) {
+          return this.#holdInvalidV2Identity(record, scopeId, identityValidation, inputEvidenceRefs);
+        }
+        return this.#holdInvalidV2Identity(record, scopeId, structuredIdentityHold([
+          trackerIdentityError('RESOURCE_IDENTITY_DRIFT', '$.identity', 'version-2 identity must remain unchanged after binding'),
+        ]), inputEvidenceRefs);
+      }
       this.#markIdentityDrift(record, 'BINDING_CHANGED');
     }
-    if (generation !== this.generation || record.generation !== this.generation) {
-      this.#markIdentityDrift(record, 'GENERATION_CHANGED');
+    if (identityValidation === null) identityValidation = this.#validateIdentity(record, identity, generation);
+    if (identityValidation !== null && !identityValidation.valid) {
+      return this.#holdInvalidV2Identity(record, scopeId, identityValidation, inputEvidenceRefs);
     }
     const eventPayload = { scopeId, resourceId, observation: { identity, generation, evidenceRefs } };
     this.#assertInputSize(eventPayload);
@@ -555,14 +752,72 @@ class TaskResourceTracker {
     return cloneRecord(record);
   }
 
-  #validateIdentity(record, identity, generation) {
+  #validateIdentity(record, identity, generation, requireV2 = false) {
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity)
+      || Object.keys(identity).length === 0) {
+      if (requireV2) {
+        const validation = validateResourceIdentity2(record.type, identity);
+        return structuredIdentityHold(validation.errors.map((item) => ({
+          code: item.code,
+          path: item.path,
+          message: item.message,
+        })));
+      }
+      if (PROCESS_RESOURCE_TYPES.has(record.type)) {
+        throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
+      }
+      throw new ResourceTrackerError('RESOURCE_IDENTITY_INVALID');
+    }
+    if (!requireV2 && PROCESS_RESOURCE_TYPES.has(record.type) && !hasExplicitV2IdentityMarker(identity)) {
+      const legacyValidation = validateProcessIdentity(identity);
+      if (legacyValidation.valid) {
+        if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
+        return null;
+      }
+      if (!hasV2IdentityIntent(record.type, identity)) {
+        throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
+      }
+    }
+    if (requireV2 || hasV2IdentityIntent(record.type, identity)) {
+      const validation = validateResourceIdentity2(record.type, identity);
+      const errors = validation.errors.map((item) => ({
+        code: item.code,
+        path: item.path,
+        message: item.message,
+      }));
+      if (generation !== this.generation || record.generation !== this.generation) {
+        errors.push(trackerIdentityError('TRACKER_GENERATION_MISMATCH', '$.generation', 'bind generation must match tracker generation'));
+      }
+      if (validation.valid && (HARNESS_RESOURCE_TYPES.has(record.type) || PROCESS_V2_RESOURCE_TYPES.has(record.type))) {
+        if (identity.owner_id !== record.ownerId) {
+          errors.push(trackerIdentityError('TRACKER_OWNER_MISMATCH', '$.owner_id', 'identity owner must match resource owner'));
+        }
+        if (identity.run_id !== this.runId) {
+          errors.push(trackerIdentityError('TRACKER_RUN_MISMATCH', '$.run_id', 'identity run must match tracker run'));
+        }
+        if (identity.lease_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_LEASE_GENERATION_MISMATCH', '$.lease_generation', 'identity lease generation must match bind generation'));
+        }
+        if (identity.adapter_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_ADAPTER_GENERATION_MISMATCH', '$.adapter_generation', 'adapter generation must match bind generation'));
+        }
+      }
+      if (validation.valid && record.type === 'temporary_allocation') {
+        if (identity.owner_id !== record.ownerId) {
+          errors.push(trackerIdentityError('TRACKER_OWNER_MISMATCH', '$.owner_id', 'identity owner must match resource owner'));
+        }
+        if (identity.run_id !== this.runId) {
+          errors.push(trackerIdentityError('TRACKER_RUN_MISMATCH', '$.run_id', 'identity run must match tracker run'));
+        }
+        if (identity.lease_generation !== generation) {
+          errors.push(trackerIdentityError('TRACKER_LEASE_GENERATION_MISMATCH', '$.lease_generation', 'identity lease generation must match bind generation'));
+        }
+      }
+      return errors.length === 0 ? validation : structuredIdentityHold(errors);
+    }
     if (PROCESS_RESOURCE_TYPES.has(record.type)) {
       const validation = validateProcessIdentity(identity);
       if (!validation.valid) throw new ResourceTrackerError('PROCESS_IDENTITY_INVALID');
-    }
-    if (!identity || typeof identity !== 'object' || Array.isArray(identity)
-      || Object.keys(identity).length === 0) {
-      throw new ResourceTrackerError('RESOURCE_IDENTITY_INVALID');
     }
     if (generation !== this.generation) this.#markIdentityDrift(record, 'GENERATION_CHANGED');
     if (record.type === 'temporary_allocation') {
@@ -573,6 +828,40 @@ class TaskResourceTracker {
         throw new ResourceTrackerError('TEMPORARY_IDENTITY_INVALID');
       }
     }
+    return null;
+  }
+
+  #holdInvalidV2Identity(record, scopeId, validation, evidenceRefs) {
+    this.#assertInputSize({
+      scopeId,
+      resourceId: record.resourceId,
+      reason: 'V2_IDENTITY_VALIDATION_FAILED',
+      validation,
+      evidenceRefs,
+    });
+    const decision = invalidV2BindHoldDecision(validation);
+    const eventPayload = {
+      scopeId,
+      resourceId: record.resourceId,
+      reason: 'V2_IDENTITY_VALIDATION_FAILED',
+      decision,
+      evidenceRefs: [],
+    };
+    this.#assertInputSize(eventPayload);
+    this.#requireHistoryCapacity([{ kind: 'RESOURCE_HELD', payload: eventPayload }]);
+    const checkpoint = this.#checkpoint();
+    try {
+      record.state = 'HOLD';
+      record.releaseConfirmed = false;
+      record.decision = decision;
+      this.#touch();
+      this.#assertStateWithinLimit();
+      this.#record('RESOURCE_HELD', eventPayload);
+    } catch (error) {
+      this.#restoreCheckpoint(checkpoint);
+      throw error;
+    }
+    return decision;
   }
 
   #observe(scopeId, resourceId, observation) {
@@ -586,12 +875,33 @@ class TaskResourceTracker {
       purpose = 'temporary_reclaim';
       safeObservation = jsonObservation(observation, ['trustedFilesystemResolver']);
       if (!this.#temporaryObservationMatches(record, safeObservation)) {
-        decision = { action: 'HOLD', reasons: ['TEMP_BOUND_IDENTITY_MISMATCH'] };
+        decision = {
+          action: 'HOLD',
+          reasons: ['TEMP_BOUND_IDENTITY_MISMATCH'],
+          action_authorized: false,
+          downstream_release_allowed: false,
+        };
       } else {
         decision = decideTemporaryLease({
           ...safeObservation,
           trustedFilesystemResolver: this.#trustedFilesystemResolver,
         });
+      }
+    } else if (PROCESS_V2_RESOURCE_TYPES.has(record.type) && hasExplicitV2IdentityMarker(record.identity)) {
+      purpose = 'process_recovery';
+      safeObservation = jsonObservation(observation);
+      if (!this.#processObservationMatches(record, safeObservation)) {
+        decision = { action: 'HOLD', reasons: ['TRACKER_BINDING_MISMATCH'] };
+      } else {
+        decision = decideProcessRecovery2(safeObservation);
+      }
+    } else if (HARNESS_RESOURCE_TYPES.has(record.type) && hasExplicitV2IdentityMarker(record.identity)) {
+      purpose = 'harness_closure';
+      safeObservation = jsonObservation(observation);
+      if (!this.#v2HarnessObservationMatches(record, safeObservation)) {
+        decision = { action: 'HOLD', reasons: ['TRACKER_BINDING_MISMATCH'], action_authorized: false };
+      } else {
+        decision = this.#decideHarnessClosure(record, safeObservation);
       }
     } else if (PROCESS_RESOURCE_TYPES.has(record.type)) {
       purpose = 'process_recovery';
@@ -664,13 +974,54 @@ class TaskResourceTracker {
   #temporaryObservationMatches(record, input) {
     const identity = record.identity;
     const manifest = input.manifest;
+    const isV2Identity = identity && identity.schema === 'TemporaryAllocationIdentity2'
+      && identity.schema_version === 2;
+    if (!isV2Identity) {
+      return input.child_id === identity.child_id
+        && manifest && manifest.manifest_sha256 === identity.manifest_sha256
+        && manifest.owner_id === identity.owner_id
+        && manifest.run_id === identity.run_id
+        && manifest.session_id === identity.session_id
+        && manifest.lease_generation === identity.lease_generation
+        && sameValue(manifest.canonical_root_identity, identity.canonical_root_identity);
+    }
+    const child = manifest && manifest.child_sublease_map && manifest.child_sublease_map[input.child_id];
     return input.child_id === identity.child_id
       && manifest && manifest.manifest_sha256 === identity.manifest_sha256
       && manifest.owner_id === identity.owner_id
       && manifest.run_id === identity.run_id
       && manifest.session_id === identity.session_id
       && manifest.lease_generation === identity.lease_generation
-      && sameValue(manifest.canonical_root_identity, identity.canonical_root_identity);
+      && manifest.canonical_root_identity && manifest.canonical_root_identity.canonical_path === identity.canonical_root
+      && manifest.canonical_root_identity.platform === TEMPORARY_MANIFEST_PLATFORM[identity.platform]
+      && identity.confirmed_parent_directory && identity.confirmed_parent_directory.path === identity.canonical_root
+      && child && child.owner_id === input.child_id
+      && child.lease_generation === identity.lease_generation
+      && child.canonical_descendant === identity.task_directory.path
+      && child.nonce === identity.creation_nonce;
+  }
+
+  #v2HarnessObservationMatches(record, observation) {
+    const expectedScope = { kind: 'scope', value: record.scopeId };
+    return observation.expected_generation === record.boundGeneration
+      && observation.observed_generation === record.boundGeneration
+      && sameValue(observation.expected_identity, record.identity)
+      && sameValue(observation.observed_identity, record.identity)
+      && sameValue(observation.expected_scope, expectedScope)
+      && sameValue(observation.observed_scope, expectedScope);
+  }
+
+  #decideHarnessClosure(record, observation) {
+    const proofVerified = record.type === 'agent_session'
+      ? observation.child_closed === true
+      : Boolean(observation.absence && observation.absence.thread_absent === true);
+    return {
+      action: 'OBSERVE_ONLY',
+      reasons: [proofVerified ? 'HARNESS_CLOSURE_PROOF_VERIFIED' : 'HARNESS_CLOSURE_PROOF_MISSING'],
+      identity_confidence: 'MATCH',
+      downstream_release_allowed: proofVerified,
+      action_authorized: false,
+    };
   }
 
   #typeReleaseProofMatches(record, observation) {
@@ -1109,8 +1460,17 @@ class TaskResourceTracker {
       }
       case 'RESOURCE_HELD': {
         const record = this.#requireOwnedResource(payload.scopeId, payload.resourceId);
+        const rejectedV2Bind = payload.reason === 'V2_IDENTITY_VALIDATION_FAILED';
         record.state = 'HOLD';
         record.releaseConfirmed = false;
+        if (payload.decision !== undefined) {
+          record.decision = rejectedV2Bind
+            ? invalidV2BindHoldDecision(payload.decision)
+            : detached(payload.decision);
+        }
+        if (!rejectedV2Bind && Array.isArray(payload.evidenceRefs)) {
+          record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...payload.evidenceRefs]));
+        }
         this.#touch();
         break;
       }

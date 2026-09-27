@@ -28,28 +28,25 @@ description: Use when 用户要求检查、比较或排查 Claude Code、Codex�
 
 ### 1. 优先运行插件内脚本
 
-在 Claude Code 插件环境中：
+运行时逻辑位于无依赖 CommonJS 文件 `scripts/check-updates.js`，兼容入口 `scripts/check-updates.ps1` 只负责把旧参数转给 Node：
 
 ```powershell
-pwsh -NoProfile -File "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.ps1"
+node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js"
 ```
 
 在本仓库开发环境中：
 
 ```powershell
-pwsh -NoProfile -File "./plugins/development-workflow/skills/check-updates/scripts/check-updates.ps1"
+node "./plugins/development-workflow/skills/check-updates/scripts/check-updates.js"
 ```
 
-优先使用 PowerShell 7 (`pwsh`)。只有环境明确缺少 `pwsh` 时才用 Windows PowerShell 兼容执行；不要默认加 `-ExecutionPolicy Bypass`，需要绕过策略时先解释原因并取得授权。
-
-默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出。每个外部命令受 `-CommandTimeoutSec` 限制，超时会终止本脚本启动的进程并按 `WARN` 汇报。脚本只检查，不自动升级或修改配置。
-
+旧调用仍可使用 PowerShell 兼容入口；`-NoRemote`、`-NoReport`、`-ProjectPath`、`-CommandTimeoutSec` 和 `-ReportDirectory` 会被映射到 CommonJS 参数。默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出。每个外部命令受超时限制，超时按 `WARN` 汇报。脚本只检查，不自动升级或修改配置。
 ### 2. 受限环境需要本地-only 时加 `-NoRemote`
 
 只有在用户明确要求不联网、当前环境没有网络权限、或正在做离线排障时，才关闭远程检查：
 
 ```powershell
-pwsh -NoProfile -File "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.ps1" -NoRemote
+node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js" --no-remote
 ```
 
 `-CheckRemote` 仍可被旧调用传入，但现在只是兼容参数；远程检查已经是默认行为。

@@ -9,6 +9,7 @@ const {
   createDetachedJsonSnapshot,
 } = require('./canonical-json');
 const stateMachines = require('./state-machines');
+const identitySupportV2 = require('./identity-support-v2');
 
 const CAPABILITY_IDS = Object.freeze(['spawn_child', 'collect_result', 'child_to_root_message', 'root_to_child_message', 'interrupt_child', 'request_shutdown', 'verify_child_exit', 'shared_task_status', 'isolated_workspace', 'exclusive_file_ownership', 'runtime_liveness', 'process_identity', 'process_tree_terminate', 'terminal_session_control', 'temporary_lease', 'constrained_compute_lease', 'resource_observation', 'model_request_control', 'reasoning_request_control', 'actual_model_metadata', 'actual_effort_metadata']);
 const CAPABILITY_SUBJECTS = Object.freeze(['root', 'child', 'adapter']);
@@ -1213,6 +1214,64 @@ function decideProcessRecovery(input) {
   }
 }
 
+function isValidProcessScope2(scope) {
+  return isPlainObject(scope)
+    && Object.keys(scope).length === 2
+    && Object.prototype.propertyIsEnumerable.call(scope, 'kind')
+    && Object.prototype.propertyIsEnumerable.call(scope, 'value')
+    && scope.kind === 'scope'
+    && typeof scope.value === 'string'
+    && scope.value.trim() !== '';
+}
+
+function decideProcessRecovery2(input) {
+  const decision = (action, reasons, extra = {}) => controlledDecision(action, reasons, {
+    ...extra,
+    action_authorized: false,
+  });
+  try {
+    const value = createDetachedJsonSnapshot(input).snapshot;
+    if (!isPlainObject(value)) return decision('HOLD', ['PROCESS_RECOVERY_INPUT_INVALID']);
+    if (value.duplicate_run_lock === true) return decision('HOLD', ['DUPLICATE_RUN_LOCK']);
+    if (value.owner_status !== 'owned') return decision('HOLD', ['OWNER_NOT_EXACT']);
+    const expected = identitySupportV2.validateProcessIdentity2(value.expected_identity);
+    const observed = identitySupportV2.validateProcessIdentity2(value.observed_identity);
+    if (!expected.valid || !observed.valid) return decision('HOLD', ['IDENTITY_INCOMPLETE'], { identity_confidence: 'PARTIAL' });
+    if (!Number.isSafeInteger(value.expected_generation) || value.expected_generation < 1
+      || !Number.isSafeInteger(value.observed_generation) || value.observed_generation < 1
+      || value.expected_generation !== value.observed_generation
+      || value.expected_generation !== value.expected_identity.lease_generation
+      || value.observed_generation !== value.observed_identity.lease_generation
+      || !sameJson(value.expected_identity, value.observed_identity)) {
+      return decision('HOLD', ['IDENTITY_MISMATCH'], { identity_confidence: 'MISMATCH' });
+    }
+    const confidence = 'MATCH';
+    if (!isValidProcessScope2(value.expected_scope) || !isValidProcessScope2(value.observed_scope)) {
+      return decision('HOLD', ['SCOPE_IDENTITY_INVALID'], { identity_confidence: confidence });
+    }
+    if (!sameJson(value.expected_scope, value.observed_scope)) {
+      return decision('HOLD', ['SCOPE_IDENTITY_MISMATCH'], { identity_confidence: confidence });
+    }
+    const absence = value.absence;
+    if (isPlainObject(absence) && absence.process_absent === true && absence.thread_absent === true && absence.port_absent === true) {
+      return decision('OBSERVE_ONLY', ['ABSENCE_VERIFIED'], { identity_confidence: confidence, downstream_release_allowed: true });
+    }
+    const graceful = value.graceful;
+    if (!isPlainObject(graceful) || graceful.requested !== true) return decision('REQUEST_GRACEFUL', ['GRACEFUL_NOT_REQUESTED'], { identity_confidence: confidence });
+    if (graceful.exit_observed === true) return decision('WAIT_BOUNDED', ['EXIT_ABSENCE_NOT_VERIFIED'], { identity_confidence: confidence });
+    if (graceful.deadline_reached !== true) return decision('WAIT_BOUNDED', ['GRACEFUL_WINDOW_OPEN'], { identity_confidence: confidence });
+    if (value.exact_tree_termination_supported !== true) return decision('HOLD', ['EXACT_TREE_TERMINATION_UNSUPPORTED'], { identity_confidence: confidence });
+    return decision('TERMINATE_EXACT_TREE', ['EXACT_OWNED_TREE'], {
+      identity_confidence: confidence,
+      orphan_recovery: value.orphaned === true,
+      requires_identity_recheck: true,
+      requires_absence_verification: true,
+    });
+  } catch (_) {
+    return decision('HOLD', ['PROCESS_RECOVERY_INPUT_INVALID']);
+  }
+}
+
 function hashWithoutField(value, field) {
   const detached = {};
   for (const key of Object.keys(value)) if (key !== field) detached[key] = value[key];
@@ -1657,4 +1716,4 @@ function isActionAuthorized(action, authorization, context = {}) {
   return validateAuthorization(authorization, { ...context, expectedAction: action }).valid;
 }
 
-module.exports = { CAPABILITY_IDS, CAPABILITY_SUBJECTS, SUPPORT, EVIDENCE_LEVELS, SOURCE_KINDS, REDACTION_POLICIES, UTC_TIMESTAMP_PATTERN, PROCESS_RECOVERY_ACTIONS, TEMPORARY_LEASE_ACTIONS, PROGRESS_CLASSIFICATIONS, RUN_OUTCOMES, ROUTE_ATTESTATIONS, CLEANUP_STATUSES, AUTHORIZATION_ACTIONS, ContractError, getEffectiveCapabilities, isCapabilitySupported, validateArtifact, validateArtifactSet, validateTaskPacket, selectTopology, selectRoute, validateRouteDecision, validateCollaborationPlan, decideProcessRecovery, computeTemporaryManifestSha256, decideTemporaryLease, validateProgressReport, decideRetry, validateExecutionReceipt, validateAuthorization, isActionAuthorized, ...stateMachines };
+module.exports = { CAPABILITY_IDS, CAPABILITY_SUBJECTS, SUPPORT, EVIDENCE_LEVELS, SOURCE_KINDS, REDACTION_POLICIES, UTC_TIMESTAMP_PATTERN, PROCESS_RECOVERY_ACTIONS, TEMPORARY_LEASE_ACTIONS, PROGRESS_CLASSIFICATIONS, RUN_OUTCOMES, ROUTE_ATTESTATIONS, CLEANUP_STATUSES, AUTHORIZATION_ACTIONS, ContractError, getEffectiveCapabilities, isCapabilitySupported, validateArtifact, validateArtifactSet, validateTaskPacket, selectTopology, selectRoute, validateRouteDecision, validateCollaborationPlan, decideProcessRecovery, decideProcessRecovery2, computeTemporaryManifestSha256, decideTemporaryLease, validateProgressReport, decideRetry, validateExecutionReceipt, validateAuthorization, isActionAuthorized, ...stateMachines, ...identitySupportV2 };

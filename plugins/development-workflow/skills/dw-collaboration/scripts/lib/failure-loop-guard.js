@@ -266,6 +266,64 @@ function normalizeLimits(value) {
   return Object.freeze(limits);
 }
 
+function readInitialStateInput(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new FailureLoopError('FAILURE_INITIAL_STATE_INVALID');
+  }
+  const keys = Reflect.ownKeys(value);
+  const required = ['runId', 'guardId', 'retryBudget', 'repairBudget'];
+  if (keys.length !== required.length || keys.some((key) => typeof key !== 'string')
+    || keys.some((key) => !required.includes(key))) {
+    throw new FailureLoopError('FAILURE_INITIAL_STATE_INVALID');
+  }
+  const output = {};
+  for (const key of required) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.enumerable !== true || !Object.hasOwn(descriptor, 'value')) {
+      throw new FailureLoopError('FAILURE_INITIAL_STATE_INVALID');
+    }
+    output[key] = descriptor.value;
+  }
+  return output;
+}
+
+/**
+ * Build the durable, pre-operation Guard state without constructing a Guard or
+ * touching its Store/resolver collaborators.  This is deliberately a pure
+ * schema seam for the manager bootstrap snapshot.
+ */
+function createInitialFailureLoopState(value) {
+  try {
+    const input = readInitialStateInput(value);
+    if (typeof input.runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(input.runId)
+      || typeof input.guardId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.guardId)
+      || !Number.isSafeInteger(input.retryBudget) || input.retryBudget < 0
+      || !Number.isSafeInteger(input.repairBudget) || input.repairBudget < 0) {
+      throw new FailureLoopError('FAILURE_INITIAL_STATE_INVALID');
+    }
+    const payload = {
+      schema: FAILURE_STATE_VERSION,
+      runId: input.runId,
+      guardId: input.guardId,
+      revision: 1,
+      previousStateSha256: null,
+      retryBudget: input.retryBudget,
+      repairBudget: input.repairBudget,
+      retryUsed: 0,
+      repairUsed: 0,
+      activeFingerprint: null,
+      operationBindings: [],
+      consumedExitFamilies: [],
+      failures: [],
+    };
+    return detached({ ...payload, stateSha256: computeDetachedSha256(payload) });
+  } catch (error) {
+    if (error instanceof FailureLoopError) throw error;
+    throw new FailureLoopError('FAILURE_INITIAL_STATE_INVALID');
+  }
+}
+
 function resolverAccepts(resolver, context) {
   if (typeof resolver !== 'function') return false;
   try {
@@ -1200,5 +1258,6 @@ module.exports = {
   FAILURE_FINGERPRINT_VERSION,
   FailureLoopError,
   FailureLoopGuard,
+  createInitialFailureLoopState,
   computeFailureFingerprint,
 };

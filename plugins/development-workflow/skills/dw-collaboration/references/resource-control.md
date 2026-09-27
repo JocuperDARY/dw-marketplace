@@ -1,6 +1,19 @@
 # Task resource control
 
-This reference explains the executable 5.2.0 helpers. They keep records and return decisions. They do not start agents, stop processes, delete directories, reserve a GPU, or call a remote service. The host still performs an approved action and reports what actually happened.
+This reference explains the executable resource-control helpers carried forward from the 5.2.0 implementation. In the 5.3.0 package they remain a compatibility surface: they keep records and return decisions. They do not start agents, stop processes, delete directories, reserve a GPU, or call a remote service; the host still performs an approved action and reports what actually happened.
+
+TaskResourceManager is the 5.3 operational facade for open, startCommand, observe, stop, and
+close. It accepts an executable plus an argument array, registers before launch, persists recovery state below the host data root, re-observes identity before action, and leaves unresolved or drifted state at HOLD. Recovery after interruption is host-owned: reload the persisted record, re-observe identity, and invoke only a currently authorized manager operation. The manager coordinates these helpers; it does not widen their authority.
+
+## Scheduled audit gate
+
+A scheduled audit is only a policy-timed trigger for another bounded read-only observation. It does not create, grant, inherit, refresh, or expand cleanup authority or termination authority. Cadence is host policy, not a universal interval. Each run must reacquire the current owner, run/session, scope, lease and manager generation, complete process identity, teardown condition, policy references, and action authorization; a prior run's PID, status, classification, or receipt is historical evidence only.
+
+Give the audit itself a tracked resource scope, timeout, output bound, backoff, and teardown record. Prefer counters, hashes, and precise paths over an unbounded process, event, tracked-file, or untracked-file listing. Detect repeated source-control enumeration by observing existing commands and I/O; do not create the same polling loop as the measurement. Process names such as Git, Node, a renderer, an endpoint-security worker, or a GPU client may select observations but never a stop target.
+
+If audits overlap, skip, coalesce, or `HOLD` the later run; never perform concurrent remediation. One audit may classify ownership, progress, task relevance, and next action, but an obsolete candidate or `SUSPECTED_HUNG` result only enters further diagnosis. It does not authorize a graceful request, force termination, deletion, configuration change, or capacity release. Unknown ownership, identity, generation, side effects, external waits, action state, or authority remains `OBSERVE_ONLY` or `HOLD`.
+
+Use the pre-action, recovery, backup, and post-action comparison contract in [resource-lifecycle.md](resource-lifecycle.md). A textual report, timer firing, cleanup request, adapter return, or lower process count is not an execution or absence receipt.
 
 ## Track every resource created for a task
 
@@ -10,7 +23,7 @@ Always register before launch. Open one root `ResourceScope`, then open a child 
 
 The owner and generation must match the original record. Process identity also checks the executable, arguments, start time, parent, launch nonce, and host run ID when they are observable. Temporary storage keeps its canonical root and path identity checks. A changed owner, parent, scope, generation, process identity, or path identity stops release and returns `HOLD`.
 
-`observe` always uses the existing 5.1.0 process and temporary-storage safety functions; callers cannot replace them with a function that simply says “released.” The tracker compares each process observation with the identity, scope and generation recorded by `bind`. A host-owned observation resolver must authenticate any observation that could authorize exact termination, exact temporary removal, or downstream release. The real-path filesystem resolver is injected once when the tracker is created. A resolver supplied inside an individual observation is ignored, so a child task cannot approve its own temporary-directory removal. The tracker records the decision but never carries it out. A request to stop or reclaim is not proof of success.
+`observe` always uses the existing 5.1.0 process and temporary-storage safety functions retained by the 5.3.0 compatibility surface; callers cannot replace them with a function that simply says “released.” The tracker compares each process observation with the identity, scope and generation recorded by `bind`. A host-owned observation resolver must authenticate any observation that could authorize exact termination, exact temporary removal, or downstream release. The real-path filesystem resolver is injected once when the tracker is created. A resolver supplied inside an individual observation is ignored, so a child task cannot approve its own temporary-directory removal. The tracker records the decision but never carries it out. A request to stop or reclaim is not proof of success.
 
 The resolvers, limits, resource records, scope records, history, counters, and hashes are private tracker state rather than writable instance properties. Tracker and scope objects expose only their public operations, and returned snapshots are detached and deeply immutable. Callers therefore cannot replace a trusted resolver or edit a record to manufacture a release.
 
@@ -47,7 +60,7 @@ A completed, failed, or cancelled result does not free capacity. Each profile co
 
 Each task profile states GPU count and capabilities, whether devices are exclusive or explicitly shareable, soft and hard VRAM needs, CPU, RAM, I/O, duration estimate and confidence, dependencies, priority, wait time, and resources reserved for foreground or external work. Host observations include GPU capabilities. Without stable device IDs, shared and exclusive work are conservatively kept apart: an active shared claim blocks an exclusive claim, and an active exclusive claim blocks shared work. Missing required values place the task in `blocked`; the queue does not guess.
 
-Admission checks all resource dimensions together and honors the host concurrency limit. If the first long task cannot fit yet, another task may use the gap only when its declared maximum duration ends before both the backfill limit and the waiting task's remaining reservation time. Version 5.2.0 does not implement checkpoint or pause commands, so `preemptible: true` does not relax this rule. The queue records a reservation for the waiting task. Once its maximum wait is reached, it is promoted ahead of fresh high-priority work; later work cannot keep taking that reservation. This prevents long-term starvation. A policy-defined maximum task count and explicit removal of unreferenced terminal entries keep queue memory bounded.
+Admission checks all resource dimensions together and honors the host concurrency limit. If the first long task cannot fit yet, another task may use the gap only when its declared maximum duration ends before both the backfill limit and the waiting task's remaining reservation time. The 5.3.0 package retains the 5.2.0 implementation boundary and does not implement checkpoint or pause commands, so `preemptible: true` does not relax this rule. The queue records a reservation for the waiting task. Once its maximum wait is reached, it is promoted ahead of fresh high-priority work; later work cannot keep taking that reservation. This prevents long-term starvation. A policy-defined maximum task count and explicit removal of unreferenced terminal entries keep queue memory bounded.
 
 Any start, completion, timeout, failure, or cancellation moves the task toward `draining`. New work fills released space only after the tracker verifies release. An out-of-memory risk, unsafe temperature or power condition, foreground slowdown, or unprotected external lease reduces concurrency or stops scheduling before utilization is considered.
 
@@ -82,6 +95,6 @@ Use four short reports:
 3. 失败：说明错误分类，已用和剩余预算，真正新增的证据，所选退出方法，以及是否需要用户授权。
 4. 结束：说明结果和验证，哪些资源已确认释放，哪些仍无法确认，剩余进程、目录、端口或句柄，以及恢复或人工处理办法。
 
-## Scope of 5.2.0
+## Compatibility boundary retained from 5.2.0
 
-5.2.0 不包含付费模型询问、供应商 API 适配、密钥登记表或远程模型列表刷新。这些仍是未来可选方案；任何真实付费调用或凭据网络操作都需要另行设计和用户逐次明确批准。
+兼容层不包含付费模型询问、供应商 API 适配、密钥登记表或远程模型列表刷新。这些仍是未来可选方案；任何真实付费调用或凭据网络操作都需要另行设计和用户逐次明确批准。

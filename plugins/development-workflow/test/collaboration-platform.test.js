@@ -3,6 +3,7 @@
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const api = require('../skills/dw-collaboration/scripts/lib/contracts');
@@ -178,14 +179,20 @@ expectReason(api.decideRetry({ ...retryBase, side_effect_state: 'unknown' }, { p
 expectReason(api.decideRetry({ ...retryBase, idempotency_key: '' }, { policyIndex }), 'HOLD', 'IDEMPOTENCY_KEY_REQUIRED');
 
 async function runMarker() {
-  if (process.platform !== 'win32') {
-    console.log(`SKIP_NOT_APPLICABLE:windows:host is ${process.platform}`);
-    console.log('platform lifecycle contract passed');
+  const isWindows = process.platform === 'win32';
+  const lifecycle = isWindows ? 'windows' : 'linux';
+  console.log(isWindows
+    ? 'SKIP_NOT_APPLICABLE:linux:host is win32'
+    : `SKIP_NOT_APPLICABLE:windows:host is ${process.platform}`);
+  const sandboxRoot = isWindows
+    ? process.env.DW_PLATFORM_SANDBOX_ROOT
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'dw-platform-linux-'));
+  if (!sandboxRoot) {
+    console.log('LIFECYCLE_NOT_RUN:windows');
+    console.log('NOT_RUN: DW_PLATFORM_SANDBOX_ROOT is required for the applicable Windows marker test');
+    console.log('HOLD: Windows lifecycle evidence is unavailable until an authorized sandbox is provided');
     return;
   }
-  console.log('SKIP_NOT_APPLICABLE:posix:host is win32');
-  const sandboxRoot = process.env.DW_PLATFORM_SANDBOX_ROOT;
-  assert(sandboxRoot, 'DW_PLATFORM_SANDBOX_ROOT is required for the applicable Windows marker test');
   const markerPath = path.join(sandboxRoot, 'marker-observed.json');
   fs.mkdirSync(sandboxRoot, { recursive: true });
   fs.rmSync(markerPath, { force: true });
@@ -212,7 +219,9 @@ async function runMarker() {
       child.kill();
       await new Promise((resolve) => child.once('exit', resolve));
     }
+    if (!isWindows) fs.rmSync(sandboxRoot, { recursive: true, force: true });
   }
+  console.log(`LIFECYCLE_RAN:${lifecycle}`);
   console.log('platform lifecycle contract passed');
 }
 

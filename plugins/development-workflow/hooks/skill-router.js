@@ -40,6 +40,11 @@ const ROUTES = [
     pattern: /(?:请|帮我|需要)?\s*(?:收尾|整理交付|准备提交|提交前检查|wrap up|prepare (?:the )?commit|finalize delivery)/i,
     context: 'Use `development-workflow:dw-wrapup`; do not commit, push, publish, or merge without explicit authorization.',
   },
+  {
+    id: 'handoff',
+    pattern: /(?:交接|接手|移交)(?:文档|记录|说明|材料|清单)|hand[\s-]?off\b/i,
+    context: 'Use development-workflow:dw-handoff to re-examine the whole task and write a handoff with a TODO reconciliation; it does not authorize commits, pushes, or scope expansion.',
+  },
 ];
 
 function readPrompt(raw) {
@@ -56,8 +61,11 @@ function routePrompt(prompt) {
   if (/(?:["'“‘`](?:fix|debug|review|plan|implement|optimi[sz]e)["'”’`]|\b(?:fix|debug|review|plan|implement|optimi[sz]e)\b)\s*(?:是什么意思|的含义|means what|definition)/i.test(prompt)) {
     return null;
   }
+  if (/(?:(?:hand[\s-]?off\b|(?:交接|接手|移交)(?:文档|记录|说明|材料|清单))\s*(?:是什么意思|的含义|means what|definition)|what\s+does\s+(?:a\s+)?hand[\s-]?off\s+mean)/i.test(prompt)) return null;
   const normalized = prompt
     .replace(/(?:不要|别|无需|不需要)\s*(?:直接\s*)?(?:修复|解决|排查|诊断|定位|优化|重构|实现|审查|验证|提交)/g, '')
+    .replace(/(?:不要|别|无需|不需要)\s*(?:直接\s*)?(?:写|生成|创建|整理|准备|输出)\s*(?:一份|一个)?\s*(?:交接|接手|移交)(?:文档|记录|说明|材料|清单)/g, '')
+    .replace(/(?:do\s+not|don't|dont|without)\s+(?:write|generate|create|organize|prepare|output)\s+(?:(?:a|an)\s+)?hand[\s-]?off(?:\s+(?:note|document|record|summary|materials?|checklist))?\b/gi, '')
     .replace(/(?:do\s+not|don't|dont|without)\s+(?:fix|debug|repair|diagnose|optimi[sz]e|refactor|implement|review|verify|commit)\b/gi, '');
   for (const route of ROUTES) {
     if (route.pattern.test(normalized)) return route;

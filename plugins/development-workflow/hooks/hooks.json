@@ -1,5 +1,5 @@
 {
-  "description": "DW 5 hooks: one read-only session initializer and one high-confidence workflow router",
+  "description": "DW hooks: 2 registered hooks (one read-only session initializer and one high-confidence workflow router)",
   "hooks": {
     "SessionStart": [
       {
