@@ -193,6 +193,13 @@ function cleanupMarkerProcesses(marker) {
   ], { encoding: 'utf8', timeout: 10000, windowsHide: true });
 }
 
+function processObservationUnavailable(result) {
+  if (!result) return true;
+  const text = `${result.error ? result.error.message : ''}\n${result.stdout || ''}\n${result.stderr || ''}`;
+  return Boolean(result.error && ['EACCES', 'EPERM'].includes(result.error.code))
+    || (result.status !== 0 && /access[\s-]?is[\s-]?denied|accessdenied|permission[\s-]?denied|not[\s-]?authorized|80041003/i.test(text));
+}
+
 const tests = [];
 function test(name, fn) {
   tests.push({ name, fn });
@@ -709,6 +716,10 @@ test('check-updates kills the owned process tree after a CLI timeout on Windows'
     cleanup = cleanupMarkerProcesses(marker);
   }
 
+  if (processObservationUnavailable(cleanup) || processObservationUnavailable(probe)) {
+    skipTest('HOLD: Win32_Process observation or cleanup is unavailable under the current permission boundary');
+    return;
+  }
   assert.strictEqual(cleanup.status, 0, cleanup.stderr);
   assert.strictEqual(result.error, undefined, `check-updates timed out: ${result.error}`);
   assert.strictEqual(result.status, 0, result.stderr || result.stdout);
@@ -765,6 +776,10 @@ test('check-updates reclaims a child after its CLI parent exits normally on Wind
     cleanup = cleanupMarkerProcesses(marker);
   }
 
+  if (processObservationUnavailable(cleanup) || processObservationUnavailable(probe)) {
+    skipTest('HOLD: Win32_Process observation or cleanup is unavailable under the current permission boundary');
+    return;
+  }
   assert.strictEqual(cleanup.status, 0, cleanup.stderr);
   assert.strictEqual(result.error, undefined, `check-updates timed out: ${result.error}`);
   assert.strictEqual(result.status, 0, result.stderr || result.stdout);
@@ -839,7 +854,11 @@ test('development-workflow manifests and README agree on version and skill count
 });
 
 test('5.3 documentation states evidence boundaries and manager entry points', () => {
-  const readme = fs.readFileSync(path.join(checkoutRoot, 'README.md'), 'utf8');
+  if (!isRepositoryCheckout) {
+    skipTest('marketplace README is not part of the published package');
+    return;
+  }
+  const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
   const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-collaboration', 'SKILL.md'), 'utf8');
   const handoff = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-handoff', 'SKILL.md'), 'utf8');
   const checker = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js'), 'utf8');

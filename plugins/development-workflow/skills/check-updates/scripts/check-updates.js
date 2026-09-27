@@ -36,7 +36,26 @@ function add(category, component, status, detail, data = {}) {
 function readJson(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
 function exists(file) { try { return fs.existsSync(file); } catch { return false; } }
 function countDirs(dir) { try { return fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).length; } catch { return null; } }
-function commandPath(name) { const result = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], { encoding: 'utf8', timeout: options.timeoutSec * 1000, windowsHide: true }); return result.status === 0 ? String(result.stdout).split(/\r?\n/).find(Boolean) : null; }
+function commandPath(name) {
+  const pathEntries = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
+  const candidates = [];
+  for (const entry of pathEntries) {
+    if (path.isAbsolute(name)) candidates.push(name);
+    else if (process.platform === 'win32' && !path.extname(name)) {
+      for (const extension of extensions) candidates.push(path.join(entry, `${name}${extension.toLowerCase()}`));
+      candidates.push(path.join(entry, name));
+    } else candidates.push(path.join(entry, name));
+  }
+  for (const candidate of candidates) {
+    try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* keep searching */ }
+  }
+  const resolver = process.platform === 'win32' ? 'where.exe' : 'which';
+  const result = spawnSync(resolver, [name], { encoding: 'utf8', timeout: options.timeoutSec * 1000, windowsHide: true });
+  return result.status === 0 ? String(result.stdout).split(/\r?\n/).find(Boolean) : null;
+}
 function run(name, args = []) {
   const executable = commandPath(name) || name;
   const isWindowsCmd = process.platform === 'win32' && /.cmd$/i.test(executable);
