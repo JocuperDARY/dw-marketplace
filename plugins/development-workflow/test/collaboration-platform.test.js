@@ -180,10 +180,18 @@ expectReason(api.decideRetry({ ...retryBase, idempotency_key: '' }, { policyInde
 
 async function runMarker() {
   const isWindows = process.platform === 'win32';
+  const isLinux = process.platform === 'linux';
+  if (!isWindows && !isLinux) {
+    console.log(`SKIP_NOT_APPLICABLE:windows:host is ${process.platform}`);
+    console.log(`SKIP_NOT_APPLICABLE:linux:host is ${process.platform}`);
+    console.log(`NOT_RUN: native lifecycle suite has no adapter for ${process.platform}`);
+    console.log('HOLD: unsupported host must not be counted as Linux evidence');
+    return;
+  }
   const lifecycle = isWindows ? 'windows' : 'linux';
   console.log(isWindows
     ? 'SKIP_NOT_APPLICABLE:linux:host is win32'
-    : `SKIP_NOT_APPLICABLE:windows:host is ${process.platform}`);
+    : 'SKIP_NOT_APPLICABLE:windows:host is linux');
   const sandboxRoot = isWindows
     ? process.env.DW_PLATFORM_SANDBOX_ROOT
     : fs.mkdtempSync(path.join(os.tmpdir(), 'dw-platform-linux-'));
