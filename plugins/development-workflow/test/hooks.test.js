@@ -204,27 +204,28 @@ test('development-workflow package includes check-updates skill assets', () => {
   const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
   const skillPath = path.join(pluginRoot, 'skills', 'check-updates', 'SKILL.md');
   const scriptPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1');
+  const commonJsPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js');
 
   assert(packageJson.files.includes('skills/check-updates/'));
-  assert.match(pluginJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
+  assert.match(pluginJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
   assert.match(hub, /check-updates/);
   assert(fs.existsSync(skillPath), 'expected check-updates skill');
-  assert(fs.existsSync(scriptPath), 'expected check-updates script');
+  assert(fs.existsSync(scriptPath), 'expected check-updates compatibility wrapper');
+  assert(fs.existsSync(commonJsPath), 'expected check-updates CommonJS implementation');
 });
 
 test('check-updates defaults to remote checking and has explicit local-only opt-out', () => {
   const skill = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'SKILL.md'), 'utf8');
-  const script = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1'), 'utf8');
+  const script = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js'), 'utf8');
 
   assert.match(skill, /默认.*联网|默认.*远程/);
   assert.match(skill, /-NoRemote/);
+  assert.match(skill, /check-updates\.js/);
   assert.doesNotMatch(skill, /默认模式只做本地检查/);
-  assert.match(script, /\[switch\]\$NoRemote/);
-  assert.match(script, /if \(\$NoRemote\)/);
-  assert.doesNotMatch(script, /if \(-not \$CheckRemote\)/);
-});
-
-test('task-utils does not export an automatic git commit helper', () => {
+  assert.match(script, /noRemote/);
+  assert.match(script, /--no-remote/);
+  assert.doesNotMatch(script, /shell:\s*true/);
+});test('task-utils does not export an automatic git commit helper', () => {
   const utils = require('../hooks/task-utils.js');
   assert.strictEqual(utils.autoCommitTask, undefined);
 });
@@ -294,7 +295,7 @@ function parseSkillFrontmatter(content, file) {
 
 test('all skills expose concise trigger-only discovery metadata', () => {
   const skills = readSkillDirectories();
-  assert.strictEqual(skills.length, 12, `expected 12 skills, found ${skills.length}`);
+  assert.strictEqual(skills.length, 13, `expected 13 skills, found ${skills.length}`);
 
   for (const skill of skills) {
     const content = fs.readFileSync(skill.file, 'utf8');
@@ -488,7 +489,7 @@ test('contributor and package manifests expose the real skill and test surface',
     return;
   }
   const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /1 core hub \+ 11 sub-skills/);
+  assert.match(agents, /1 core hub \+ 12 sub-skills/);
 });
 
 test('tooling and wrap-up require owned child processes to be reclaimed', () => {
@@ -502,46 +503,98 @@ test('tooling and wrap-up require owned child processes to be reclaimed', () => 
   assert.match(wrapup, /回收|终止|停止/);
 });
 
+test('dw-handoff re-examines the task and keeps TODO reconciliation authoritative', () => {
+  const handoff = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-handoff', 'SKILL.md'), 'utf8');
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  const router = fs.readFileSync(path.join(pluginRoot, 'hooks', 'skill-router.js'), 'utf8');
+
+  assert.match(hub, /\[dw-handoff\]\(\.\.\/dw-handoff\/SKILL\.md\)/, 'hub navigation must register dw-handoff');
+  assert.match(router, /dw-handoff/, 'router must offer dw-handoff for explicit handoff intent');
+  assert.match(handoff, /最初的目标是什么/);
+  assert.match(handoff, /从什么起点开始/);
+  assert.match(handoff, /做了什么、效果如何/);
+  assert.match(handoff, /最后的结果怎么样/);
+  assert.match(handoff, /未来计划做什么/);
+  assert.match(handoff, /TODO[^\n]*对账|对账[^\n]*TODO/);
+  assert.match(handoff, /新增\s*\/\s*修改\s*\/\s*删除/);
+  assert.match(handoff, /参考内容清单/);
+  assert.match(handoff, /网页链接/);
+  assert.match(handoff, /上下文记忆/);
+  assert.match(handoff, /计划/);
+  assert.match(handoff, /未完成目标/);
+  assert.match(handoff, /引用频[次率]/);
+  assert.match(handoff, /未验证/);
+  assert.match(handoff, /放弃/);
+  assert.match(handoff, /授权/);
+  assert.match(handoff, /脱敏|敏感信息/);
+  assert.match(handoff, /建议技能|suggested skills/i);
+  assert.match(handoff, /临时目录/);
+});
+
+
+
+test('important-file changes require records, version retention, and approval', () => {
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  const implementation = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-implementation', 'SKILL.md'), 'utf8');
+  const wrapup = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-wrapup', 'SKILL.md'), 'utf8');
+  const rule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
+
+  assert.match(hub, /铁律 B6/);
+  assert.match(hub, /重要文件增删治理/);
+  assert.match(hub, /被删内容原文/);
+  assert.match(hub, /耐久落点/);
+  assert.match(hub, /旧版本/);
+  assert.match(hub, /失去全部价值|仅剩占用空间/);
+  assert.match(hub, /2[–-]4 个子 agent/);
+  assert.match(hub, /新对话/);
+  assert.match(hub, /2[–-]4 次/);
+  assert.match(implementation, /B6/);
+  assert.match(wrapup, /B6/);
+  assert.match(rule, /Trace important changes/);
+  assert.match(rule, /When this workflow is active/);
+
+  if (!isRepositoryCheckout) {
+    skipTest('README is not part of the published package');
+    return;
+  }
+  const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+  assert.match(readme, /铁律 B6/);
+});
+
+
+
+test('development-workflow rule keeps B6 trace as its own invariant', () => {
+  const rule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
+  assert.match(rule, /\n8\. \*\*Trace important changes\.\*\*/);
+});
+
 test('performance guidance requires local evidence instead of timeless rankings', () => {
   const optimization = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-optimization', 'SKILL.md'), 'utf8');
   assert.match(optimization, /本地.*基准|代表性.*基准|工作负载.*基准/);
   assert.doesNotMatch(optimization, /唯一可扩展选项|最快 2-3x|推理可达 150x/);
 });
 
-test('check-updates bounds external commands and reclaims timed-out processes', () => {
+test('check-updates bounds external commands and preserves timeout/report evidence', () => {
   const script = fs.readFileSync(
-    path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1'),
+    path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js'),
     'utf8',
   );
-  assert.match(script, /CommandTimeoutSec/);
-  assert.match(script, /function Invoke-ExternalCommand/);
-  assert.match(script, /function Stop-OwnedProcessTree/);
-  assert.match(script, /Get-CimInstance Win32_Process[^\r\n]*-OperationTimeoutSec/);
-  assert((script.match(/Stop-OwnedProcessTree/g) || []).length >= 3,
-    'timeout and finally paths should reclaim the owned process tree');
-  assert.match(script, /WaitForExit/);
-  assert.match(script, /finally/);
-  assert.match(script, /Kill\(\$true\)|Stop-Process/);
-  assert.doesNotMatch(
-    script,
-    /& \$Name --version|^\s*npm\s+(list|outdated)\b|^\s*python\s+-m\s+pip\s+show\b/m,
-  );
-});
-
-test('check-updates reports registry failures before printing the final summary', () => {
+  assert.match(script, /timeoutSec/);
+  assert.match(script, /spawnSync/);
+  assert.match(script, /timedOut/);
+  assert.match(script, /shell:\s*false/);
+  assert.match(script, /Report was not saved/);
+});test('check-updates reports registry failures before printing the final summary', () => {
   const script = fs.readFileSync(
-    path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.ps1'),
+    path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js'),
     'utf8',
   );
-  assert.match(script, /\$registryFailed\s*=/);
-  assert.match(script, /if \(\$registryFailed\)/);
+  assert.match(script, /checkRemote/);
   assert(
-    script.indexOf('Add-Status "Report" "write report"') < script.indexOf('Write-Section "8. Summary"'),
+    script.indexOf("add('Report', 'write report'") < script.indexOf("section('8. Summary')"),
     'report-write warnings must be recorded before the final console summary',
   );
-});
-
-test('check-updates classifies fake npm responses without confirming uncertain packages', () => {
+});test('check-updates classifies fake npm responses without confirming uncertain packages', () => {
   if (process.platform !== 'win32') {
     skipTest('fake npm .cmd fixtures require Windows');
     return;
@@ -743,10 +796,10 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.2.0');
+  assert.strictEqual(packageJson.version, '5.3.0');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
-  assert.match(packageJson.description, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
+  assert.match(packageJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
   const completeTestFiles = testManifest.suites.all.tests.flatMap((test) => test.args || []);
   for (const testFile of [
     'test/resource-control.test.js',
@@ -764,7 +817,7 @@ test('development-workflow manifests and README agree on version and skill count
     'test/failure-loop-guard-hardening.test.js',
     'test/resource-aware-queue.test.js',
   ]) {
-    assert(fs.existsSync(path.join(pluginRoot, relative)), `expected packaged 5.2.0 asset: ${relative}`);
+    assert(fs.existsSync(path.join(pluginRoot, relative)), `expected packaged 5.3.0 asset: ${relative}`);
   }
   if (!isRepositoryCheckout) {
     skipTest('marketplace and README are not part of the published package');
@@ -778,15 +831,28 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.2.0');
+  assert.strictEqual(marketplaceEntry.version, '5.3.0');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
-  assert.match(readme, /12个 Skill（1个总纲 \+ 11个子 Skill）/);
+  assert.match(readme, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
 });
 
+test('5.3 documentation states evidence boundaries and manager entry points', () => {
+  const readme = fs.readFileSync(path.join(checkoutRoot, 'README.md'), 'utf8');
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-collaboration', 'SKILL.md'), 'utf8');
+  const handoff = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-handoff', 'SKILL.md'), 'utf8');
+  const checker = fs.readFileSync(path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js'), 'utf8');
+  for (const status of ['IMPLEMENTED', 'PASS_STATIC', 'PASS_FOCUSED', 'VERIFIED', 'VERIFIED_DEGRADED', 'UNVERIFIED', 'NOT_RUN', 'FAIL', 'HOLD']) {
+    assert(readme.includes(`\`${status}\``) || handoff.includes(`\`${status}\``), `missing evidence status ${status}`);
+  }
+  assert.match(readme, /5\.3 实现平台资源管理，但不证明真实 Claude、Codex 或 Grok Build 组合/);
+  assert.match(hub, /TaskResourceManager/);
+  assert.match(checker, /spawnSync/);
+});
 const retainedContractTests = new Set([
   'development-workflow package includes check-updates skill assets',
+  '5.3 documentation states evidence boundaries and manager entry points',
   'check-updates defaults to remote checking and has explicit local-only opt-out',
   'task-utils does not export an automatic git commit helper',
   'hook self-check covers every JavaScript command in hooks.json',
@@ -798,8 +864,11 @@ const retainedContractTests = new Set([
   'published guidance has no stale fixed lifecycle or unavailable capability mandates',
   'contributor and package manifests expose the real skill and test surface',
   'tooling and wrap-up require owned child processes to be reclaimed',
+  'dw-handoff re-examines the task and keeps TODO reconciliation authoritative',
+  'important-file changes require records, version retention, and approval',
+  'development-workflow rule keeps B6 trace as its own invariant',
   'performance guidance requires local evidence instead of timeless rankings',
-  'check-updates bounds external commands and reclaims timed-out processes',
+  'check-updates bounds external commands and preserves timeout/report evidence',
   'check-updates reports registry failures before printing the final summary',
   'check-updates classifies fake npm responses without confirming uncertain packages',
   'check-updates records report-write failure before its final summary',

@@ -187,7 +187,12 @@ async function runMarker() {
   const sandboxRoot = isWindows
     ? process.env.DW_PLATFORM_SANDBOX_ROOT
     : fs.mkdtempSync(path.join(os.tmpdir(), 'dw-platform-linux-'));
-  assert(sandboxRoot, 'DW_PLATFORM_SANDBOX_ROOT is required for the applicable Windows marker test');
+  if (!sandboxRoot) {
+    console.log('LIFECYCLE_NOT_RUN:windows');
+    console.log('NOT_RUN: DW_PLATFORM_SANDBOX_ROOT is required for the applicable Windows marker test');
+    console.log('HOLD: Windows lifecycle evidence is unavailable until an authorized sandbox is provided');
+    return;
+  }
   const markerPath = path.join(sandboxRoot, 'marker-observed.json');
   fs.mkdirSync(sandboxRoot, { recursive: true });
   fs.rmSync(markerPath, { force: true });

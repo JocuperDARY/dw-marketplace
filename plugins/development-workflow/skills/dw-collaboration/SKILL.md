@@ -36,6 +36,10 @@ Stop retries when the immutable failure fingerprint repeats or the injected retr
 
 For executable task-resource tracking, repeated-failure loop exit, work levels, resource-aware queueing, and user progress reports, follow [resource-control.md](references/resource-control.md). Register and bind resources before launch; inject filesystem and observation checks when the tracker is created; use a monotonic compare-and-swap store for failure budgets; bind each queued task to a non-empty list of resources in one exact scope; stop after one summarized bounded exit attempt repeats the same failure family; and do not refill queue capacity until that task's exact tracker close result is consumed.
 
+## 5.3 resource manager entry point
+
+Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and obtain current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
+
 Before `COMPLETE`, require root acceptance, review, independent verification when specified, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Completion never authorizes staging, commit, push, merge, publication, deployment, paid work, credential changes, or constrained compute.
 
 Read only the reference needed:

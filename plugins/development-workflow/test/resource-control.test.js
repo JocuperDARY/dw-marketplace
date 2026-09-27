@@ -1016,6 +1016,14 @@ test('documents resource control and loop exit in plain operational language', (
   );
   assert(fs.existsSync(controlPath), 'resource-control.md must be packaged with dw-collaboration');
   const control = fs.readFileSync(controlPath, 'utf8');
+  const wrapup = fs.readFileSync(
+    path.join(pluginRoot, 'skills', 'dw-wrapup', 'SKILL.md'),
+    'utf8',
+  );
+  const workflowRule = fs.readFileSync(
+    path.join(pluginRoot, 'rules', 'development-workflow.md'),
+    'utf8',
+  );
 
   assert.match(skill, /resource-control\.md/);
   assert.match(lifecycle, /TaskResourceTracker/);
@@ -1035,6 +1043,353 @@ test('documents resource control and loop exit in plain operational language', (
   assert.match(control, /85%/);
   assert.match(control, /开始.*进度.*失败.*结束/s);
   assert.match(control, /付费模型.*不.*5\.2\.0|5\.2\.0.*不.*付费模型/s);
+
+  const openFence = (line) => {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (!match) return null;
+    const marker = match[1][0];
+    if (marker === '`' && match[2].includes('`')) return null;
+    return { marker, length: match[1].length };
+  };
+  const closesFence = (line, fence) => {
+    const match = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
+    return Boolean(
+      match
+      && match[1][0] === fence.marker
+      && match[1].length >= fence.length
+    );
+  };
+  const markdownSection = (text, heading, { includeFenced = false } = {}) => {
+    const lines = text.split(/\r?\n/);
+    const body = [];
+    let fence = null;
+    let sectionFound = false;
+
+    for (let index = 0; index < lines.length; index += 1) {
+      if (fence) {
+        if (sectionFound && includeFenced) body.push(lines[index]);
+        if (closesFence(lines[index], fence)) fence = null;
+        continue;
+      }
+
+      const opening = openFence(lines[index]);
+      if (opening) {
+        fence = opening;
+        if (sectionFound && includeFenced) body.push(lines[index]);
+        continue;
+      }
+
+      if (!sectionFound) {
+        if (lines[index] === `## ${heading}`) sectionFound = true;
+        continue;
+      }
+
+      if (/^## /.test(lines[index])) break;
+      body.push(lines[index]);
+    }
+    return sectionFound ? body.join('\n') : '';
+  };
+  const lineContaining = (text, marker) => (
+    text.split(/\r?\n/).find((line) => line.includes(marker)) || ''
+  );
+  const hasAll = (text, patterns) => patterns.every((pattern) => pattern.test(text));
+  const missingProcessTriageRequirements = (documents) => {
+    const baseline = markdownSection(
+      documents.lifecycle,
+      'Read-only host baseline before intervention',
+    );
+    const persistent = markdownSection(
+      documents.lifecycle,
+      'Persistent repair, recovery, and comparison',
+    );
+    const scheduled = markdownSection(documents.control, 'Scheduled audit gate');
+    const ownedCleanup = markdownSection(
+      documents.wrapup,
+      '自有资源清理',
+      { includeFenced: true },
+    );
+    const windowsSignals = lineContaining(baseline, 'On Windows,');
+    const nonTaskOwnedDefaults = lineContaining(baseline, 'Third-party,');
+    const postActionComparison = lineContaining(ownedCleanup, '每次处置后');
+
+    return [
+      ['read-only host baseline precedes classification', hasAll(baseline, [
+        /bounded, read-only host baseline/i,
+        /before classification or action/i,
+      ])],
+      ['ownership, progress, relevance, and action stay separate', hasAll(baseline, [
+        /\*\*ownership\*\*/i,
+        /\*\*progress\*\*/i,
+        /\*\*relevance\*\*/i,
+        /\*\*action\*\*/i,
+        /keep four questions separate/i,
+      ])],
+      ['historical observations cannot authorize current action', hasAll(baseline, [
+        /Historical crashes, PIDs, WAL growth, load samples, or earlier cleanup results/i,
+        /not current action authority/i,
+      ])],
+      ['home-profile Git roots receive bounded read-only inspection', hasAll(baseline, [
+        /resolve the Git root read-only/i,
+        /Git root is a user home or profile directory/i,
+        /bounded summary of the tracked set/i,
+        /redacted remotes/i,
+        /applicable ignore rules/i,
+      ])],
+      ['process and platform signals are evidence, not kill selectors', hasAll(windowsSignals, [
+        /\bCodex\b/i,
+        /\bGit\b/i,
+        /\bDefender\b/i,
+        /\brenderer\b/i,
+        /\bGPU\b/i,
+        /\bNode\b/i,
+        /evidence filters, not kill selectors/i,
+      ])],
+      ['non-task-owned processes remain observation-only or hold', hasAll(nonTaskOwnedDefaults, [
+        /\bThird-party\b/i,
+        /\bsystem\b/i,
+        /\bforeground\b/i,
+        /\buser-started\b/i,
+        /\bexternal\b/i,
+        /\bunknown processes default to `OBSERVE_ONLY` or `HOLD`/i,
+      ])],
+      ['weak liveness signals do not prove a hung process', hasAll(baseline, [
+        /Low CPU and no output do not establish `SUSPECTED_HUNG`/i,
+        /timeout, teardown condition, task failure, interruption, old age, stable memory, a repeated command, or a process name is also insufficient by itself/i,
+      ])],
+      ['only declared task-owned candidates bind the task ledger', hasAll(baseline, [
+        /candidate already declared by the current task/i,
+        /proven `TASK_OWNED`/i,
+        /bound to the task ledger/i,
+        /Do not register an `EXTERNAL` or `UNKNOWN` candidate as task-owned/i,
+        /bounded, redacted observation evidence/i,
+      ])],
+      ['audit axes are prose rather than executable classifications', hasAll(baseline, [
+        /four host-audit axes are prose reasoning dimensions/i,
+        /not serialized runtime fields/i,
+        /`PROGRESS_CLASSIFICATIONS`/i,
+        /existing runtime progress mapping remains/i,
+      ])],
+      ['persistent repair requires an exact backup and restoration check', hasAll(persistent, [
+        /exact, minimal backup/i,
+        /supported consistent snapshot method/i,
+        /source identity and hash/i,
+        /backup identity and hash/i,
+        /restoration steps/i,
+        /restoration acceptance check/i,
+      ])],
+      ['a backup grants no stop or delete authority', hasAll(persistent, [
+        /backup neither makes process termination reversible/i,
+        /nor grants stop, delete, or force authority/i,
+      ])],
+      ['Git metadata cannot be deleted or reset as cleanup', hasAll(persistent, [
+        /Never delete, move, reset, or reinitialize `\.git` as diagnosis or cleanup/i,
+        /Repair only the proven configuration or metadata after its exact backup/i,
+      ])],
+      ['active WAL files require a supported consistent snapshot', hasAll(persistent, [
+        /Never delete, truncate, replace, or force-checkpoint an active SQLite WAL/i,
+        /application's supported backup interface/i,
+        /owned, verified quiescent state/i,
+        /consistent database\/WAL\/SHM snapshot/i,
+      ])],
+      ['force recovery uses a fresh request-bound host identity', hasAll(persistent, [
+        /fresh host-owned identity resolution/i,
+        /bound to the request/i,
+        /expected-identity hashes/i,
+      ])],
+      ['managed-boundary descendants do not require individual subleases', hasAll(persistent, [
+        /authenticated managed job, process group, or session boundary/i,
+        /without an individual sublease for each child/i,
+        /outside that authenticated managed boundary/i,
+        /lacking a valid individual sublease plus identity binding/i,
+        /whole tree `HOLD`/i,
+      ])],
+      ['post-action comparison spans at least 15 seconds', hasAll(persistent, [
+        /at least three strictly time-ordered samples/i,
+        /spanning at least 15 seconds/i,
+        /same-method scope/i,
+      ])],
+      ['15 seconds is not an automatic pass or stop threshold', hasAll(persistent, [
+        /15-second floor applies only to post-action host comparison/i,
+        /not a hung threshold, wait timeout, termination permission, or automatic PASS/i,
+        /absence remains a separate required check/i,
+      ])],
+      ['the v1 progress classifier is not action authority', hasAll(persistent, [
+        /`validateProgressReport\(\)` version 1 is a descriptive classifier/i,
+        /does not authenticate elapsed time, sampling method, target identity, or host authority/i,
+        /is not action or termination authority/i,
+      ])],
+      ['scheduled audits do not create cleanup authority', hasAll(scheduled, [
+        /scheduled audit is only a policy-timed trigger/i,
+        /bounded read-only observation/i,
+        /does not create, grant, inherit, refresh, or expand cleanup authority or termination authority/i,
+      ])],
+      ['each scheduled audit reacquires identity and authorization', hasAll(scheduled, [
+        /Each run must reacquire/i,
+        /current owner/i,
+        /complete process identity/i,
+        /action authorization/i,
+        /prior run's PID, status, classification, or receipt is historical evidence only/i,
+      ])],
+      ['scheduled observation cannot manufacture a Git polling loop', hasAll(scheduled, [
+        /Detect repeated source-control enumeration by observing existing commands and I\/O/i,
+        /do not create the same polling loop as the measurement/i,
+      ])],
+      ['overlapping audits cannot perform concurrent remediation', hasAll(scheduled, [
+        /audits overlap/i,
+        /skip, coalesce, or `HOLD` the later run/i,
+        /never perform concurrent remediation/i,
+      ])],
+      ['wrap-up uses read-only triage and a 15-second comparison', (
+        hasAll(ownedCleanup, [/有界、只读的当前基线/])
+        && hasAll(postActionComparison, [
+          /至少 15 秒/,
+          /Git/,
+          /CPU/,
+          /WAL/,
+          /界面响应/,
+          /单独验证资源不存在/,
+        ])
+      )],
+      ['the always-loaded rule preserves stop authority and observation gates', hasAll(documents.workflowRule, [
+        /bounded read-only baseline/i,
+        /current compound identity/i,
+        /grants no stop authority/i,
+        /graceful-first recovery/i,
+        /verify exact absence/i,
+        /at least three same-method samples/i,
+        /15-second-or-longer post-action window/i,
+        /`HOLD`\/`UNVERIFIED`/i,
+      ])],
+      ['the always-loaded rule separates teardown from incident cause', hasAll(documents.workflowRule, [
+        /Normal teardown requires a valid teardown reason or condition/i,
+        /Incident response or persistent repair additionally requires the applicable cause to be confirmed/i,
+        /applicable cause evidence/i,
+        /post-action observation is `HOLD`\/`UNVERIFIED`/i,
+      ])],
+    ].filter(([, present]) => !present).map(([requirement]) => requirement);
+  };
+  const documents = { lifecycle, control, wrapup, workflowRule };
+  const mutate = (text, search, replacement = '') => {
+    const mutated = text.replace(search, replacement);
+    assert.notStrictEqual(mutated, text, 'controlled mutation must alter its fixture');
+    return mutated;
+  };
+  const scheduledBodyFixture = markdownSection(control, 'Scheduled audit gate');
+  const scheduledAuthorityFixture = lineContaining(
+    scheduledBodyFixture,
+    'A scheduled audit is only',
+  );
+  assert(scheduledAuthorityFixture, 'scheduled-audit authority fixture must exist');
+  const mutations = [
+    {
+      name: 'active WAL deletion guard',
+      document: 'lifecycle',
+      text: mutate(
+        lifecycle,
+        'Never delete, truncate, replace, or force-checkpoint an active SQLite WAL merely because it grew. ',
+      ),
+      requirement: 'active WAL files require a supported consistent snapshot',
+    },
+    {
+      name: 'always-loaded stop-authority and HOLD guard',
+      document: 'workflowRule',
+      text: mutate(
+        workflowRule,
+        'a schedule, PID, name, path, age, timeout, low load, no output, historical event, or suspected-hung label grants no stop authority. ',
+      ),
+      requirement: 'the always-loaded rule preserves stop authority and observation gates',
+    },
+    {
+      name: 'external candidates cannot enter the task ledger',
+      document: 'lifecycle',
+      text: mutate(
+        lifecycle,
+        'Do not register an `EXTERNAL` or `UNKNOWN` candidate as task-owned; retain only bounded, redacted observation evidence and keep its action `OBSERVE_ONLY` or `HOLD`. ',
+      ),
+      requirement: 'only declared task-owned candidates bind the task ledger',
+    },
+    {
+      name: 'authenticated managed-boundary descendant rule',
+      document: 'lifecycle',
+      text: mutate(
+        lifecycle,
+        'An authenticated managed job, process group, or session boundary may cover its descendants without an individual sublease for each child. ',
+      ),
+      requirement: 'managed-boundary descendants do not require individual subleases',
+    },
+    {
+      name: 'Windows Git observation example',
+      document: 'lifecycle',
+      text: mutate(
+        lifecycle,
+        'On Windows, Codex, Git, Defender, renderer, GPU, and Node',
+        'On Windows, Codex, Defender, renderer, GPU, and Node',
+      ),
+      requirement: 'process and platform signals are evidence, not kill selectors',
+    },
+    {
+      name: 'system-process observation-only category',
+      document: 'lifecycle',
+      text: mutate(
+        lifecycle,
+        'Third-party, system, foreground, user-started, external, and unknown',
+        'Third-party, foreground, user-started, external, and unknown',
+      ),
+      requirement: 'non-task-owned processes remain observation-only or hold',
+    },
+    {
+      name: 'post-action CPU comparison metric',
+      document: 'wrapup',
+      text: mutate(
+        wrapup,
+        '进程、Git、CPU、I/O、GPU、WAL 和界面响应',
+        '进程、Git、I/O、GPU、WAL 和界面响应',
+      ),
+      requirement: 'wrap-up uses read-only triage and a 15-second comparison',
+    },
+    {
+      name: 'scheduled audit exact level-two heading',
+      document: 'control',
+      text: mutate(control, '## Scheduled audit gate', '### Scheduled audit gate'),
+      requirement: 'scheduled audits do not create cleanup authority',
+    },
+    {
+      name: 'four-backtick fence cannot expose a fake scheduled-audit heading',
+      document: 'control',
+      text: [
+        '````markdown',
+        '```',
+        '## Scheduled audit gate',
+        scheduledBodyFixture,
+        '````',
+        mutate(control, '## Scheduled audit gate', '### Scheduled audit gate'),
+      ].join('\n'),
+      requirement: 'scheduled audits do not create cleanup authority',
+    },
+    {
+      name: 'fenced policy text cannot replace the real scheduled-audit clause',
+      document: 'control',
+      text: mutate(
+        control,
+        scheduledAuthorityFixture,
+        ['````text', scheduledAuthorityFixture, '````'].join('\n'),
+      ),
+      requirement: 'scheduled audits do not create cleanup authority',
+    },
+  ];
+  assert.deepStrictEqual(
+    {
+      missing: missingProcessTriageRequirements(documents),
+      undetectedMutations: mutations
+        .filter(({ document, text: mutated, requirement }) => {
+          const candidate = { ...documents, [document]: mutated };
+          return !missingProcessTriageRequirements(candidate).includes(requirement);
+        })
+        .map(({ name }) => name),
+    },
+    { missing: [], undetectedMutations: [] },
+    'process triage and reversible cleanup contract must be complete',
+  );
 });
 
 let passed = 0;
