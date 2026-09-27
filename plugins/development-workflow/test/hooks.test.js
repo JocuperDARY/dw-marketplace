@@ -811,10 +811,17 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.3.0');
+  assert.strictEqual(packageJson.version, '5.4.0');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
+  const coreSkill = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  assert.match(coreSkill, /### 中文说明写法/);
+  assert.match(coreSkill, /先说明当前状态/);
+  assert.match(coreSkill, /具体的动词、条件和结果/);
+  assert.match(coreSkill, /HOLD、FAIL、NOT_RUN、UNVERIFIED/);
+  assert.match(coreSkill, /额度配置保持当前值/);
+  assert.match(coreSkill, /shell 命令、JSON\/schema\/manifest/);
   const completeTestFiles = testManifest.suites.all.tests.flatMap((test) => test.args || []);
   for (const testFile of [
     'test/resource-control.test.js',
@@ -832,7 +839,7 @@ test('development-workflow manifests and README agree on version and skill count
     'test/failure-loop-guard-hardening.test.js',
     'test/resource-aware-queue.test.js',
   ]) {
-    assert(fs.existsSync(path.join(pluginRoot, relative)), `expected packaged 5.3.0 asset: ${relative}`);
+    assert(fs.existsSync(path.join(pluginRoot, relative)), `expected packaged asset: ${relative}`);
   }
   if (!isRepositoryCheckout) {
     skipTest('marketplace and README are not part of the published package');
@@ -846,14 +853,14 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.3.0');
+  assert.strictEqual(marketplaceEntry.version, '5.4.0');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
   assert.match(readme, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
 });
 
-test('5.3 documentation states evidence boundaries and manager entry points', () => {
+test('documentation states evidence boundaries and manager entry points', () => {
   if (!isRepositoryCheckout) {
     skipTest('marketplace README is not part of the published package');
     return;
@@ -865,13 +872,13 @@ test('5.3 documentation states evidence boundaries and manager entry points', ()
   for (const status of ['IMPLEMENTED', 'PASS_STATIC', 'PASS_FOCUSED', 'VERIFIED', 'VERIFIED_DEGRADED', 'UNVERIFIED', 'NOT_RUN', 'FAIL', 'HOLD']) {
     assert(readme.includes(`\`${status}\``) || handoff.includes(`\`${status}\``), `missing evidence status ${status}`);
   }
-  assert.match(readme, /5\.3 实现平台资源管理，但不证明真实 Claude、Codex 或 Grok Build 组合/);
+  assert.match(readme, /5\.3 实现平台资源管理；真实 Claude、Codex 或 Grok Build 组合的运行效果仍需对应环境验证/);
   assert.match(hub, /TaskResourceManager/);
   assert.match(checker, /spawnSync/);
 });
 const retainedContractTests = new Set([
   'development-workflow package includes check-updates skill assets',
-  '5.3 documentation states evidence boundaries and manager entry points',
+  'documentation states evidence boundaries and manager entry points',
   'check-updates defaults to remote checking and has explicit local-only opt-out',
   'task-utils does not export an automatic git commit helper',
   'hook self-check covers every JavaScript command in hooks.json',
