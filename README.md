@@ -7,7 +7,7 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 | 插件 | 版本 | 说明 |
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.4.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 13个 Skill（1个总纲 + 12个子 Skill）、2 个 hooks 和 8 组规则 |
-| [gpt-bridge](./plugins/gpt-bridge/) | 1.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 
 ## 安装
 
@@ -47,7 +47,7 @@ claude mcp add gpt-bridge -- node \
 
 5.2.1 对资源回收规则增加了观察门控和状态证据要求，并同步发布元数据与测试契约。
 
-5.4.0 候选补充面向用户的中文说明规则：报告先写当前状态、已完成动作和证据，再写尚缺证据、下一步和授权；普通说明少用否定式、对照句和抽象词。正式状态值、路径、哈希、schema 和安全要求保持原样。当前材料覆盖 Windows W 的文本、静态检查和合成 fixture 读回；Linux 原生验收与 Grok Build 验收标为 deferred/NOT_RUN，Claude/Codex harness 运行时验证标为 NOT_RUN，产品级运行时验证标为 NOT_RUN。
+5.4.0 候选补充面向用户的中文说明规则：报告先写当前状态、已完成动作和证据，再写尚缺证据、下一步和授权；普通说明少用否定式、对照句和抽象词。正式状态值、路径、哈希、schema 和安全要求保持原样。文本规范与 Windows、Linux、Claude/Codex 的真实组合验证必须分别进行；对于本候选，Linux、Claude/Codex 及运行时验证仍为 `NOT_RUN` 或 deferred。
 
 总纲新增铁律 B6《重要文件增删治理》：重要文件（影响后续方向的节点文件、框架核心代码与核心逻辑、技能/规则/契约正文；无耐久备份者为风险加重项）的增删必须完整留痕（含被删内容原文与耐久落点）、保留旧版本；关键修改需经 2–4 个子 agent 交叉审议一致通过，或按无子 agent 备选方案（中断交用户新对话审核 / 多轮异向自审）执行。
 

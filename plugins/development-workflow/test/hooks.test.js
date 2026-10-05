@@ -416,7 +416,7 @@ test('collaboration integration exposes one canonical discovery path', () => {
       `required Plan B path is missing: ${relativePath}`);
     const ignored = childProcess.spawnSync(
       'git',
-      ['check-ignore', '--no-index', '--quiet', '--', relativePath],
+      ['-c', `safe.directory=${repoRoot}`, 'check-ignore', '--no-index', '--quiet', '--', relativePath],
       { cwd: repoRoot, encoding: 'utf8', windowsHide: true },
     );
     assert.strictEqual(ignored.error, undefined, `git check-ignore failed: ${ignored.error}`);
