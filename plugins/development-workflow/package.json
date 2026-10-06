@@ -1,6 +1,6 @@
 {
   "name": "development-workflow",
-  "version": "5.4.0",
+  "version": "5.4.1",
   "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共13个 Skill（1个总纲 + 12个子 Skill），并含 hooks、rules 及环境健康检查。",
   "scripts": {
     "test": "npm run test:all",
