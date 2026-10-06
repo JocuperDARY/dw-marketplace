@@ -811,7 +811,7 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.4.0');
+  assert.strictEqual(packageJson.version, '5.4.1');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
@@ -822,6 +822,11 @@ test('development-workflow manifests and README agree on version and skill count
   assert.match(coreSkill, /HOLD、FAIL、NOT_RUN、UNVERIFIED/);
   assert.match(coreSkill, /额度配置保持当前值/);
   assert.match(coreSkill, /shell 命令、JSON\/schema\/manifest/);
+  assert.match(coreSkill, /方法论版本\*\*:\s*3\.8/);
+  assert.match(coreSkill, /每个独立 PR 在合并进入 `master` 前/);
+  assert.match(coreSkill, /版本更新属于这次变更的一部分，版本更新本身不会再次触发递增/);
+  assert.match(coreSkill, /MAJOR > MINOR > PATCH/);
+  assert.match(coreSkill, /总纲的 3\.x 方法论版本独立维护/);
   const completeTestFiles = testManifest.suites.all.tests.flatMap((test) => test.args || []);
   for (const testFile of [
     'test/resource-control.test.js',
@@ -853,7 +858,7 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.4.0');
+  assert.strictEqual(marketplaceEntry.version, '5.4.1');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
