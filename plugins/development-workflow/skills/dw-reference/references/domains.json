@@ -1,5 +1,5 @@
 {
-  "description": "Domain knowledge config for skill-router.js Layer 3. Each entry maps keywords to inline context blocks. The highest-scoring primary domain is injected, plus at most one complementary security overlay.",
+  "description": "Static domain reference notes for dw-reference. These notes are not loaded or scored by the hook router. Read paths are relative to the plugin root; discover runtime capabilities separately.",
   "domains": [
     {
       "keywords": ["渗透","红队","pentest","exploit","c2","lateral","提权","bypass","evasion","red team","后渗透"],
@@ -59,7 +59,7 @@
     {
       "keywords": ["ai agent","tool use","function calling","agent框架","orchestration","multi agent","multi-agent","subagent","子agent","多智能体","协作","agentic","智能体"],
       "name": "Agent开发",
-      "text": "## Agent开发\n原则: 先验证宿主实际能力，再选择单链、任务指派或互动协作；工具契约、授权、所有权和证据边界必须明确，所有进程与临时空间按精确身份回收。复杂协作统一进入 canonical 协作协议。\n深入参考: `Read rules/ai-agent-dev.md`"
+      "text": "## Agent开发\n原则: 根据当前宿主能力选择单链、任务指派或互动协作；明确输入输出、授权、资源归属和清理责任。普通协作使用宿主工具，需要持久资源恢复时再启用完整协议。\n深入参考: `Read rules/ai-agent-dev.md`"
     },
     {
       "keywords": ["prompt injection","jailbreak","guardrail","llm安全","提示词注入","模型安全","ai safety"],

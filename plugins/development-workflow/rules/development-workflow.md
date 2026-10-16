@@ -21,7 +21,7 @@
 |-------|--------------------|-----------------|
 | Light | Local, reversible, no runtime behavior change | Goal + focused edit + static check + diff review |
 | Standard | Behavior change, bug fix, or multiple related files | Traceable plan + regression evidence + relevant gates + 3C |
-| High | Security/data/production, cross-module, irreversible, or external side effects | Written design + rollback/backup + expanded tests/review + explicit authorization points |
+| High | Security, sensitive data, data loss, production impact, critical cross-module contracts, irreversible changes, or significant external side effects | Written design + rollback/backup + expanded tests/review + explicit authorization points |
 
 File count informs impact but does not determine risk by itself. An urgent change may shorten explanation, but it does not remove rollback and correctness evidence.
 

@@ -22,9 +22,10 @@ function test(name, fn) {
   }
 }
 
-function run(suite) {
+function run(suite, env = process.env) {
   return childProcess.spawnSync(node, [runner, '--manifest', manifestPath, '--suite', suite], {
     encoding: 'utf8',
+    env,
     timeout: 10000,
   });
 }
@@ -101,6 +102,27 @@ try {
     assert.match(result.stdout, /pass: 3/);
     assert.match(result.stdout, /skip: 2/);
     assert.match(result.stdout, /not-run: 0/);
+  });
+
+  test('suite runs cannot silently inherit a narrowed manager focus or transaction root', () => {
+    const manifest = { suites: { all: { tests: [{
+      name: 'unfocused fixture', command: node,
+      args: ['-e', "if (process.env.DW_TASK_RESOURCE_TEST_FOCUS || process.env.DW_TRANSACTION_TEST_ROOT) process.exit(1); console.log('complete fixture selected')"],
+    }] } } };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const result = run('all', { ...process.env, DW_TASK_RESOURCE_TEST_FOCUS: 'm2-v2-contract-v1', DW_TRANSACTION_TEST_ROOT: 'unexpected-override' });
+    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /complete fixture selected/);
+  });
+  test('a child timeout preserves its failure reason', () => {
+    fs.writeFileSync(manifestPath, JSON.stringify({ suites: { all: { tests: [{
+      name: 'bounded slow child', command: node,
+      args: ['-e', 'setTimeout(() => {}, 5000)'], timeoutMs: 50,
+    }] } } }));
+    const result = run('all');
+    assert.strictEqual(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stderr, /TEST_EXECUTION_ERROR:ETIMEDOUT/);
+    assert.match(result.stdout, /fail: 1/);
   });
 } finally {
   fs.rmSync(root, { recursive: true, force: true });

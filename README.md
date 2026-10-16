@@ -6,10 +6,12 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.4.3 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.5.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 
-**5.4.3 文字表述拆分**：[dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 集中维护已有的中文说明、结果与证据表达、限制说明和任务命名规范，可单独用于润色说明。总纲、规则和快速参考改为引用它；本次按既有规范的组织调整递增 PATCH。
+**5.5.0 技能与脚本整理**：明确诊断、调试、实现、验证、优化、收尾和文字表述的主维护位置；快速参考使用短链接，详细进程维护集中在协作模块。新增全部 Skill 的显式调用注册和写作/协作/工具提示路由，修正否定、引用文本及规则选择问题；增加只读结构检查与 Windows 有界命令后端，按新增功能递增 MINOR。manager 的关闭、持久化、写入路径冲突和模型选择约束补齐相应回归，原先遗漏的 manager 测试接入完整入口。
+
+**5.4.3 文字表述拆分**：[dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 集中维护已有的中文说明、结果与证据表达、限制说明和任务命名规范，可单独用于润色说明。总纲、规则和快速参考引用它。
 
 **5.4.2 流程简化**：普通工作沿用已有授权，复用 Git 历史、相关测试与一次适当审查；覆盖独有未提交内容前保存一次副本。普通协作使用宿主工具，需要持久资源恢复时启用完整资源管理协议。
 
@@ -47,7 +49,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.4.3 版本
+3. 将插件更新到当前的 5.5.0 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -73,6 +75,18 @@ claude mcp add gpt-bridge -- node \
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/hooks/tool-inventory.js" --json
 ```
+
+该清单读取配置，记录来源和项目作用域；`configured` 不证明当前会话的工具已连接或可调用。只有显式 `--write-cache` 才写配置盘点缓存。技能发现、规则选择/迁移和结构检查的职责见 [dw-tooling](./plugins/development-workflow/skills/dw-tooling/SKILL.md)。
+
+维护插件时，可在插件目录执行只读检查：
+
+```bash
+npm run check:skills
+```
+
+它校验 Skill 元数据、导航与本地引用、显式路由目标、发布清单及全部 `.test.js` 的入口登记。不会修改源码、替用户作授权决定或检查写作风格。`npm run test:package` 另外生成实际 npm 归档，在隔离目录离线安装后运行包内测试，防止清单存在但文件未实际发布。
+
+路由只给出建议，保留两个 advisory hooks。全部 14 个 Skill 支持显式名称；总纲与快速参考主要通过显式调用使用。领域提示资料已归入 [dw-reference](./plugins/development-workflow/skills/dw-reference/references/domains.json)，不再声明为运行中的 Layer 3 自动注入。
 
 旧版 `prune-rules.js` 已移除。运行时选择器不会修改用户规则；若需要把活跃语言规则
 移出自动加载目录，必须先审阅只读迁移计划：
@@ -110,7 +124,11 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 
 ### 证据状态说明
 
-`IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构、路径和哈希检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。5.3 实现平台资源管理；真实 Claude、Codex 或 Grok Build 组合的运行效果仍需对应环境验证。本候选将 Linux 原生和 Grok Build 暂缓验收保持为计划/TODO 中的 `NOT_RUN` 或 `deferred`。
+`IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构和相关静态检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要对应功能的运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。
+
+`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付；包内没有通用 Windows/Linux 或 Claude/Codex/Grok 的生产平台 adapter。其测试使用 fake adapter 和隔离文件系统，不能作为真实进程管理的验收。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
+
+更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。原生 Linux、Grok Build、真实 Claude/Codex 和用户配置安装继续暂缓。
 
 ## 许可
 

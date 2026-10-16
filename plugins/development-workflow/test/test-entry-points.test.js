@@ -6,17 +6,28 @@ const fs = require('fs');
 const path = require('path');
 
 const pluginRoot = path.resolve(__dirname, '..');
-const npm = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm';
-const npmArgs = (script) => process.platform === 'win32'
-  ? ['/d', '/s', '/c', `npm run ${script}`]
-  : ['run', script];
+const npmCli = process.env.npm_execpath
+  || path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+
+function npmEnvironment(env) {
+  const result = { ...env };
+  const pathKeys = Object.keys(result).filter(key => key.toLowerCase() === 'path');
+  const inherited = pathKeys.length ? result[pathKeys[0]] : '';
+  for (const key of pathKeys) delete result[key];
+  // npm adds every ancestor's node_modules/.bin again on each nested run.
+  // cmd.exe drops PATH once it exceeds its environment limit. This dependency-free
+  // package only needs the original tools and the current Node installation.
+  result.PATH = [...new Set([path.dirname(process.execPath), ...inherited.split(path.delimiter)
+    .filter(entry => entry && !/(?:^|[\\/])node_modules[\\/]\.bin[\\/]?$/i.test(entry))])].join(path.delimiter);
+  return result;
+}
 
 function runNpm(script, env = process.env) {
-  return childProcess.spawnSync(npm, npmArgs(script), {
+  return childProcess.spawnSync(process.execPath, [npmCli, 'run', script], {
     cwd: pluginRoot,
-    env,
+    env: npmEnvironment(env),
     encoding: 'utf8',
-    timeout: 120000,
+    timeout: 300000,
     windowsHide: true,
   });
 }
@@ -51,10 +62,16 @@ test('raw Windows platform entry point preserves the lifecycle guard', () => {
   const env = { ...process.env };
   delete env.DW_PLATFORM_SANDBOX_ROOT;
   delete env.DW_PLATFORM_NATIVE_RUN_ID;
+  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'PATH';
+  env[pathKey] += path.delimiter + Array.from({ length: 300 }, (_, index) =>
+    path.join(pluginRoot, `nested-${index}`, 'node_modules', '.bin')).join(path.delimiter);
+  assert(env[pathKey].length > 8191, 'fixture must reproduce nested npm PATH growth');
   const result = runNpm('test:platform:windows', env);
   assert.strictEqual(result.error, undefined, result.error && result.error.message);
   assert.strictEqual(result.status, 1, result.stderr || result.stdout);
   assert.match(result.stderr, /LIFECYCLE_NOT_RUN:windows/);
+  assert.match(result.stdout, /NOT_RUN: DW_PLATFORM_SANDBOX_ROOT is required/);
+  assert.doesNotMatch(result.stderr, /TEST_EXECUTION_ERROR:/);
 });
 
 test('synthetic host evidence data test names its non-live contract in output', () => {

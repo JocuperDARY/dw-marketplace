@@ -207,6 +207,20 @@ function processResourceTrace(entry) { return [
   resourceEvent(entry, 8, 'VERIFY_RECLAIM', 'RECLAIMING', 'RECLAIMED', { postconditions: { identity_result: 'MATCH', liveness_absent: true, owner_verified: true, generation_verified: true } }),
 ]; }
 const processEntry = resourceEntry();
+for (const mutate of [
+  (entry) => { entry.scope = {}; },
+  (entry) => { delete entry.scope.stop_condition; },
+  (entry) => { entry.scope.extra = true; },
+  (entry) => { entry.scope.timeout_seconds = 0; },
+  (entry) => { entry.quota_policy = {}; },
+  (entry) => { entry.cleanup_policy = {}; },
+]) {
+  const malformed = resourceEntry('schema-shape');
+  mutate(malformed);
+  expectStateError(() => api.reduceResourceEvents(
+    [resourceEvent(malformed, 1, 'DECLARE', null, 'DECLARED')], [malformed], {},
+  ), 'RESOURCE_DECLARATION_INVALID');
+}
 const identityOptions = { runId: 'run-A', planRef, validatedPlanRef: planRef, planIndex, authorityIndex, guardIndex, trustedAuthorityResolver, identityIndex: { 'identity-A': clone(exactIdentity) } };
 const resourceSnapshots = api.reduceResourceEvents(processResourceTrace(processEntry), [processEntry], identityOptions);
 assert.strictEqual(resourceSnapshots[0].state, 'RECLAIMED');

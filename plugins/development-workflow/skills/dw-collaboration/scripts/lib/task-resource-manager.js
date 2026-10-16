@@ -517,7 +517,7 @@ function managerCloseResult(status, reason) {
 
 function closePreflightFailure(state, records) {
   // Liveness and topology have manager-wide priority, not per-record priority.
-  if (records.some((record) => record.startAttempt !== undefined
+  if (state.operation.token !== null || records.some((record) => record.startAttempt !== undefined
     || record.observationAttempt !== undefined || record.stopAttempt !== undefined)) {
     return 'COMMAND_OPERATION_IN_PROGRESS';
   }
@@ -1434,6 +1434,9 @@ class TaskResourceManager {
         authorization: input.authorization,
         capabilityEnvelope: envelope,
         commands: new Map(),
+        // Serialize journal operations, not the lifetimes of started commands.
+        // RecoveryStore permits only its current trailing intent to settle.
+        operation: { token: null },
         closeTransaction: {
           admissionClosed: false,
           phase: 'OPEN',
@@ -1472,7 +1475,20 @@ class TaskResourceManager {
     }
   }
 
+  async #runOperation(action) {
+    const state = PRIVATE_STATE.get(this);
+    if (!state || state.operation.token !== null) throw hold();
+    const token = Symbol('TaskResourceManager.operation');
+    state.operation.token = token;
+    try { return await action(); }
+    finally { if (state.operation.token === token) state.operation.token = null; }
+  }
+
   async startCommand(value) {
+    return this.#runOperation(() => this.#startCommand(value));
+  }
+
+  async #startCommand(value) {
     let command;
     let state;
     let record;
@@ -1709,6 +1725,10 @@ class TaskResourceManager {
   }
 
   async observe(resourceId) {
+    return this.#runOperation(() => this.#observe(resourceId));
+  }
+
+  async #observe(resourceId) {
     const state = PRIVATE_STATE.get(this);
     if (!state || state.closeTransaction.admissionClosed || typeof resourceId !== 'string') throw hold();
     let record = null;
@@ -1788,6 +1808,10 @@ class TaskResourceManager {
   }
 
   async stop(resourceId, options) {
+    return this.#runOperation(() => this.#stop(resourceId, options));
+  }
+
+  async #stop(resourceId, options) {
     const state = PRIVATE_STATE.get(this);
     if (!state || state.closeTransaction.admissionClosed || typeof resourceId !== 'string'
       || !PROCESS_TREE_RESOURCE_ID.test(resourceId)) throw hold();
@@ -2120,7 +2144,35 @@ class TaskResourceManager {
     transaction.admissionClosed = true;
     transaction.phase = 'CLOSE_REQUESTED';
     const finish = (reason) => {
-      const status = reason === 'ALL_RESOURCES_RELEASED' ? 'CLOSED' : 'HOLD';
+      let status = reason === 'ALL_RESOURCES_RELEASED' ? 'CLOSED' : 'HOLD';
+      if (state.runtime.store !== null) {
+        state.runtime.phase = status;
+        state.runtime.reason = status === 'CLOSED' ? 'TRACKER_CLOSED_WRITER_RELEASE_PENDING' : reason;
+        state.runtime.trackerClose = status === 'CLOSED' ? 'VERIFIED' : 'PENDING';
+        try {
+          const receipt = runtimePersist(state);
+          const published = runtimeDurableHead(state);
+          if (published === null || published.revision !== receipt.revision
+            || published.content_sha256 !== receipt.contentSha256
+            || !sameCanonicalValue(published.transaction, runtimeBody(state))) throw hold();
+        } catch (_) {
+          // Preserve the writer when the final history cannot be confirmed.
+          // An uncertain disk write is never undone or reported as completion.
+          status = 'HOLD';
+          reason = 'CLOSE_PERSISTENCE_UNVERIFIED';
+        }
+        if (reason !== 'CLOSE_PERSISTENCE_UNVERIFIED') {
+          try {
+            const released = state.runtime.store.close();
+            state.runtime.storeReleased = released !== null && typeof released === 'object'
+              && released.released === true;
+          } catch (_) { state.runtime.storeReleased = false; }
+          if (!state.runtime.storeReleased) {
+            status = 'HOLD';
+            reason = 'RECOVERY_STORE_RELEASE_UNVERIFIED';
+          }
+        }
+      }
       transaction.terminalResult = managerCloseResult(status, reason);
       transaction.phase = status === 'CLOSED' ? 'CLOSED' : 'TERMINAL_HOLD';
       return transaction.terminalResult;
@@ -2222,26 +2274,9 @@ class TaskResourceManager {
       return finish('CLOSE_INTERNAL_HOLD');
     } finally {
       if (transaction.attempt === attempt) transaction.attempt = undefined;
-      state.runtime.phase = transaction.phase;
-      state.runtime.reason = transaction.terminalResult === null ? null : transaction.terminalResult.reason;
-      // The durable head is released through the Store's own lifecycle so the
-      // writer lease is never hand-deleted. Only a terminal close releases it: a
-      // close that settled on CLOSING still has in-flight operations that need the
-      // serialization point. Retained revision files are the product's detailed
-      // state; compacting them is 3-6D, not this unit.
-      if (state.runtime.store !== null && transaction.terminalResult !== null
-        && state.runtime.storeReleased !== true) {
-        try {
-          // F7: the Store reports the real disposition rather than throwing, so the
-          // lease is only recorded as released when it actually was. A retained
-          // lease is never hand-deleted, and it is never claimed as released.
-          const released = state.runtime.store.close();
-          state.runtime.storeReleased = released !== null && typeof released === 'object'
-            && released.released === true;
-        } catch (_) {
-          // An unverifiable lease is retained rather than deleted.
-          state.runtime.storeReleased = false;
-        }
+      if (transaction.terminalResult === null) {
+        state.runtime.phase = 'CLOSING';
+        state.runtime.reason = null;
       }
     }
   }

@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { MANAGED_LANGUAGES, isWithin } = require('./session-rules.js');
+const { MANAGED_LANGUAGES, isWithin, assertNoLinkedAncestors } = require('./session-rules.js');
 
 function migrationId() {
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
@@ -68,6 +68,9 @@ function buildMigrationPlan(home) {
   const claudeRoot = path.join(resolvedHome, '.claude');
   const rulesRoot = path.join(claudeRoot, 'rules');
   const storeRoot = path.join(claudeRoot, 'rules-store');
+  for (const target of [rulesRoot, storeRoot, path.join(claudeRoot, 'rules-archive')]) {
+    assertNoLinkedAncestors(resolvedHome, target);
+  }
   const candidates = [];
   const conflicts = [];
 
@@ -127,6 +130,7 @@ function buildMigrationPlan(home) {
 function assertMigrationBoundary(plan, target) {
   const claudeRoot = path.join(plan.home, '.claude');
   if (!isWithin(claudeRoot, target)) throw new Error(`migration target escaped ~/.claude: ${target}`);
+  assertNoLinkedAncestors(plan.home, target);
 }
 
 function removeMigrationOwnedTree(plan, target, expectedDigest = null) {
@@ -165,19 +169,26 @@ function applyMigration(home, id = migrationId()) {
   try {
     for (const candidate of plan.candidates.filter(item => item.destinationState === 'create')) {
       const stagedDestination = path.join(stagingRoot, candidate.language);
+      assertMigrationBoundary(plan, candidate.source);
+      assertMigrationBoundary(plan, stagedDestination);
       copyTree(candidate.source, stagedDestination);
       const stagedDigest = treeDigest(stagedDestination).digest;
       if (stagedDigest !== candidate.digest) throw new Error(`copy verification failed for ${candidate.language}`);
       staged.push({ ...candidate, stagedDestination });
     }
 
+    assertMigrationBoundary(plan, archiveRoot);
     fs.mkdirSync(archiveRoot, { recursive: true });
     for (const candidate of staged) {
+      assertMigrationBoundary(plan, candidate.destination);
+      assertMigrationBoundary(plan, candidate.stagedDestination);
       fs.mkdirSync(path.dirname(candidate.destination), { recursive: true });
       fs.renameSync(candidate.stagedDestination, candidate.destination);
       createdDestinations.push(candidate);
     }
     for (const candidate of plan.candidates) {
+      assertMigrationBoundary(plan, candidate.source);
+      assertMigrationBoundary(plan, candidate.destination);
       const currentSourceDigest = treeDigest(candidate.source).digest;
       if (currentSourceDigest !== candidate.digest) {
         throw new Error(`source changed after preflight for ${candidate.language}`);
@@ -189,6 +200,7 @@ function applyMigration(home, id = migrationId()) {
         }
       }
       const archived = path.join(archiveRoot, candidate.language);
+      assertMigrationBoundary(plan, archived);
       fs.renameSync(candidate.source, archived);
       applied.push({
         language: candidate.language,
@@ -200,6 +212,7 @@ function applyMigration(home, id = migrationId()) {
     }
 
     const manifestPath = path.join(archiveRoot, 'manifest.json');
+    assertMigrationBoundary(plan, manifestPath);
     const manifest = {
       schemaVersion: 1,
       migrationId: id,
@@ -215,6 +228,8 @@ function applyMigration(home, id = migrationId()) {
   } catch (error) {
     for (const item of [...applied].reverse()) {
       const original = path.join(plan.rulesRoot, item.language);
+      assertMigrationBoundary(plan, item.archived);
+      assertMigrationBoundary(plan, original);
       if (fs.existsSync(item.archived) && !fs.existsSync(original)) fs.renameSync(item.archived, original);
     }
     for (const item of [...createdDestinations].reverse()) {

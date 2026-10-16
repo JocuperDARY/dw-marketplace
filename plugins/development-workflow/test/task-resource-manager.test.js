@@ -778,7 +778,7 @@ test('M2 descriptor and object rejections preserve the universal no-effect bound
     const bad = m2NormalV2Command({ commandId: recovery.commandId });
     const assertUnread = mutate(bad);
     await expectM2NormalRejectWithoutEffects(fixture, manager, bad, recovery, label);
-    if (assertUnread) assertUnread();
+    if (typeof assertUnread === 'function') assertUnread();
   }
 
   const bootstrapCases = [
@@ -807,7 +807,7 @@ test('M2 descriptor and object rejections preserve the universal no-effect bound
     const subject = holderScenario({ noRoot: true, command: { gracefulShutdown: null } });
     const bad = { ...subject.command }; const assertUnread = mutate(bad);
     await expectM2BootstrapRejectWithoutEffects(subject, bad, label);
-    if (assertUnread) assertUnread();
+    if (typeof assertUnread === 'function') assertUnread();
   }
 });
 
@@ -837,7 +837,7 @@ test('M2 non-null contract grammar rejects exact-shape violations before effects
     await expectM2NormalRejectWithoutEffects(fixture, manager, m2NormalV2Command({
       commandId: recovery.commandId, gracefulShutdown: contract,
     }), recovery, `normal contract ${label}`);
-    if (assertUnread) assertUnread();
+    if (typeof assertUnread === 'function') assertUnread();
   }
   for (const [label, handler] of [
     ['ownKeys', { ownKeys() { throw new Error('contract ownKeys trap'); } }],

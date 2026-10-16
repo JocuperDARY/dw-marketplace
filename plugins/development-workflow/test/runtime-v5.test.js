@@ -43,6 +43,7 @@ function runScript(script, input, options = {}) {
       USERPROFILE: home,
       CLAUDE_PLUGIN_ROOT: pluginRoot,
       CLAUDE_PROJECT_DIR: projectDir,
+      GIT_CEILING_DIRECTORIES: options.projectDir ? path.dirname(projectDir) : process.env.GIT_CEILING_DIRECTORIES,
     },
   });
 }
@@ -160,7 +161,7 @@ test('concurrent SessionStart runs are deterministic and read-only', () => {
   const children = Array.from({ length: 8 }, () => childProcess.spawn(node, [path.join(pluginRoot, 'hooks', 'session-start.js')], {
     cwd: project,
     windowsHide: true,
-    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: project },
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: project, GIT_CEILING_DIRECTORIES: path.dirname(project) },
     stdio: ['ignore', 'pipe', 'pipe'],
   }));
   return Promise.all(children.map(child => new Promise((resolve, reject) => {

@@ -20,6 +20,7 @@ let user; // test A creates, test B uses
 // ❌ 不清理状态
 test('creates user', async () => { await db.users.create(...) })
 // ✅ 每个测试独立
+// db 指本次测试的隔离临时数据库；不得对用户或共享数据库执行清空
 beforeEach(async () => { await db.clean() })
 ```
 

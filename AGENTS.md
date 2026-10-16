@@ -29,6 +29,14 @@ Before modifying: identify target sub-skill/hook/rule; update the aligned versio
 - Update relevant plugin.json version
 - Choose checks for the affected behavior. Text-only changes use the existing text, link, and package checks; live harness tests run when that integration changes and an agreed test window is available.
 
+## Marketplace version policy
+
+- Before each independent PR merges into `master`, increment each affected plugin once and record the change. Documentation, tests and fixes use at least PATCH; new functionality uses MINOR; incompatible changes use MAJOR. A mixed change uses its highest applicable level (MAJOR > MINOR > PATCH).
+- Revisions within one PR keep its candidate version. Editing version metadata does not itself trigger another increment; unaffected plugins keep their versions.
+- Keep the affected plugin's package.json, plugin.json, marketplace entry and README release record aligned. Derive test expectations from these files rather than maintaining another literal version in tests.
+- The development-workflow hub's 3.x methodology version is independent of its plugin release version. Preserve historical release notes.
+- Use `npm run check:skills` in the development-workflow plugin to validate metadata, links, route targets, declared package assets and complete-suite registration. This read-only check does not validate real host loading or replace relevant behavior tests.
+
 ## Current project context
 
 - When local `docs/handoff/` records exist, locate the current handoff through its current index or explicit supersession notes, then consult its status, TODO, and future plan. Verify which snapshot is current rather than relying on a fixed date or filename alone. Local recovery records are excluded from publication.

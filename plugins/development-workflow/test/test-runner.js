@@ -43,7 +43,13 @@ function testIdentity(test) {
 }
 
 function runTest(test) {
+  const env = { ...process.env };
+  // Focused historical runs remain available through their direct entry point.
+  // A named suite must exercise its full fixture set in a fresh temporary root.
+  delete env.DW_TASK_RESOURCE_TEST_FOCUS;
+  delete env.DW_TRANSACTION_TEST_ROOT;
   const result = childProcess.spawnSync(test.command, test.args || [], {
+    env,
     encoding: 'utf8',
     timeout: test.timeoutMs || 120000,
     windowsHide: true,
@@ -81,6 +87,7 @@ function main() {
     if (result.status === 'pass' && result.skipped) counts.skip += 1;
     if (lifecycleMarker && result.status === 'pass' && result.output.includes(lifecycleMarker)) lifecycleRan = true;
     console.log(`${result.status.toUpperCase()} - ${test.name}`);
+    if (result.error) console.error(`TEST_EXECUTION_ERROR:${result.error.code || 'UNKNOWN'}`);
     if (result.status === 'pass' && result.skipped) console.log(`SKIP - ${test.name} (inapplicable evidence)`);
     if (result.output) process.stdout.write(result.output);
   }
