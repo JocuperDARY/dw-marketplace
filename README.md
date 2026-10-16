@@ -6,8 +6,10 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.4.2 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 13个 Skill（1个总纲 + 12个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.4.3 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+
+**5.4.3 文字表述拆分**：[dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 集中维护已有的中文说明、结果与证据表达、限制说明和任务命名规范，可单独用于润色说明。总纲、规则和快速参考改为引用它；本次按既有规范的组织调整递增 PATCH。
 
 **5.4.2 流程简化**：普通工作沿用已有授权，复用 Git 历史、相关测试与一次适当审查；覆盖独有未提交内容前保存一次副本。普通协作使用宿主工具，需要持久资源恢复时启用完整资源管理协议。
 
@@ -45,7 +47,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.4.2 版本
+3. 将插件更新到当前的 5.4.3 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 

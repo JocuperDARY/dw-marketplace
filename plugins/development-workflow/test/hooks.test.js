@@ -214,7 +214,7 @@ test('development-workflow package includes check-updates skill assets', () => {
   const commonJsPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js');
 
   assert(packageJson.files.includes('skills/check-updates/'));
-  assert.match(pluginJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
+  assert.match(pluginJson.description, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
   assert.match(hub, /check-updates/);
   assert(fs.existsSync(skillPath), 'expected check-updates skill');
   assert(fs.existsSync(scriptPath), 'expected check-updates compatibility wrapper');
@@ -302,7 +302,7 @@ function parseSkillFrontmatter(content, file) {
 
 test('all skills expose concise trigger-only discovery metadata', () => {
   const skills = readSkillDirectories();
-  assert.strictEqual(skills.length, 13, `expected 13 skills, found ${skills.length}`);
+  assert.strictEqual(skills.length, 14, `expected 14 skills, found ${skills.length}`);
 
   for (const skill of skills) {
     const content = fs.readFileSync(skill.file, 'utf8');
@@ -496,7 +496,7 @@ test('contributor and package manifests expose the real skill and test surface',
     return;
   }
   const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /1 core hub \+ 12 sub-skills/);
+  assert.match(agents, /1 core hub \+ 13 sub-skills/);
 });
 
 test('tooling and wrap-up require owned child processes to be reclaimed', () => {
@@ -810,18 +810,24 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.4.2');
+  assert.strictEqual(packageJson.version, '5.4.3');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
-  assert.match(packageJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
+  assert.match(packageJson.description, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
   const coreSkill = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
-  assert.match(coreSkill, /### 中文说明写法/);
-  assert.match(coreSkill, /先说明完成的事项和当前结果/);
-  assert.match(coreSkill, /具体的动词、条件和结果/);
-  assert.match(coreSkill, /HOLD、FAIL、NOT_RUN、UNVERIFIED/);
-  assert.match(coreSkill, /额度配置保持当前值/);
-  assert.match(coreSkill, /shell 命令、JSON\/schema\/manifest/);
-  assert.match(coreSkill, /方法论版本\*\*:\s*3\.9/);
+  const writingPath = path.join(pluginRoot, 'skills', 'dw-writing', 'SKILL.md');
+  const writing = fs.readFileSync(writingPath, 'utf8');
+  assert.strictEqual(parseSkillFrontmatter(writing, writingPath).name, 'dw-writing');
+  assert(packageJson.files.includes('skills/dw-writing/'), 'writing guidance must ship in the package');
+  for (const [file, target] of [
+    ['skills/development-workflow/SKILL.md', '../dw-writing/SKILL.md'],
+    ['skills/dw-reference/SKILL.md', '../dw-writing/SKILL.md'],
+    ['rules/development-workflow.md', '../skills/dw-writing/SKILL.md'],
+  ]) {
+    const content = fs.readFileSync(path.join(pluginRoot, file), 'utf8');
+    assert(content.includes(`](${target})`), `${file} must link to the standalone writing skill`);
+  }
+  assert.match(coreSkill, /方法论版本\*\*:\s*3\.10/);
   assert.match(coreSkill, /每个独立 PR 在合并进入 `master` 前/);
   assert.match(coreSkill, /版本更新属于这次变更的一部分，版本更新本身不会再次触发递增/);
   assert.match(coreSkill, /MAJOR > MINOR > PATCH/);
@@ -857,11 +863,11 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.4.2');
+  assert.strictEqual(marketplaceEntry.version, '5.4.3');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
-  assert.match(readme, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
+  assert.match(readme, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
 });
 
 test('documentation states evidence boundaries and manager entry points', () => {
