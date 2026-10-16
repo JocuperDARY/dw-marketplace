@@ -1,5 +1,7 @@
 # Runtime adapters
 
+Scope: this reference defines the optional managed protocol and its machine-readable evidence. For ordinary native-tool delegation, use the lightweight procedure in [dw-collaboration](../SKILL.md). Protocol probes and hash-linked attestations apply when that managed protocol is selected.
+
 Treat Claude Code, Codex, Grok Build, or any other host name as a discovery hint only. Select behavior from observed semantic capabilities.
 
 ## Evidence ladder

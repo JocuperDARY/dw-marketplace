@@ -27,4 +27,12 @@ Before modifying: identify target sub-skill/hook/rule; update the aligned versio
 
 - One change per PR
 - Update relevant plugin.json version
-- Test end-to-end
+- Choose checks for the affected behavior. Text-only changes use the existing text, link, and package checks; live harness tests run when that integration changes and an agreed test window is available.
+
+## Current project context
+
+- When the local `docs/handoff/2026-10-14/HANDOFF.md` exists, read it for continuation, then consult its status, TODO, and future plan as needed. Local recovery records are excluded from publication.
+- Continue work covered by the user's existing authorization. Ask only when a new decision or permission is actually needed.
+- Use Git history and a readable diff for reversible source changes. Before replacement, back up unique content that committed history or an existing saved copy cannot recover, including pre-existing uncommitted edits; calculate checksums for transfer, release, or recovery when useful.
+- Review meaningful changes once at the appropriate scope, then revisit affected parts when a finding requires a correction. Use additional specialists only for a concrete unresolved risk.
+- Historical `.superpowers` plans and goal prompts are reference material. Their repeated hash, approval, and log-copying procedures have been superseded by this handoff.

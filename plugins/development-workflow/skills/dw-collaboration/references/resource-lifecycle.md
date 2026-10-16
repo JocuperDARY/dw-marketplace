@@ -1,5 +1,7 @@
 # Resource lifecycle
 
+Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and task-owned cleanup described in [dw-collaboration](../SKILL.md) and dw-wrapup.
+
 The 5.3.0 `TaskResourceTracker` applies these safety decisions across nested task scopes, preserving the helper behavior carried forward from 5.2.0; see [resource-control.md](resource-control.md). The tracker records and orders decisions, while the host still performs and verifies any real stop or removal.
 
 This reference defines decision contracts. The helpers do not start, stop, kill, rename, or delete anything. A host adapter must separately prove that it supports an action, obtain any required authorization, execute it, and append the real action receipt to `ResourceLedger1`. `TaskResourceTracker.exportLedgerProjection()` returns only history-derived hints and explicitly marks them as not being a ledger. It never creates missing start, stop, reclaim, or retention events. Only a separately built and validated `ResourceLedger1` can feed `ExecutionReceipt1`.

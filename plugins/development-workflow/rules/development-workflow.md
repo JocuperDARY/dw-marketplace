@@ -6,12 +6,12 @@
 
 1. **Use auditable edits.** Manual changes use the current runtime's structured mechanism, such as Claude Code `Edit`/`Write` or Codex `apply_patch`. Repository formatters and generators remain valid deterministic tools.
 2. **Protect sensitive data.** Do not print secrets or send project data to an unauthorized external tool.
-3. **Respect authorization.** Do not stage, commit, push, deploy, message, or change external state unless the user requested that action.
+3. **Respect authorization.** Reuse the user's existing authorization for its specified repository, target, and operation. Ask for a decision when a new action exceeds that scope.
 4. **Choose a minimal sufficient tool set.** Discover declared capabilities instead of assuming names. Use CodeGraph first only when `.codegraph/` exists; otherwise use `rg` and focused file reads.
 5. **Require fresh evidence.** A completion claim names the command/check, outcome, and any unverified residual risk.
-6. **Reclaim owned child processes, development servers, and other resources through an observation gate.** Begin with a bounded read-only baseline and current compound identity; a schedule, PID, name, path, age, timeout, low load, no output, historical event, or suspected-hung label grants no stop authority. Use graceful-first recovery, verify exact absence, and compare at least three same-method samples over a 15-second-or-longer post-action window. Normal teardown requires a valid teardown reason or condition. Incident response or persistent repair additionally requires the applicable cause to be confirmed. Missing required ownership, identity, authorization, teardown evidence, applicable cause evidence, or post-action observation is `HOLD`/`UNVERIFIED`.
-7. **Use the canonical collaboration protocol.** When work needs child delegation, interactive messages, a resource ledger, lifecycle recovery, or multi-agent execution evidence, route through [dw-collaboration](../skills/dw-collaboration/SKILL.md). Select topology from freshly observed capabilities, serialize shared writes, and reclaim only exact verified task-owned resources.
-8. **Trace important changes.** When this workflow is active, record complete before/after content with reasons for important files, keep old versions until they are proven valueless, and apply the B6 approval process before critical additions or deletions.
+6. **Reclaim owned child processes and development servers.** For ordinary commands, use the host's completion result and track resources created by this task. Stop only confirmed task-owned resources, prefer normal shutdown, and verify exit. Incident recovery and the executable resource-manager protocol retain their detailed identity and observation requirements; missing required evidence remains `HOLD`/`UNVERIFIED`.
+7. **Choose collaboration by task need.** Use [dw-collaboration](../skills/dw-collaboration/SKILL.md) for ordinary native-tool delegation or optional managed resource tracking. Keep shared writes serial, and use the detailed ledger and schema protocol when persisted lifecycle recovery is actually needed.
+8. **Trace important changes.** When this workflow is active, use Git history and a readable diff for reversible source changes, back up unique content absent from committed history or a saved copy before replacement, including pre-existing uncommitted edits, and select review by actual impact. Reuse existing user authorization; use hashes for release, transfer, or recovery when content integrity matters.
 9. **Make the next step clear.** Frame ordinary advice around what to do and why. For status, handoffs, and review findings, state the scope, completed work, current facts, and evidence-supported conclusions, then what remains uncertain and what comes next. Support a claim that something remains unchanged with the check performed and its coverage. Use explicit restrictions when an applicable authorization, protected-scope, safety/resource, evidence, budget, or confirmed-failure boundary actually limits an action or claim; preserve required prohibitions, stops, HOLD states, and failure findings, and explain the condition for proceeding where relevant.
 
 
@@ -31,7 +31,7 @@ File count informs impact but does not determine risk by itself. An urgent chang
 - **Bug fix:** reproduce -> identify the root cause -> add a failing regression -> fix -> verify.
 - **Feature:** clarify contract -> choose a plan proportional to risk -> test behavior -> implement -> verify.
 - **Performance:** establish a representative local baseline -> profile -> change one bottleneck -> verify equivalence and performance.
-- **Docs/config/Skill:** use a failing structure, link, schema, or static check; do not force unrelated compilation or TDD.
+- **Docs/config/Skill:** reuse relevant structure, link, schema, or static checks; a simple wording edit can use a diff review.
 - **Incident:** reversible containment may precede root-cause work; record containment separately from the permanent fix.
 
 ## Planning Contract
