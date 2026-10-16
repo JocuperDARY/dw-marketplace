@@ -28,7 +28,7 @@ description: Use when 用户要求检查、比较或排查 Claude Code、Codex�
 
 ### 1. 优先运行插件内脚本
 
-运行时逻辑位于无依赖 CommonJS 文件 `scripts/check-updates.js`，兼容入口 `scripts/check-updates.ps1` 只负责把旧参数转给 Node：
+运行时逻辑位于 CommonJS 文件 `scripts/check-updates.js`，只复用插件内的配置清单模块，不需要额外 npm 依赖。兼容入口 `scripts/check-updates.ps1` 只负责把旧参数转给 Node：
 
 ```powershell
 node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js"
@@ -40,7 +40,11 @@ node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js"
 node "./plugins/development-workflow/skills/check-updates/scripts/check-updates.js"
 ```
 
-旧调用仍可使用 PowerShell 兼容入口；`-NoRemote`、`-NoReport`、`-ProjectPath`、`-CommandTimeoutSec` 和 `-ReportDirectory` 会被映射到 CommonJS 参数。默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出。每个外部命令受超时限制，超时按 `WARN` 汇报。脚本只检查，不自动升级或修改配置。
+旧调用仍可使用 PowerShell 兼容入口；`-NoRemote`、`-NoReport`、`-ProjectPath`、`-CommandTimeoutSec` 和 `-ReportDirectory` 会被映射到 CommonJS 参数。默认模式会联网查询 npm registry，并同时读取版本缓存、配置文件、安装目录和本地 CLI 输出；默认报告目录为 `~/.claude/scripts`。报告使用独占创建的唯一文件名。脚本不自动升级或修改配置。
+
+Windows 外部命令由 `scripts/bounded-command-windows.ps1` 管理：通过 `STARTUPINFOEX / PROC_THREAD_ATTRIBUTE_JOB_LIST` 在挂起创建时原子绑定本次私有 Job Object，然后才恢复运行；设置命令超时及输出上限，正常退出和超时都回收仍属于该 Job 的后代，并检查 active process 数为零。私有 Job 的 kill-on-close 语义覆盖后端突然退出的路径。该创建接口要求 Windows 10 / Server 2016 或更新版本；无法建立归属或确认回收时按 `HOLD` 原因记录为 `WARN`，不回退到先创建再分配的路径，也不会按进程名称或 PID 扫描终止。此后端仅服务于环境检查工具，不等于完整 `TaskResourceManager` 宿主适配器。接口支持范围见 [Microsoft UpdateProcThreadAttribute 文档](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)。
+
+当前 POSIX 外部命令的后代回收尚未验证，脚本保留本地文件/配置审计，CLI、pip、npm 外部检查返回明确 `HOLD`，不执行这些命令。这一限制需要对应平台实现和实测后再解除。每个 Windows 外部命令受 `CommandTimeoutSec` 限制，另留有限后端启动/清理时间；不是整次审计的总时间上限。
 ### 2. 受限环境需要本地-only 时加 `-NoRemote`
 
 只有在用户明确要求不联网、当前环境没有网络权限、或正在做离线排障时，才关闭远程检查：
@@ -52,6 +56,14 @@ node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js" --n
 `-CheckRemote` 仍可被旧调用传入，但现在只是兼容参数；远程检查已经是默认行为。
 
 不希望写报告文件时加 `-NoReport`。慢速或不稳定环境可设置 `-CommandTimeoutSec 60`；不要使用无限超时。
+
+只做本地只读审计、避免 registry 查询和报告持久化时，同时使用两个参数：
+
+```powershell
+node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js" --no-remote --no-report
+```
+
+该组合仍可能在 Windows 执行受控的本地版本命令；它不会修改安装/配置或保存审计报告。MCP 名称来自用户、当前项目与已启用插件的受支持配置源，状态仅表示 `configured`，不表示服务已连接、可调用或实际生效。
 
 ### 3. 汇报结果
 
@@ -82,7 +94,7 @@ node "$env:CLAUDE_PLUGIN_ROOT/skills/check-updates/scripts/check-updates.js" --n
 - CodeGraph 是“CLI + MCP + 项目索引”三层检查：CLI 存在不代表当前仓库已建 `.codegraph/`，MCP 注册也不代表索引健康。
 - OpenSpec 是“CLI + 项目目录 + 可选 MCP”三层检查：没有 `openspec/` 目录通常只是当前项目尚未采用 OpenSpec，不应误报为错误。
 - Codex 是独立运行时，不属于 Claude Code 插件体系：必须检查 `codex --version`、`~/.codex/config.toml`、`~/.codex/version.json`、`~/.codex/skills` 和 Codex MCP 配置。
-- 脚本不得输出配置中的 `env`、token、API key 或 auth 文件内容；只能输出组件名、版本、路径存在性和注册状态。
+- 脚本不得输出配置中的 `env`、token、API key 或 auth 文件内容；只能输出组件名、经过格式验证的有限版本号、路径存在性和注册状态。外部命令 stderr/stdout 的其他文本和底层异常消息不进入终端或报告；超时、输出超限、无效日期、执行失败和后端 HOLD 分别保留为受控原因。
 
 ---
 

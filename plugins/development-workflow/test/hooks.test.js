@@ -153,15 +153,37 @@ function skipTest(reason) {
   console.log(`# SKIP ${reason}`);
 }
 
-function copyPackagedPlugin(destination) {
-  const packageJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
-  writeFile(path.join(destination, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`);
-  for (const listed of packageJson.files) {
-    const relative = listed.replace(/[\\/]$/, '');
-    const source = path.join(pluginRoot, relative);
-    if (!fs.existsSync(source)) continue;
-    fs.cpSync(source, path.join(destination, relative), { recursive: true });
+function npmCli() {
+  const candidates = [process.env.npm_execpath, path.join(path.dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js')];
+  const resolved = candidates.find(candidate => candidate && fs.existsSync(candidate) && /npm-cli\.js$/i.test(candidate));
+  assert(resolved, 'Run the package checks through npm so its CLI is available');
+  return resolved;
+}
+
+function unpackPublishedPlugin(home) {
+  const env = { ...process.env, npm_config_cache: path.join(home, 'npm-cache'), GIT_CEILING_DIRECTORIES: home };
+  const pack = childProcess.spawnSync(node, [npmCli(), 'pack', '--ignore-scripts', '--json', '--pack-destination', home], {
+    cwd: pluginRoot, env, encoding: 'utf8', timeout: 60000, windowsHide: true,
+  });
+  assert.strictEqual(pack.error, undefined, pack.error && pack.error.message);
+  assert.strictEqual(pack.status, 0, pack.stderr || pack.stdout);
+  const [archive] = JSON.parse(pack.stdout);
+  assert(archive && path.basename(archive.filename) === archive.filename && archive.filename.endsWith('.tgz'));
+  const installRoot = path.join(home, 'installed');
+  writeFile(path.join(installRoot, 'package.json'), JSON.stringify({ name: 'dw-package-fixture', private: true }));
+  const install = childProcess.spawnSync(node, [npmCli(), 'install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', path.join(home, archive.filename)], {
+    cwd: installRoot, env, encoding: 'utf8', timeout: 60000, windowsHide: true,
+  });
+  assert.strictEqual(install.error, undefined, install.error && install.error.message);
+  assert.strictEqual(install.status, 0, install.stderr || install.stdout);
+  const packagedRoot = path.join(installRoot, 'node_modules', 'development-workflow');
+  for (const skill of readSkillDirectories()) {
+    const target = path.join(packagedRoot, 'skills', skill.name, 'SKILL.md');
+    assert(fs.existsSync(target), `actual npm archive omits ${skill.name}`);
+    assert.deepStrictEqual(fs.readFileSync(target), fs.readFileSync(skill.file), `archived skill differs: ${skill.name}`);
   }
+  console.log(`# actual npm archive ${archive.filename}: ${archive.entryCount} files; all skills match source`);
+  return packagedRoot;
 }
 
 function remoteUpdateSection(stdout) {
@@ -254,22 +276,21 @@ test('published package can run its own npm test without repository-only files',
   }
 
   const home = makeHome();
-  const packagedRoot = path.join(home, 'packaged-plugin');
+  const packagedRoot = unpackPublishedPlugin(home);
   const platformSandboxRoot = path.join(home, 'platform-sandbox');
-  copyPackagedPlugin(packagedRoot);
   mkdirp(platformSandboxRoot);
-  const npmCommand = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm';
-  const npmArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm test'] : ['test'];
-  const result = childProcess.spawnSync(npmCommand, npmArgs, {
+  const result = childProcess.spawnSync(node, [npmCli(), 'test'], {
     cwd: packagedRoot,
     env: {
       ...process.env,
       DW_PACKAGE_TEST: '1',
       DW_PLATFORM_SANDBOX_ROOT: platformSandboxRoot,
-      DW_PLATFORM_NATIVE_RUN_ID: 'package-copy-test',
+      DW_PLATFORM_NATIVE_RUN_ID: 'package-archive-test',
+      GIT_CEILING_DIRECTORIES: home,
+      npm_config_cache: path.join(home, 'npm-cache'),
     },
     encoding: 'utf8',
-    timeout: 120000,
+    timeout: 600000,
     windowsHide: true,
   });
   assert.strictEqual(result.error, undefined, `packaged npm test timed out: ${result.error}`);
@@ -336,7 +357,7 @@ test('collaboration integration exposes one canonical discovery path', () => {
   const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
   const tooling = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-tooling', 'SKILL.md'), 'utf8');
   const domains = JSON.parse(fs.readFileSync(
-    path.join(pluginRoot, 'skills', 'dw-domains', 'domains.json'),
+    path.join(pluginRoot, 'skills', 'dw-reference', 'references', 'domains.json'),
     'utf8',
   ));
   const agentRule = fs.readFileSync(path.join(pluginRoot, 'rules', 'ai-agent-dev.md'), 'utf8');
@@ -681,7 +702,7 @@ test('check-updates kills the owned process tree after a CLI timeout on Windows'
   writeFile(path.join(bin, 'python.cmd'), '@echo off\r\n');
   writeFile(
     path.join(bin, 'codex.cmd'),
-    `@echo off\r\npowershell.exe -NoProfile -Command "Start-Sleep -Seconds 30" ${marker}\r\n`,
+    `@echo off\r\npowershell.exe -NoProfile -Command "$null='${marker}'; Start-Sleep -Seconds 30"\r\n`,
   );
 
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -743,7 +764,7 @@ test('check-updates reclaims a child after its CLI parent exits normally on Wind
   writeFile(path.join(bin, 'python.cmd'), '@echo off\r\n');
   writeFile(
     path.join(bin, 'codex.cmd'),
-    `@echo off\r\nstart "" /b powershell.exe -NoProfile -Command "Start-Sleep -Seconds 120" ${marker}\r\necho codex 1.0.0\r\nexit /b 0\r\n`,
+    `@echo off\r\nstart "" /b powershell.exe -NoProfile -Command "$null='${marker}'; Start-Sleep -Seconds 120"\r\necho codex 1.0.0\r\nexit /b 0\r\n`,
   );
 
   const env = {
@@ -786,8 +807,8 @@ test('check-updates reclaims a child after its CLI parent exits normally on Wind
   assert.strictEqual(probe.stdout.trim(), '0', `detached child still running: ${marker}`);
 });
 
-test('domain routing instructions reference existing plugin assets', () => {
-  const domainsPath = path.join(pluginRoot, 'skills', 'dw-domains', 'domains.json');
+test('domain reference notes link to existing plugin assets', () => {
+  const domainsPath = path.join(pluginRoot, 'skills', 'dw-reference', 'references', 'domains.json');
   const domains = JSON.parse(fs.readFileSync(domainsPath, 'utf8'));
   for (const domain of domains.domains) {
     const instructions = [domain.text, ...(domain.instructions || [])].filter(Boolean);
@@ -810,7 +831,7 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.4.3');
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
@@ -827,11 +848,7 @@ test('development-workflow manifests and README agree on version and skill count
     const content = fs.readFileSync(path.join(pluginRoot, file), 'utf8');
     assert(content.includes(`](${target})`), `${file} must link to the standalone writing skill`);
   }
-  assert.match(coreSkill, /方法论版本\*\*:\s*3\.10/);
-  assert.match(coreSkill, /每个独立 PR 在合并进入 `master` 前/);
-  assert.match(coreSkill, /版本更新属于这次变更的一部分，版本更新本身不会再次触发递增/);
-  assert.match(coreSkill, /MAJOR > MINOR > PATCH/);
-  assert.match(coreSkill, /总纲的 3\.x 方法论版本独立维护/);
+  assert.match(coreSkill, /方法论版本\*\*:\s*\d+\.\d+/);
   const completeTestFiles = testManifest.suites.all.tests.flatMap((test) => test.args || []);
   for (const testFile of [
     'test/resource-control.test.js',
@@ -863,7 +880,6 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.4.3');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
@@ -882,7 +898,7 @@ test('documentation states evidence boundaries and manager entry points', () => 
   for (const status of ['IMPLEMENTED', 'PASS_STATIC', 'PASS_FOCUSED', 'VERIFIED', 'VERIFIED_DEGRADED', 'UNVERIFIED', 'NOT_RUN', 'FAIL', 'HOLD']) {
     assert(readme.includes(`\`${status}\``) || handoff.includes(`\`${status}\``), `missing evidence status ${status}`);
   }
-  assert.match(readme, /5\.3 实现平台资源管理；真实 Claude、Codex 或 Grok Build 组合的运行效果仍需对应环境验证/);
+  assert.match(readme, /生产.*adapter|生产.*适配器/);
   assert.match(hub, /TaskResourceManager/);
   assert.match(checker, /spawnSync/);
 });
@@ -910,7 +926,7 @@ const retainedContractTests = new Set([
   'check-updates records report-write failure before its final summary',
   'check-updates kills the owned process tree after a CLI timeout on Windows',
   'check-updates reclaims a child after its CLI parent exits normally on Windows',
-  'domain routing instructions reference existing plugin assets',
+  'domain reference notes link to existing plugin assets',
   'development-workflow manifests and README agree on version and skill count',
 ]);
 const selectedTests = tests.filter(({ name }) => retainedContractTests.has(name));

@@ -647,9 +647,36 @@ function routeFloor(phaseAxes, policy) {
 
 function selectedEffort(lane, floor) {
   if (lane.request_control_support !== 'supported') return 'unspecified';
-  const preferred = floor === 'light' ? 'low' : floor === 'standard' ? 'medium' : floor === 'assurance' ? 'max' : 'high';
+  const preferred = floor === 'light' ? 'low' : floor === 'standard' ? 'medium' : 'high';
   if (Array.isArray(lane.supported_efforts) && lane.supported_efforts.includes(preferred)) return preferred;
   return 'unspecified';
+}
+
+const AUTOMATIC_MODELS = new Set(['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+function normalizedModelId(value) { return typeof value === 'string' ? value.trim().toLowerCase() : ''; }
+function excludedAutomaticModel(value) {
+  return /^(?:gpt-5\.[56](?:-|$)|gpt-6-sol(?:-|$))/.test(normalizedModelId(value));
+}
+function resolveAutomaticLane(lane, phaseAxes, floor, policy) {
+  if (excludedAutomaticModel(lane.lane_id) || typeof policy.trustedLanePolicyResolver !== 'function') return null;
+  try {
+    const resolved = policy.trustedLanePolicyResolver(createDetachedJsonSnapshot({
+      purpose: 'automatic_model_lane', lane, phaseAxes, now: policy.now,
+    }).snapshot);
+    // The resolver is synchronous. Observe a rejected native Promise without
+    // assimilating an arbitrary thenable, then reject its non-JSON shape below.
+    try { Reflect.apply(Promise.prototype.then, resolved, [() => undefined, () => undefined]); } catch (_) { /* not a native Promise */ }
+    const resolution = createDetachedJsonSnapshot(resolved).snapshot;
+    if (!exactOwnKeys(resolution, ['canonicalModel', 'supportedEfforts'])) return null;
+    const canonicalModel = normalizedModelId(resolution.canonicalModel);
+    if (excludedAutomaticModel(canonicalModel) || !AUTOMATIC_MODELS.has(canonicalModel)
+      || !nonEmptyUniqueStrings(resolution.supportedEfforts)
+      || resolution.supportedEfforts.some((effort) => !PLAN_EFFORTS.includes(effort)
+        || ['unspecified', 'unknown'].includes(effort))) return null;
+    const effort = selectedEffort(lane, floor);
+    if (effort === 'unspecified' || !resolution.supportedEfforts.includes(effort)) return null;
+    return { lane, canonicalModel, effort };
+  } catch (_) { return null; }
 }
 
 function hasValidAssuranceGate(phaseAxes, policy) {
@@ -709,19 +736,21 @@ function selectRouteFromEffectiveCapabilities(availableLanes, phaseAxes, effecti
       && Array.isArray(lane.supported_task_types)
       && lane.supported_task_types.includes(phaseAxes.task_type)
       && lane.latency_class === phaseAxes.latency_cost)
-    .sort((left, right) => CAPABILITY_CLASS_RANK[left.capability_class] - CAPABILITY_CLASS_RANK[right.capability_class] || left.cost_rank - right.cost_rank);
+    .map((lane) => resolveAutomaticLane(lane, phaseAxes, floor, policy))
+    .filter((lane) => lane !== null)
+    .sort((left, right) => CAPABILITY_CLASS_RANK[left.lane.capability_class] - CAPABILITY_CLASS_RANK[right.lane.capability_class] || left.lane.cost_rank - right.lane.cost_rank);
   const candidate = eligible[0];
   if (!candidate) return { status: 'HOLD_ROUTE_UNAVAILABLE', requested_model: requestedModel, requested_effort: requestedEffort, selected_model: 'unspecified', selected_effort: 'unspecified', capability_class: floor, reasons: ['no_fresh_lane_meets_floor'], required_validation: phaseAxes.validation_failure_cost, fallbacks: [] };
   return {
     status: 'SELECTED',
     requested_model: requestedModel,
     requested_effort: requestedEffort,
-    selected_model: candidate.lane_id,
-    selected_effort: selectedEffort(candidate, floor),
-    capability_class: candidate.capability_class,
-    reasons: [`floor_${floor}`, `availability_${candidate.availability_evidence_ref}`],
+    selected_model: candidate.canonicalModel,
+    selected_effort: candidate.effort,
+    capability_class: candidate.lane.capability_class,
+    reasons: [`floor_${floor}`, `availability_${candidate.lane.availability_evidence_ref}`],
     required_validation: phaseAxes.validation_failure_cost,
-    fallbacks: eligible.filter((lane) => lane !== candidate).map((lane) => lane.lane_id),
+    fallbacks: [...new Set(eligible.filter((lane) => lane.canonicalModel !== candidate.canonicalModel).map((lane) => lane.canonicalModel))],
   };
 }
 
@@ -907,6 +936,38 @@ function graphOrders(graph, fromId, targetId) {
   return ((graph.ancestors.get(fromId) || 0n) & targetBit) !== 0n;
 }
 
+function ownershipPathKey(value) {
+  if (!isNonEmptyString(value) || value !== value.trim() || /[\u0000-\u001f*?]/.test(value)) return null;
+  const portable = value.replace(/\\/g, '/');
+  if (portable.split('/').some((part) => part !== '.' && part !== '..' && /[. ]$/.test(part))) return null;
+  const normalized = path.posix.normalize(portable).replace(/\/$/, '');
+  if (!normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../')) return null;
+  // Conservative across hosts: case aliases and slash aliases cannot create a
+  // second parallel owner. Host isolation still has to prove real-path identity.
+  return normalized.toLowerCase();
+}
+
+function ownershipPathsOverlap(left, right) {
+  // Inputs have a trailing separator, so a name prefix is not a path ancestor.
+  return left.startsWith(right) || right.startsWith(left);
+}
+
+function ownershipSetsOverlap(left, right) {
+  // Separator-terminated keys keep descendants beside their ancestor even when
+  // sibling punctuation sorts before '/': ['a-b', 'a/x'] versus ['a'].
+  // Move past the smaller disjoint key, avoiding a path Cartesian product.
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPath = left[leftIndex];
+    const rightPath = right[rightIndex];
+    if (ownershipPathsOverlap(leftPath, rightPath)) return true;
+    if (leftPath < rightPath) leftIndex += 1;
+    else rightIndex += 1;
+  }
+  return false;
+}
+
 function validatePlanExactKeys(value, required, path, result, missingCode) {
   for (const key of required) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) error(result, missingCode, `${path}.${key}`, 'required plan field is missing');
@@ -1053,8 +1114,9 @@ function validateAuthorizedPlan(plan, capabilityMatrix, options, result) {
       authorizationEvidenceIndex: options.authorizationEvidenceIndex,
       allowedSourceEvidenceClasses: gate.allowed_source_evidence_classes,
       trustedAuthorizationResolver: options.trustedAuthorizationResolver,
+      trustedLanePolicyResolver: options.trustedLanePolicyResolver,
     });
-    const lane = options.availableLanes.find((candidate) => candidate && candidate.lane_id === phase.route.selected_model);
+    const lane = options.availableLanes.find((candidate) => candidate && candidate.availability_evidence_ref === phase.route.selection_evidence);
     const exactFallbacks = Array.isArray(expected.fallbacks) && canonicalize(expected.fallbacks) === canonicalize(phase.route.allowed_fallbacks);
     if (expected.status !== 'SELECTED' || !lane || phase.route.requested_model !== expected.requested_model
       || phase.route.requested_effort !== expected.requested_effort || phase.route.selected_model !== expected.selected_model
@@ -1132,7 +1194,7 @@ function validateCollaborationPlanTransaction(plan, artifacts, options = {}) {
       || Object.keys(phase.ownership).length !== 1
       || !Array.isArray(phase.ownership.exclusive_paths)
       || phase.ownership.exclusive_paths.length === 0
-      || phase.ownership.exclusive_paths.some((item) => !isNonEmptyString(item))
+      || phase.ownership.exclusive_paths.some((item) => ownershipPathKey(item) === null)
       || new Set(phase.ownership.exclusive_paths).size !== phase.ownership.exclusive_paths.length) {
       error(result, 'PLAN_OWNERSHIP_INVALID', `${path}.ownership`, 'phase ownership requires unique non-empty exclusive paths');
       ownershipShapeValid = false;
@@ -1141,21 +1203,16 @@ function validateCollaborationPlanTransaction(plan, artifacts, options = {}) {
   }
   const graph = graphShapeValid ? analyzePhaseGraph(phases, result) : null;
   if (graph && ownershipShapeValid) {
-    const phasesByPath = new Map();
+    const pathsByPhase = new Map();
     for (const phase of phases.values()) {
       if (!isPlainObject(phase.ownership) || !Array.isArray(phase.ownership.exclusive_paths)) continue;
-      for (const ownedPath of phase.ownership.exclusive_paths) {
-        const owners = phasesByPath.get(ownedPath) || [];
-        owners.push(phase.phase_id);
-        phasesByPath.set(ownedPath, owners);
-      }
+      pathsByPhase.set(phase.phase_id, [...new Set(phase.ownership.exclusive_paths.map((item) => `${ownershipPathKey(item)}/`))].sort());
     }
-    const reportedPairs = new Set();
-    for (const owners of phasesByPath.values()) for (let leftIndex = 0; leftIndex < owners.length; leftIndex += 1) for (let rightIndex = leftIndex + 1; rightIndex < owners.length; rightIndex += 1) {
-      const leftId = owners[leftIndex]; const rightId = owners[rightIndex];
-      const pairKey = [leftId, rightId].sort().join('\u0000');
-      if (!reportedPairs.has(pairKey) && !graphOrders(graph, leftId, rightId) && !graphOrders(graph, rightId, leftId)) {
-        reportedPairs.add(pairKey);
+    const phaseIds = [...pathsByPhase.keys()];
+    for (let leftIndex = 0; leftIndex < phaseIds.length; leftIndex += 1) for (let rightIndex = leftIndex + 1; rightIndex < phaseIds.length; rightIndex += 1) {
+      const leftId = phaseIds[leftIndex]; const rightId = phaseIds[rightIndex];
+      if (!graphOrders(graph, leftId, rightId) && !graphOrders(graph, rightId, leftId)
+        && ownershipSetsOverlap(pathsByPhase.get(leftId), pathsByPhase.get(rightId))) {
         error(result, 'SHARED_WRITE_CONFLICT', '$.phases', 'parallel phases cannot share exclusive paths');
       }
     }

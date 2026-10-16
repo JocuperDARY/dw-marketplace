@@ -390,7 +390,14 @@ function validateResourceDeclaration(entry, path) {
   if (entry.owner_role === 'child' && entry.sublease_ref === null) fail('CHILD_SUBLEASE_REQUIRED', `${path}.sublease_ref`, 'child resource requires a verified sublease');
   if (entry.owner_role === 'root' && entry.sublease_ref !== null) fail('ROOT_RESOURCE_SUBLEASE_FORBIDDEN', `${path}.sublease_ref`, 'root resource cannot claim a child sublease');
   if (!Number.isSafeInteger(entry.lease_generation) || entry.lease_generation < 1 || entry.state !== 'DECLARED') fail('RESOURCE_DECLARATION_INVALID', path, 'resource declaration generation or initial state is invalid');
-  if (!isPlainObject(entry.scope) || !isPlainObject(entry.quota_policy) || !isPlainObject(entry.cleanup_policy) || !Array.isArray(entry.evidence_refs)) fail('RESOURCE_DECLARATION_INVALID', path, 'resource launch card is incomplete');
+  const scopeKeys = ['purpose', 'cwd_logical_id', 'timeout_seconds', 'temporary_root_logical_id', 'stop_condition'];
+  if (!isPlainObject(entry.scope) || Object.keys(entry.scope).length !== scopeKeys.length
+    || scopeKeys.some((key) => !Object.prototype.hasOwnProperty.call(entry.scope, key))
+    || scopeKeys.filter((key) => key !== 'timeout_seconds').some((key) => !isNonEmptyString(entry.scope[key]))
+    || !Number.isSafeInteger(entry.scope.timeout_seconds) || entry.scope.timeout_seconds < 1
+    || !isPlainObject(entry.quota_policy) || Object.keys(entry.quota_policy).length === 0
+    || !isPlainObject(entry.cleanup_policy) || Object.keys(entry.cleanup_policy).length === 0
+    || !Array.isArray(entry.evidence_refs)) fail('RESOURCE_DECLARATION_INVALID', path, 'resource launch card is incomplete');
   stringArray(entry.evidence_refs, `${path}.evidence_refs`);
 }
 function requirePostconditions(event, names, code = 'RECLAIM_POSTCONDITION_MISSING') {

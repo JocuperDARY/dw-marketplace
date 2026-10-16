@@ -42,9 +42,13 @@ The dependency-free CLI accepts at most 256 artifact paths. Before reading any f
 
 Changing topology does not raise or lower the selected intelligence lane. Model and effort are selected from task/risk/phase needs. Do not upgrade merely because communication failed, and do not claim the requested pair actually ran without host metadata.
 
+Automatic route selection additionally requires a host-owned, non-JSON `trustedLanePolicyResolver`. It receives frozen `{purpose, lane, phaseAxes, now}` data and returns exactly `{canonicalModel, supportedEfforts}` from the current host's real model mapping and supported pairs. Missing, throwing, malformed or rejecting resolution leaves the route unavailable. The executable policy permits `gpt-6-luna`, `gpt-6.1-sol` and `gpt-6-astra`, rejects the GPT-5.5/GPT-5.6 and GPT-6 Sol families after whitespace/case normalization, and also rejects aliases resolving to an excluded family. Every candidate and fallback passes this same boundary. Selection requires an explicit effort supported by both the lane and its host resolution; `unspecified` cannot authorize dispatch. Assurance defaults to `high`; its existing authorization contract still applies. Requested and selected pairs remain planning evidence, never actual runtime metadata. Synthetic fixture resolvers do not establish live model support.
+
 ## Ownership and messages
 
 Root owns plan, acceptance, repository writes, outer resources, and terminal decisions. A child owns only its explicit task-local paths/resources and cannot create descendants unless separately authorized. Shared mutable writes are serial unless isolated by exclusive ownership.
+
+The plan validator conservatively normalizes slash, case and dot-segment path aliases and detects ancestor/descendant overlaps between unordered phases. Literal ownership entries cannot contain wildcard selectors, control characters or Windows trailing-dot/space aliases. Logical resource IDs must map to real exclusive host resources before dispatch. Lexical checks do not prove real-path, symlink or reparse isolation; that remains a host responsibility.
 
 Interactive messages carry blockers, decision evidence, or milestone results; they do not mutate the immutable task packet, authorization, generation, or ownership. Material change creates a new packet or superseding plan generation.
 

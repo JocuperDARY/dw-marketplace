@@ -96,8 +96,9 @@ function technologyLabel(languages) {
     dart: 'Dart',
     csharp: 'C#',
     angular: 'Angular',
+    perl: 'Perl', php: 'PHP', fsharp: 'F#', ruby: 'Ruby', arkts: 'ArkTS', zh: 'Chinese',
   };
-  const values = languages.map(language => display[language] || language)
+  const values = languages.map(language => language === 'common' ? null : display[language] || language)
     .filter(Boolean);
   return values.length ? [...new Set(values)].join(' + ') : 'Unknown';
 }

@@ -1,6 +1,12 @@
 # Resource lifecycle
 
-Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and task-owned cleanup described in [dw-collaboration](../SKILL.md) and dw-wrapup.
+Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and the task record; they do not require the optional managed protocol.
+
+## Ordinary task completion
+
+Before finishing, use the existing task record and tool results to account for the commands, watcher, worker, browser driver, terminal/tool sessions, ports and temporary files created for this task. Request normal shutdown for task-owned background work and confirm the applicable exit, session end and port release. Stop or remove only resources whose current ownership and exact target are established; user-started, shared, external and unknown services remain untouched. A successful signal request is not an exit result.
+
+Remove only task-owned temporary files whose resolved path and identity are safe. Preserve user outputs, recoverable work and diagnostic evidence. A completed command's host exit result is normally sufficient; investigate abnormal liveness or cleanup using the applicable read-only baseline and recovery steps below, selecting signals and observation duration for the actual symptom. Missing identity, exit or causal evidence remains `HOLD` or `UNVERIFIED`. The 15-second post-action comparison rule below is not a universal completion delay.
 
 The 5.3.0 `TaskResourceTracker` applies these safety decisions across nested task scopes, preserving the helper behavior carried forward from 5.2.0; see [resource-control.md](resource-control.md). The tracker records and orders decisions, while the host still performs and verifies any real stop or removal.
 

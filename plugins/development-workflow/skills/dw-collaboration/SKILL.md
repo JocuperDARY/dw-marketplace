@@ -48,6 +48,8 @@ For executable task-resource tracking, repeated-failure loop exit, work levels, 
 
 Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and confirm that the operation is covered by current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
 
+The package supplies the manager, tracker, store and validators, plus synthetic test adapters. It does not ship a production Windows, Linux, Claude Code, Codex or Grok OS adapter. Real observation, bounded action timeout, graceful shutdown, exact termination, path isolation and absence verification require a separately implemented trusted host adapter. A manager test passing does not prove those host capabilities.
+
 Before a managed `COMPLETE`, require root acceptance, review, independent verification for every required phase as defined by the executable protocol, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Continue later Git or external operations under the user's existing authorization; completing a managed task adds no permissions.
 
 Read only the reference needed:

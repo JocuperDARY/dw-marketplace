@@ -32,6 +32,7 @@ const EXTENSION_LANGUAGES = new Map([
   ['.php', 'php'],
   ['.fs', 'fsharp'], ['.fsx', 'fsharp'],
   ['.rb', 'ruby'],
+  ['.ets', 'arkts'],
 ]);
 
 const IGNORED_DIRECTORIES = new Set([
@@ -44,6 +45,24 @@ const IGNORED_DIRECTORIES = new Set([
 function isWithin(root, candidate) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// Check the supplied home and every existing component below it. This rejects
+// junctions as well as symbolic links; it is a preflight/recheck, not an atomic
+// defense against another process replacing a directory between filesystem calls.
+function assertNoLinkedAncestors(root, candidate) {
+  const boundary = path.resolve(root);
+  const target = path.resolve(candidate);
+  if (!isWithin(boundary, target)) throw new Error(`path escaped boundary: ${target}`);
+  const relative = path.relative(boundary, target);
+  let current = boundary;
+  for (const part of ['', ...relative.split(path.sep).filter(Boolean)]) {
+    if (part) current = path.join(current, part);
+    let stat;
+    try { stat = fs.lstatSync(current); }
+    catch (error) { if (error.code === 'ENOENT') break; throw error; }
+    if (stat.isSymbolicLink()) throw new Error(`symbolic link or junction is not allowed: ${current}`);
+  }
 }
 
 function readPackageLanguages(projectDir, detected) {
@@ -104,6 +123,8 @@ function detectProjectLanguages(projectDir) {
 
       const language = EXTENSION_LANGUAGES.get(path.extname(entry.name).toLowerCase());
       if (language) detected.add(language);
+      if (/\.(?:tsx|jsx)$/i.test(entry.name)) { detected.add('react'); detected.add('web'); }
+      if (/\.html?$/i.test(entry.name)) detected.add('web');
       if (/^(index\.html|vite\.config\.|next\.config\.|nuxt\.config\.|astro\.config\.|svelte\.config\.)/i.test(entry.name)) {
         detected.add('web');
       }
@@ -143,6 +164,8 @@ function selectRuleFiles(home, languages) {
   const claudeRoot = path.join(home, '.claude');
   const activeRoot = path.join(claudeRoot, 'rules');
   const storeRoot = path.join(claudeRoot, 'rules-store');
+  assertNoLinkedAncestors(home, activeRoot);
+  assertNoLinkedAncestors(home, storeRoot);
   const selected = [];
 
   for (const language of languages) {
@@ -150,7 +173,6 @@ function selectRuleFiles(home, languages) {
       const languageRoot = path.join(sourceRoot, language);
       if (!isWithin(sourceRoot, languageRoot) || !fs.existsSync(languageRoot)) continue;
       const files = collectMarkdownFiles(languageRoot, languageRoot);
-      if (!files.length) continue;
       for (const file of files) {
         selected.push({
           language,
@@ -198,8 +220,7 @@ function buildRulesContext(options) {
     '',
   ].join('\n');
   chunks.push(header);
-  let usedBytes = Buffer.byteLength(header, 'utf8');
-
+  const pending = [];
   for (const candidate of candidates) {
     const label = `${candidate.language}/${candidate.relative}`;
     if (candidate.autoLoaded) {
@@ -213,34 +234,42 @@ function buildRulesContext(options) {
       deferred.push(`${candidate.language}/${candidate.relative} (unreadable)`);
       continue;
     }
-    const prefix = `--- rule: ${label} [${candidate.source}] ---\n`;
-    const suffix = '\n\n';
-    const required = Buffer.byteLength(prefix + content + suffix, 'utf8');
-    const reserve = 512;
-    if (usedBytes + required + reserve <= maxBytes) {
-      chunks.push(prefix, content, suffix);
-      usedBytes += required;
-      loaded.push(label);
-    } else {
-      deferred.push(`${label} (budget)`);
-    }
+    const text = `--- rule: ${label} [${candidate.source}] ---\n${content}\n\n`;
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) { deferred.push(`${label} (budget)`); continue; }
+    pending.push({ label, text });
   }
 
-  const footerLines = [
-    `Loaded rules: ${loaded.length}`,
-    `Active rules already auto-loaded: ${autoLoaded.length}`,
-    `Deferred rules: ${deferred.length}`,
-  ];
-  if (autoLoaded.length) footerLines.push(...autoLoaded.slice(0, 20).map(item => `- active: ${item}`));
-  if (deferred.length) {
-    footerLines.push('Deferred due to budget or read safety:');
-    footerLines.push(...deferred.slice(0, 20).map(item => `- ${item}`));
+  function footer(selected, omitted) {
+    const summary = [
+      `Loaded rules: ${selected.length}`,
+      `Active rules already auto-loaded: ${autoLoaded.length}`,
+      `Deferred rules: ${omitted.length}`,
+    ];
+    const details = [
+      ...autoLoaded.slice(0, 20).map(item => `- active: ${item}`),
+      ...(omitted.length ? ['Deferred due to budget or read safety:', ...omitted.slice(0, 20).map(item => `- ${item}`)] : []),
+    ];
+    const cap = Math.min(8192, Math.floor(maxBytes / 3));
+    const render = () => `${[...summary, ...details, '</dw-selected-rules>'].join('\n')}\n`;
+    while (details.length && Buffer.byteLength(render(), 'utf8') > cap) details.pop();
+    return render();
   }
-  footerLines.push('</dw-selected-rules>');
-  const footer = `${footerLines.join('\n')}\n`;
-  const current = chunks.join('');
-  const available = maxBytes - Buffer.byteLength(footer, 'utf8');
-  const context = `${takeUtf8(current, available)}${footer}`;
+
+  // Plan complete files with the actual footer cost. A loaded rule is never
+  // shortened merely to make room for status metadata.
+  const omitted = pending.map(item => `${item.label} (budget)`);
+  for (let index = 0; index < pending.length; index += 1) {
+    const item = pending[index];
+    const nextOmitted = [...deferred, ...omitted.filter((value, position) => value && position !== index)];
+    const proposed = chunks.join('') + item.text + footer([...loaded, item.label], nextOmitted);
+    if (Buffer.byteLength(proposed, 'utf8') <= maxBytes) {
+      chunks.push(item.text);
+      loaded.push(item.label);
+      omitted[index] = null;
+    }
+  }
+  deferred.push(...omitted.filter(Boolean));
+  const context = chunks.join('') + footer(loaded, deferred);
 
   return {
     context,
@@ -255,6 +284,7 @@ function buildRulesContext(options) {
 
 module.exports = {
   DEFAULT_RULE_BUDGET,
+  assertNoLinkedAncestors,
   MANAGED_LANGUAGES,
   buildRulesContext,
   collectMarkdownFiles,

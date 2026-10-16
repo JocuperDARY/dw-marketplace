@@ -42,7 +42,8 @@ function scanSkills(root, source, output, depth = 0) {
     return;
   }
   for (const entry of entries) {
-    if (output.length >= MAX_SKILLS || entry.isSymbolicLink()) break;
+    if (output.length >= MAX_SKILLS) break;
+    if (entry.isSymbolicLink()) continue;
     const absolute = path.join(root, entry.name);
     if (entry.isFile() && entry.name === 'SKILL.md') {
       const skill = parseSkill(absolute, source);
@@ -79,21 +80,28 @@ function pluginInstallPaths(home, pluginIds) {
   return output;
 }
 
-function addMcpNames(target, value) {
-  if (!value || typeof value !== 'object') return;
-  for (const name of Object.keys(value)) target.add(name);
+function discoverMcpConfigurations(home, installs, projectDir = process.cwd()) {
+  const configurations = [];
+  function add(value, source, scope) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    for (const name of Object.keys(value)) configurations.push({ name, source, scope, status: 'configured' });
+  }
+  const claude = readJson(path.join(home, '.claude.json')) || {};
+  add(claude.mcpServers, 'claude-user-config', 'user');
+  const requested = path.resolve(projectDir);
+  const pathIdentity = directory => process.platform === 'win32' ? path.resolve(directory).toLowerCase() : path.resolve(directory);
+  for (const [directory, project] of Object.entries(claude.projects || {})) {
+    if (pathIdentity(directory) === pathIdentity(requested)) add(project && project.mcpServers, 'claude-project-config', requested);
+  }
+  for (const [pluginId, installPath] of installs) {
+    const config = readJson(path.join(installPath, '.mcp.json'));
+    if (config) add(config.mcpServers || config, `plugin:${pluginId}`, 'enabled-plugin');
+  }
+  return configurations.sort((left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source));
 }
 
-function discoverMcpServers(home, installs) {
-  const names = new Set();
-  const claude = readJson(path.join(home, '.claude.json')) || {};
-  addMcpNames(names, claude.mcpServers);
-  for (const project of Object.values(claude.projects || {})) addMcpNames(names, project && project.mcpServers);
-  for (const installPath of installs.values()) {
-    const config = readJson(path.join(installPath, '.mcp.json'));
-    if (config) addMcpNames(names, config.mcpServers || config);
-  }
-  return [...names].sort();
+function discoverMcpServers(home, installs, projectDir = process.cwd()) {
+  return [...new Set(discoverMcpConfigurations(home, installs, projectDir).map(item => item.name))].sort();
 }
 
 function collectInventory(options = {}) {
@@ -101,6 +109,8 @@ function collectInventory(options = {}) {
   const pluginRoot = path.resolve(options.pluginRoot || process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..'));
   const plugins = enabledPluginIds(home);
   const installs = pluginInstallPaths(home, plugins);
+  const projectDir = path.resolve(options.projectDir || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const configuredMcpServers = discoverMcpConfigurations(home, installs, projectDir);
   const skills = [];
   scanSkills(path.join(home, '.claude', 'skills'), 'user', skills);
   scanSkills(path.join(pluginRoot, 'skills'), 'development-workflow', skills);
@@ -116,8 +126,12 @@ function collectInventory(options = {}) {
   return {
     generatedAt: new Date().toISOString(),
     sourcePolicy: 'discovered-only',
+    evidenceKind: 'configured-filesystem-inventory',
+    runtimeVerified: false,
+    projectDir,
     enabledPlugins: plugins,
-    mcpServers: discoverMcpServers(home, installs),
+    mcpServers: [...new Set(configuredMcpServers.map(item => item.name))].sort(),
+    configuredMcpServers,
     skills: [...deduplicated.values()].sort((a, b) => a.name.localeCompare(b.name)),
     limits: { maxSkills: MAX_SKILLS, maxDepth: MAX_SKILL_DEPTH },
   };
@@ -128,12 +142,12 @@ function formatMarkdown(inventory) {
     '# DW capability inventory',
     '',
     `Generated: ${inventory.generatedAt}`,
-    `Policy: ${inventory.sourcePolicy}; no speculative tools are included.`,
+    `Policy: ${inventory.sourcePolicy}; configured files only. Current-session availability and runtime behavior are unverified.`,
     '',
     `## Enabled plugins (${inventory.enabledPlugins.length})`,
     ...inventory.enabledPlugins.map(name => `- ${name}`),
     '',
-    `## MCP servers (${inventory.mcpServers.length})`,
+    `## Configured MCP servers (${inventory.mcpServers.length}; not live-verified)`,
     ...inventory.mcpServers.map(name => `- ${name}`),
     '',
     `## Skills (${inventory.skills.length})`,
@@ -160,6 +174,7 @@ if (require.main === module) main();
 
 module.exports = {
   collectInventory,
+  discoverMcpConfigurations,
   discoverMcpServers,
   enabledPluginIds,
   formatMarkdown,

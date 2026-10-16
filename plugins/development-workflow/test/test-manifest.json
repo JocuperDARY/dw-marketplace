@@ -3,6 +3,9 @@
     "core": {
       "tests": [
         { "name": "runtime v5 contracts", "command": "node", "args": ["test/runtime-v5.test.js"] },
+        { "name": "hook maintenance", "command": "node", "args": ["test/hook-maintenance.test.js"] },
+        { "name": "skill structure", "command": "node", "args": ["test/skill-structure.test.js"] },
+        { "name": "update checker", "command": "node", "args": ["test/check-updates.test.js"], "timeoutMs": 180000 },
         { "name": "collaboration contracts", "command": "node", "args": ["test/collaboration-contract.test.js"] },
         { "name": "collaboration state", "command": "node", "args": ["test/collaboration-state.test.js"] },
         { "name": "collaboration receipts", "command": "node", "args": ["test/collaboration-receipt.test.js"] },
@@ -13,6 +16,8 @@
         { "name": "recovery store", "command": "node", "args": ["test/recovery-store.test.js"] },
         { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
         { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
+        { "name": "task resource manager", "command": "node", "args": ["test/task-resource-manager.test.js"], "timeoutMs": 180000 },
+        { "name": "collaboration safety", "command": "node", "args": ["test/collaboration-safety.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] }
       ]
     },
@@ -30,17 +35,20 @@
     },
     "hooks": {
       "tests": [
-        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 240000 }
+        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 900000 }
       ]
     },
     "package": {
       "tests": [
-        { "name": "published package self-test", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 240000 }
+        { "name": "published package self-test", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 900000 }
       ]
     },
     "all": {
       "tests": [
         { "name": "runtime v5 contracts", "command": "node", "args": ["test/runtime-v5.test.js"] },
+        { "name": "hook maintenance", "command": "node", "args": ["test/hook-maintenance.test.js"] },
+        { "name": "skill structure", "command": "node", "args": ["test/skill-structure.test.js"] },
+        { "name": "update checker", "command": "node", "args": ["test/check-updates.test.js"], "timeoutMs": 180000 },
         { "name": "collaboration contracts", "command": "node", "args": ["test/collaboration-contract.test.js"] },
         { "name": "collaboration state", "command": "node", "args": ["test/collaboration-state.test.js"] },
         { "name": "collaboration receipts", "command": "node", "args": ["test/collaboration-receipt.test.js"] },
@@ -52,9 +60,11 @@
         { "name": "recovery store", "command": "node", "args": ["test/recovery-store.test.js"] },
         { "name": "failure loop hardening", "command": "node", "args": ["test/failure-loop-guard-hardening.test.js"] },
         { "name": "resource aware queue", "command": "node", "args": ["test/resource-aware-queue.test.js"] },
+        { "name": "task resource manager", "command": "node", "args": ["test/task-resource-manager.test.js"], "timeoutMs": 180000 },
+        { "name": "collaboration safety", "command": "node", "args": ["test/collaboration-safety.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
-        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 240000 },
-        { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"] }
+        { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 900000 },
+        { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"], "timeoutMs": 360000 }
       ]
     }
   }

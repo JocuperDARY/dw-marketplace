@@ -1110,7 +1110,7 @@ test('documents resource control and loop exit in plain operational language', (
     );
     const windowsSignals = lineContaining(baseline, 'On Windows,');
     const nonTaskOwnedDefaults = lineContaining(baseline, 'Third-party,');
-    const postActionComparison = lineContaining(ownedCleanup, '普通测试根据');
+    const ordinaryCompletion = markdownSection(documents.lifecycle, 'Ordinary task completion');
 
     return [
       ['read-only host baseline precedes classification', hasAll(baseline, [
@@ -1240,11 +1240,12 @@ test('documents resource control and loop exit in plain operational language', (
         /never perform concurrent remediation/i,
       ])],
       ['wrap-up scales observation to the actual task', (
-        hasAll(ownedCleanup, [/有界、只读的当前基线/])
-        && hasAll(postActionComparison, [
-          /普通测试根据工具退出结果/,
-          /本任务资源记录/,
-          /故障诊断按具体症状选择观测指标和必要时长/,
+        hasAll(ownedCleanup, [/\.\.\/dw-collaboration\/references\/resource-lifecycle\.md/])
+        && hasAll(ordinaryCompletion, [
+          /existing task record and tool results/i,
+          /completed command's host exit result is normally sufficient/i,
+          /selecting signals and observation duration for the actual symptom/i,
+          /not a universal completion delay/i,
         ])
       )],
       ['the always-loaded rule preserves owned-resource cleanup', hasAll(documents.workflowRule, [
@@ -1331,11 +1332,11 @@ test('documents resource control and loop exit in plain operational language', (
     },
     {
       name: 'incident-specific observation guidance',
-      document: 'wrapup',
+      document: 'lifecycle',
       text: mutate(
-        wrapup,
-        '故障诊断按具体症状选择观测指标和必要时长',
-        '按固定时长观察所有普通任务',
+        lifecycle,
+        'selecting signals and observation duration for the actual symptom',
+        'waiting a fixed interval for every task',
       ),
       requirement: 'wrap-up scales observation to the actual task',
     },

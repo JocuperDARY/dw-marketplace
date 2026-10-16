@@ -38,7 +38,7 @@ description: Use when 有可复现的性能、吞吐、延迟、内存、I/O 或
    ↓ 否
 6. 是否有不必要的 IO？           → 是 → IO 优化（批量读写/延迟加载/条件跳过）
    ↓ 否
-7. 是否可以并发/并行？           → 是 → 并发并行优化（CPU密集→多进程, IO密集→线程）
+7. 是否可以并发/并行？           → 是 → 按 GIL、IPC、配额和依赖线程池实测选择模型（见下文）
    ↓ 否
 8. 是否可以 GPU 加速？          → 是 → GPU 优化（合并内核启动/减少传输）
    ↓ 否
@@ -61,9 +61,12 @@ description: Use when 有可复现的性能、吞吐、延迟、内存、I/O 或
 # 优化前：每帧实时计算指数衰减
 decay = 0.75 ** max(0, stationary_count - 5)
 
-# 优化后：预计算为模块级常量（查找表）
+# 优化后：仅缓存有界整数输入；其他输入沿用原表达式
 DECAY_LUT = np.array([0.75 ** max(0, i - 5) for i in range(MAX_STATIONARY + 1)])
-decay = DECAY_LUT[stationary_count]
+if isinstance(stationary_count, int) and 0 <= stationary_count <= MAX_STATIONARY:
+    decay = DECAY_LUT[stationary_count]
+else:
+    decay = 0.75 ** max(0, stationary_count - 5)
 ```
 
 **检查清单**：
@@ -142,7 +145,8 @@ for fid in frames:
     with open(output_csv, 'a') as f:
         f.write(f"{fid},{result}\n")
 
-# 优化后：保持 append 契约，只减少 open/flush 次数；按需分块 checkpoint
+# 优化后：减少 open/flush 次数；仅适用于允许该缓冲丢失窗口的任务
+# 有 checkpoint/刷盘要求时，先按原恢复契约实现对应动作
 with open(output_csv, 'a', buffering=1024 * 1024) as f:
     for fid in frames:
         result = compute(fid)
@@ -152,7 +156,7 @@ with open(output_csv, 'a', buffering=1024 * 1024) as f:
 **检查清单**：
 - [ ] 是否存在频繁的小文件读写，可否合并？
 - [ ] 是否存在重复读取同一文件的可缓存内容？
-- [ ] 诊断数据的写入路径是否在性能关键路径上？（诊断关掉后应零开销）
+- [ ] 诊断数据的写入路径是否在性能关键路径上？关闭后的开销是否符合预先定义并实测的预算？
 - [ ] 是否有在循环内 `with open(...)` 的模式？
 - [ ] 格式变更是否保持追加、崩溃恢复、兼容性和内存契约？不可信输入禁止使用 pickle
 - [ ] 是否有全局条件开关可以跳过不必要的 IO？
@@ -186,12 +190,12 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=measured_workers) as poo
 **典型场景**：大规模矩阵运算、批量 LK 光流（CUDA 后端）、YOLO 推理、批量 IoU 矩阵计算。
 
 ```python
-# 优化前：多次调用 GPU（3 次内核启动）
+# 优化前：3 次 GPU API 调用；实际内核数量由 profiler 确认
 main_flow = lk_cuda(main_kpts)
 anchor_flow = lk_cuda(anchor_kpts)
 buffer_flow = lk_cuda(buffer_kpts)
 
-# 优化后：单次 GPU 调用后拆分（1 次内核启动）
+# 优化后：1 次 GPU API 调用后拆分；先确认批量处理与原调用语义等价
 all_kpts = np.concatenate([main_kpts, anchor_kpts, buffer_kpts])
 all_flow = lk_cuda(all_kpts)
 main_flow, anchor_flow, buffer_flow = split(all_flow, splits)
@@ -239,9 +243,23 @@ main_flow, anchor_flow, buffer_flow = split(all_flow, splits)
 
 ---
 
+## 优化反模式
+
+| 反模式 | 影响 | 处理方式 |
+|--------|------|----------|
+| 无基线或 profiling 就选优化目标 | 不能证明该路径影响目标指标 | 用代表性负载确认瓶颈与端到端贡献 |
+| 过早优化非热点 | 增加实现成本，核心目标仍未达成 | 先满足正确性，再按瓶颈证据投入 |
+| 省略适用的功能等价检查 | 局部加速可能改变输出或集成行为 | 按受影响边界选择单元、集成和回归证据 |
+| 收窄输入范围或改变接口/返回类型 | 优化不能直接替换原实现 | 保留原契约；确需改变时按独立行为变更规划 |
+| 以少量收益引入大量复杂代码 | 维护与迁移成本超过可复现收益 | 同时评估实测收益、可读性与恢复成本 |
+| 删除必要说明或保留过时注释 | 后续维护者误解前提与算法 | 保留设计理由，更新与实现不一致的注释 |
+| 只测单一规模 | 固定开销、扩展性和边界退化未覆盖 | 选择代表实际风险的规模、边界与冷/热条件 |
+
+---
+
 ## 相关子Skill
 
-- [dw-implementation](../dw-implementation/SKILL.md) — 实现阶段（含优化相关反模式）
+- [dw-implementation](../dw-implementation/SKILL.md) — 实现纪律、数据完整性和适用测试检查
 - [dw-verification](../dw-verification/SKILL.md) — 功能等价验证 L1-L3
 - [dw-debugging](../dw-debugging/SKILL.md) — 性能异常时的诊断方法
 - [development-workflow](../development-workflow/SKILL.md) — 返回总纲
