@@ -13,7 +13,7 @@ plugins/
 ## Working on development-workflow
 
 - hooks/ — Session lifecycle (SessionStart, UserPromptSubmit)
-- skills/ — 1 core hub + 12 sub-skills
+- skills/ — 1 core hub + 13 sub-skills
 - rules/ — Domain knowledge (coding style, security, testing)
 
 Before modifying: identify target sub-skill/hook/rule; update the aligned version surfaces in `plugins/development-workflow/.claude-plugin/plugin.json`, `plugins/development-workflow/package.json`, `.claude-plugin/marketplace.json`, and the root README when the package release version changes.
