@@ -1110,7 +1110,7 @@ test('documents resource control and loop exit in plain operational language', (
     );
     const windowsSignals = lineContaining(baseline, 'On Windows,');
     const nonTaskOwnedDefaults = lineContaining(baseline, 'Third-party,');
-    const postActionComparison = lineContaining(ownedCleanup, '每次处置后');
+    const postActionComparison = lineContaining(ownedCleanup, '普通测试根据');
 
     return [
       ['read-only host baseline precedes classification', hasAll(baseline, [
@@ -1239,32 +1239,24 @@ test('documents resource control and loop exit in plain operational language', (
         /skip, coalesce, or `HOLD` the later run/i,
         /never perform concurrent remediation/i,
       ])],
-      ['wrap-up uses read-only triage and a 15-second comparison', (
+      ['wrap-up scales observation to the actual task', (
         hasAll(ownedCleanup, [/有界、只读的当前基线/])
         && hasAll(postActionComparison, [
-          /至少 15 秒/,
-          /Git/,
-          /CPU/,
-          /WAL/,
-          /界面响应/,
-          /单独验证资源不存在/,
+          /普通测试根据工具退出结果/,
+          /本任务资源记录/,
+          /故障诊断按具体症状选择观测指标和必要时长/,
         ])
       )],
-      ['the always-loaded rule preserves stop authority and observation gates', hasAll(documents.workflowRule, [
-        /bounded read-only baseline/i,
-        /current compound identity/i,
-        /grants no stop authority/i,
-        /graceful-first recovery/i,
-        /verify exact absence/i,
-        /at least three same-method samples/i,
-        /15-second-or-longer post-action window/i,
+      ['the always-loaded rule preserves owned-resource cleanup', hasAll(documents.workflowRule, [
+        /Stop only confirmed task-owned resources/i,
+        /prefer normal shutdown/i,
+        /verify exit/i,
         /`HOLD`\/`UNVERIFIED`/i,
       ])],
-      ['the always-loaded rule separates teardown from incident cause', hasAll(documents.workflowRule, [
-        /Normal teardown requires a valid teardown reason or condition/i,
-        /Incident response or persistent repair additionally requires the applicable cause to be confirmed/i,
-        /applicable cause evidence/i,
-        /post-action observation is `HOLD`\/`UNVERIFIED`/i,
+      ['the always-loaded rule retains the managed recovery protocol', hasAll(documents.workflowRule, [
+        /ordinary commands.*host's completion result/i,
+        /Incident recovery and the executable resource-manager protocol retain their detailed identity and observation requirements/i,
+        /missing required evidence remains/i,
       ])],
     ].filter(([, present]) => !present).map(([requirement]) => requirement);
   };
@@ -1295,9 +1287,9 @@ test('documents resource control and loop exit in plain operational language', (
       document: 'workflowRule',
       text: mutate(
         workflowRule,
-        'a schedule, PID, name, path, age, timeout, low load, no output, historical event, or suspected-hung label grants no stop authority. ',
+        'Stop only confirmed task-owned resources, ',
       ),
-      requirement: 'the always-loaded rule preserves stop authority and observation gates',
+      requirement: 'the always-loaded rule preserves owned-resource cleanup',
     },
     {
       name: 'external candidates cannot enter the task ledger',
@@ -1338,14 +1330,14 @@ test('documents resource control and loop exit in plain operational language', (
       requirement: 'non-task-owned processes remain observation-only or hold',
     },
     {
-      name: 'post-action CPU comparison metric',
+      name: 'incident-specific observation guidance',
       document: 'wrapup',
       text: mutate(
         wrapup,
-        '进程、Git、CPU、I/O、GPU、WAL 和界面响应',
-        '进程、Git、I/O、GPU、WAL 和界面响应',
+        '故障诊断按具体症状选择观测指标和必要时长',
+        '按固定时长观察所有普通任务',
       ),
-      requirement: 'wrap-up uses read-only triage and a 15-second comparison',
+      requirement: 'wrap-up scales observation to the actual task',
     },
     {
       name: 'scheduled audit exact level-two heading',

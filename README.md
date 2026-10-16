@@ -6,8 +6,14 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.4.1 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 13个 Skill（1个总纲 + 12个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.4.2 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 13个 Skill（1个总纲 + 12个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+
+**5.4.2 流程简化**：普通工作沿用已有授权，复用 Git 历史、相关测试与一次适当审查；覆盖独有未提交内容前保存一次副本。普通协作使用宿主工具，需要持久资源恢复时启用完整资源管理协议。
+
+持久交接按现状、待办、未来规划和接手说明分工；本地恢复资料单独归档。
+
+本次验证覆盖本地包、文本与隔离辅助脚本检查。真实 Claude Code / Codex、用户配置安装、原生 Linux 和 Grok Build 验证保持 `DEFERRED_NOT_RUN`，等待可用验证窗口。
 
 ## 安装
 
@@ -39,7 +45,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.4.1 版本
+3. 将插件更新到当前的 5.4.2 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -51,7 +57,7 @@ claude mcp add gpt-bridge -- node \
 
 5.4.1 作为 5.4.0 合并后的补丁版本，补充版本迭代规则：每个独立 PR 在合并进入 master 前，为受影响插件选定一次版本；版本更新属于这次变更的一部分。文档、测试和小修正至少递增 PATCH，功能新增递增 MINOR，不兼容变更递增 MAJOR；同一 PR 含多种类型时取最高级别，多个插件分别判定；只更新一个插件时，其他插件沿用原版本。插件发布元数据、README、测试断言和本次变更记录中的版本号保持一致，总纲的 3.x 方法论版本独立维护。
 
-总纲新增铁律 B6《重要文件增删治理》：重要文件（影响后续方向的节点文件、框架核心代码与核心逻辑、技能/规则/契约正文；无耐久备份者为风险加重项）的增删必须完整留痕（含被删内容原文与耐久落点）、保留旧版本；关键修改需经 2–4 个子 agent 交叉审议一致通过，或按无子 agent 备选方案（中断交用户新对话审核 / 多轮异向自审）执行。
+铁律 B6 已简化为“重要修改的记录与恢复”：通过 Git 历史与 diff 追踪源码修改；提交历史无法恢复的独有内容按需备份；沿用已有授权，并根据具体影响选择检查与审查。
 
 ### 5.0.0 钩子收敛
 
@@ -109,4 +115,4 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 Apache License 2.0
 
 
-5.3.0 合并 dw-handoff 与 dw-collaboration：交接重新审视目标、起点、过程、结果、TODO 与授权/资源边界；重要文件增删遵循 B6 的留痕、旧版本保留和关键变更审批。该说明仅记录当前文本和版本状态；安装、启用和发布按对应流程另行验证。
+5.3.0 合并了 dw-handoff 与 dw-collaboration。当前交接说明覆盖目标、起点、过程、结果与 TODO；协作按任务需要选择宿主工具或完整资源管理协议。

@@ -7,7 +7,15 @@ description: Use when a task may need multiple agents, model/effort routing, int
 
 Select intelligence and collaboration topology separately. Classify task type, dependency depth, risk/reversibility, phase, latency/cost, and validation failure cost. Request the least expensive model/effort that can satisfy the acceptance gate; record the actual model or effort only from host-observed execution metadata.
 
-Discover semantic capabilities, not product names. Configuration or inventory is only declared evidence. Require a fresh same-session probe before relying on spawn, collect, messaging, process control, or cleanup.
+## Ordinary collaboration
+
+Use the live tool declarations to choose an available operation. Its first useful call supplies runtime evidence; an extra empty probe is only useful when a required capability is genuinely uncertain. Configuration remains declared evidence.
+
+Delegate only when permitted and useful. A bounded task needs an objective, inputs, file ownership, expected result, relevant limits, and a return channel. Record its result and remaining uncertainty in the existing task record. Ordinary reviews and text edits can use the host's native task tools.
+
+## Optional managed resource protocol
+
+The detailed plan, ledger, probe and schema requirements below apply when explicitly using the executable resource manager or implementing its protocol. Choose this mode for work that actually requires persisted process identity, resource recovery, or a verifiable lifecycle. Its API requirements remain mandatory for that mode.
 
 Choose one topology:
 
@@ -38,9 +46,9 @@ For executable task-resource tracking, repeated-failure loop exit, work levels, 
 
 ## 5.3 resource manager entry point
 
-Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and obtain current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
+Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and confirm that the operation is covered by current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
 
-Before `COMPLETE`, require root acceptance, review, independent verification when specified, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Completion never authorizes staging, commit, push, merge, publication, deployment, paid work, credential changes, or constrained compute.
+Before a managed `COMPLETE`, require root acceptance, review, independent verification for every required phase as defined by the executable protocol, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Continue later Git or external operations under the user's existing authorization; completing a managed task adds no permissions.
 
 Read only the reference needed:
 

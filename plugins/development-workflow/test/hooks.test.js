@@ -540,21 +540,20 @@ test('dw-handoff re-examines the task and keeps TODO reconciliation authoritativ
 
 
 
-test('important-file changes require records, version retention, and approval', () => {
+test('important-file changes use recoverable history and proportionate review', () => {
   const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
   const implementation = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-implementation', 'SKILL.md'), 'utf8');
   const wrapup = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-wrapup', 'SKILL.md'), 'utf8');
   const rule = fs.readFileSync(path.join(pluginRoot, 'rules', 'development-workflow.md'), 'utf8');
 
   assert.match(hub, /铁律 B6/);
-  assert.match(hub, /重要文件增删治理/);
-  assert.match(hub, /被删内容原文/);
-  assert.match(hub, /耐久落点/);
-  assert.match(hub, /旧版本/);
-  assert.match(hub, /失去全部价值|仅剩占用空间/);
-  assert.match(hub, /2[–-]4 个子 agent/);
-  assert.match(hub, /新对话/);
-  assert.match(hub, /2[–-]4 次/);
+  const currentGuidance = hub.split('## 版本记录')[0];
+  assert.match(currentGuidance, /重要修改的记录与恢复/);
+  assert.match(currentGuidance, /Git 历史.*diff/);
+  assert.match(currentGuidance, /已有授权覆盖的事项继续执行/);
+  assert.match(currentGuidance, /一次适当范围的审查/);
+  assert.match(currentGuidance, /归档传输、发布包或恢复操作/);
+  assert.doesNotMatch(currentGuidance, /2[–-]4 个子 agent|重复 2[–-]4 次|先取得一致通过/);
   assert.match(implementation, /B6/);
   assert.match(wrapup, /B6/);
   assert.match(rule, /Trace important changes/);
@@ -811,18 +810,18 @@ test('development-workflow manifests and README agree on version and skill count
     path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
     'utf8',
   ));
-  assert.strictEqual(packageJson.version, '5.4.1');
+  assert.strictEqual(packageJson.version, '5.4.2');
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
   assert.match(packageJson.description, /13个 Skill（1个总纲 \+ 12个子 Skill）/);
   const coreSkill = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
   assert.match(coreSkill, /### 中文说明写法/);
-  assert.match(coreSkill, /先说明当前状态/);
+  assert.match(coreSkill, /先说明完成的事项和当前结果/);
   assert.match(coreSkill, /具体的动词、条件和结果/);
   assert.match(coreSkill, /HOLD、FAIL、NOT_RUN、UNVERIFIED/);
   assert.match(coreSkill, /额度配置保持当前值/);
   assert.match(coreSkill, /shell 命令、JSON\/schema\/manifest/);
-  assert.match(coreSkill, /方法论版本\*\*:\s*3\.8/);
+  assert.match(coreSkill, /方法论版本\*\*:\s*3\.9/);
   assert.match(coreSkill, /每个独立 PR 在合并进入 `master` 前/);
   assert.match(coreSkill, /版本更新属于这次变更的一部分，版本更新本身不会再次触发递增/);
   assert.match(coreSkill, /MAJOR > MINOR > PATCH/);
@@ -858,7 +857,7 @@ test('development-workflow manifests and README agree on version and skill count
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
   assert(marketplaceEntry, 'expected development-workflow marketplace entry');
-  assert.strictEqual(marketplaceEntry.version, '5.4.1');
+  assert.strictEqual(marketplaceEntry.version, '5.4.2');
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
@@ -896,7 +895,7 @@ const retainedContractTests = new Set([
   'contributor and package manifests expose the real skill and test surface',
   'tooling and wrap-up require owned child processes to be reclaimed',
   'dw-handoff re-examines the task and keeps TODO reconciliation authoritative',
-  'important-file changes require records, version retention, and approval',
+  'important-file changes use recoverable history and proportionate review',
   'development-workflow rule keeps B6 trace as its own invariant',
   'performance guidance requires local evidence instead of timeless rankings',
   'check-updates bounds external commands and preserves timeout/report evidence',

@@ -22,3 +22,6 @@ node_modules/
 *.log
 .ace-tool/
 .claude/
+
+# Local handoff records and recovery archives
+docs/handoff/
