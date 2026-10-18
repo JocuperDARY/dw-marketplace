@@ -96,6 +96,21 @@ test('an interrupted stage reserves its allocation before launch and cancellatio
   assert.equal(done.orchestration.charged.modelRequests, 2);
 });
 
+test('identical checkpoint fields with different JSON key order pause without consuming further stages', async t => {
+  let launches = 0;
+  const f = await fixture(t, async ({ task }) => {
+    const output = reply(task, 'checkpoint', 'same progress', 'same next step');
+    if (++launches % 2 === 0) output.text = JSON.stringify({ summary: 'same progress', nextSteps: 'same next step', state: 'checkpoint' });
+    return output;
+  });
+  const task = await f.manager.submit(f.input);
+  const done = await f.manager.wait({ taskId: task.taskId });
+  assert.equal(done.status, 'paused');
+  assert.equal(done.pauseReason, 'NO_PROGRESS');
+  assert.equal(launches, 2);
+  assert.equal(done.orchestration.charged.modelRequests, 2);
+});
+
 test('restart and manual continuation preserve totals, deadline and authorization fingerprint', async t => {
   let launches = 0;
   const runner = async ({ task }) => { launches++; return reply(task, 'completed', 'done', ''); };

@@ -128,7 +128,7 @@ export async function runOrchestrated({ record, attempt, prompt, signal, home, r
     let checkpoint;
     try { checkpoint = stageResponse(output.text); }
     catch (error) { stage.error = error.code; await persist(); return { ...output, terminal: 'error', error: { code: error.code, message: error.message } }; }
-    const repeated = checkpoint.state === 'checkpoint' && JSON.stringify(plan.lastCheckpoint?.content) === JSON.stringify(checkpoint);
+    const repeated = checkpoint.state === 'checkpoint' && ['state', 'summary', 'nextSteps'].every(key => plan.lastCheckpoint?.content[key] === checkpoint[key]);
     const path = await saveCheckpoint(stage.number, JSON.stringify(checkpoint));
     stage.status = checkpoint.state;
     stage.checkpointPath = path;
