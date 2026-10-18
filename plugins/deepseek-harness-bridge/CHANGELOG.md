@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-10-18
+
+- Add opt-in task-wide request, output-token, tool-call and elapsed-time authorization, with stage allocations and durable accounting shared by automatic stages and later continuations.
+- Reserve a checkpoint response before stage limits, using SDK prompt assembly rather than mutating frozen model requests. Persist progress and confirm teardown before restoring a new isolated stage.
+- Pause on budget exhaustion or repeated progress. Keep unknown usage conservatively reserved, and never auto-retry failed, truncated, cancelled or unclean execution.
+- Verify the complete MCP/real-SDK checkpoint chain with a synthetic model and network-blocked subprocess, plus budget, restart, cancellation and persistence regression tests. No dependency upgrades or repeated paid smoke test.
+
 ## 0.1.3 — 2026-10-18
 
 - Keep MCP discovery and diagnostics available across simultaneous desktop connections by acquiring task-store ownership only when a task tool needs it.
