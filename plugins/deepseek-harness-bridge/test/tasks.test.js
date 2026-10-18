@@ -5,6 +5,61 @@ import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, access } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskManager } from '../src/tasks.js';
+import { contract, correct, wrongDraft } from './fixtures/verification-data.js';
+
+test('completed incorrect drafts retain evidence and never become parent-accepted or auto-retried', async t => {
+  let launches = 0;
+  const wrong = wrongDraft();
+  const { manager, workspace, root } = await fixture(t, async ({ prompt, task }) => {
+    launches++;
+    assert.match(prompt, /Verification delivery contract/);
+    assert.equal(task.route.effort, 'high');
+    return { terminal: 'completed', text: JSON.stringify(wrong), cleanup: 'confirmed', toolCalls: 0 };
+  });
+  const input = { executionMode: 'single-request', requestId: 'quality', prompt: 'Classify the supplied paths using labeled rules.', workspace, reviewContract: contract };
+  const submitted = await manager.submit(input);
+  await manager.wait({ taskId: submitted.taskId });
+  const result = await manager.result({ taskId: submitted.taskId });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.cleanup, 'confirmed');
+  assert.equal(result.deliveryValidation.status, 'incomplete');
+  assert.equal(result.parentAcceptance, 'not_assessed');
+  assert.deepEqual(JSON.parse(result.text), wrong);
+  assert.equal(launches, 1);
+  await manager.close();
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: () => { throw new Error('Replay launched'); }, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
+  t.after(() => next.close());
+  const replay = await next.submit(input);
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(replay.reviewContract, contract);
+  assert.equal(replay.deliveryValidation.status, 'incomplete');
+  await assert.rejects(next.submit({ ...input, reviewContract: { ...contract, checkIds: [] } }), { code: 'REQUEST_CONFLICT' });
+  await assert.rejects(next.continue({ taskId: submitted.taskId, requestId: 'retry', prompt: 'repair' }), { code: 'NOT_RESUMABLE' });
+  await next.close();
+});
+
+test('budgeted verification preserves the contract and total ledger across stages and continuation', async t => {
+  let calls = 0;
+  const { manager, workspace } = await fixture(t, async ({ task, prompt }) => {
+    calls++;
+    assert.match(prompt, /summary string/);
+    const state = calls === 1 ? 'checkpoint' : 'completed';
+    return { terminal: 'completed', text: JSON.stringify({ state, summary: state === 'checkpoint' ? 'partial progress' : JSON.stringify(correct), nextSteps: state === 'checkpoint' ? 'finish all cases' : '' }), cleanup: 'confirmed', toolCalls: 0,
+      budget: { nonce: task.stageBudget.nonce, modelRequests: 1, calls: [{ number: 1, reservedOutputTokens: task.maxTokens, usage: { outputTokens: 100 }, finished: true }] } };
+  });
+  const first = await manager.submit({ requestId: 'verification-stages', prompt: 'Labeled rules and cases.', workspace, reviewContract: contract, capabilityProfile: 'inference-only', maxModelRequests: 2,
+    budget: { totalModelRequests: 6, totalOutputTokens: 32768, totalToolCalls: 0, totalDurationMs: 60000 } });
+  const done = await manager.wait({ taskId: first.taskId });
+  assert.equal(done.deliveryValidation.status, 'structure_complete');
+  assert.equal(done.parentAcceptance, 'not_assessed');
+  assert.equal(done.orchestration.charged.modelRequests, 2);
+  await manager.continue({ taskId: first.taskId, requestId: 'verification-followup', prompt: 'Recheck the same cases without adding scope.' });
+  const continued = await manager.wait({ taskId: first.taskId });
+  assert.equal(continued.orchestration.charged.modelRequests, 3);
+  assert.equal(continued.orchestration.deadlineAt, done.orchestration.deadlineAt);
+  assert.equal(continued.deliveryValidation.status, 'structure_complete');
+  assert.equal(continued.parentAcceptance, 'not_assessed');
+});
 
 async function fixture(t, runner) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-bridge-'));

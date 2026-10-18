@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 — 2026-10-19
+
+- Add verification workload for path classification, exception rules and test expectations, defaulting to high/16384. Preserve explicit effort/caps and warn on low/off overrides; no automatic escalation or new authorization.
+- Require a bounded reviewContract for verification: named cases, rules and mandatory checks; inject concise per-item evidence, classification/accounting separation and completeness instructions.
+- Publish structural delivery validation separately from runtime completion and parent acceptance. Detect omitted/duplicate/unknown items, missing evidence fields and malformed JSON without repair or quality-triggered retries. Structure-complete wrong answers remain unaccepted.
+- Retain old fingerprints and receipts; carry review contracts through checkpoints and continuations. Add synthetic failure regressions and a real-SDK/MCP offline integration with network blocked. No paid test or dependency upgrade.
+
 ## 1.0.0 — 2026-10-19
 
 - New long/multi-step submissions require preauthorized total budgets. Explicit single-request inference remains available without tools or continuation; persisted legacy records keep replay compatibility.

@@ -4,6 +4,28 @@ import { planExecution } from '../src/planning.js';
 import { allocateStage } from '../src/orchestration.js';
 
 const budget = { totalModelRequests: 6, totalOutputTokens: 24576, totalToolCalls: 4, totalDurationMs: 60000 };
+const reviewContract = { caseIds: ['C06'], ruleIds: ['SCRATCH', 'AUDIT'], checkIds: ['SUM'] };
+
+test('rule verification selects reasoning headroom and requires an explicit coverage contract', () => {
+  const plan = planExecution({ budget, workload: 'verification', reviewContract });
+  assert.equal(plan.effort, 'high');
+  assert.equal(plan.maxTokens, 16384);
+  assert.deepEqual(plan.reviewContract, reviewContract);
+  assert.equal(planExecution({ budget, reviewContract }).workload, 'verification');
+  assert.throws(() => planExecution({ budget, workload: 'verification' }), { code: 'REVIEW_CONTRACT_REQUIRED' });
+});
+
+test('verification warnings preserve authorized overrides rather than increasing caps or retrying', () => {
+  for (const effort of ['off', 'low']) {
+    const plan = planExecution({ budget, reviewContract, effort, maxTokens: 4096, maxModelRequests: 2 });
+    assert.equal(plan.effort, effort);
+    assert.equal(plan.maxTokens, 4096);
+    assert.equal(plan.maxModelRequests, 2);
+    assert.deepEqual(plan.budget, budget);
+    assert.match(plan.warnings.join(' '), /verification/i);
+  }
+  assert.match(planExecution({ budget, reviewContract, workload: 'mechanical' }).warnings.join(' '), /mechanical/i);
+});
 
 test('new tasks require total authorization unless explicitly selecting one inference request', () => {
   assert.throws(() => planExecution({}), { code: 'BUDGET_REQUIRED' });
