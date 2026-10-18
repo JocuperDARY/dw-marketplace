@@ -1,0 +1,19 @@
+{
+  "name": "deepseek-harness-bridge",
+  "version": "0.1.0",
+  "description": "通过官方 SDK 将有界子任务委派给独立 DeepSeek Flash 工作者，提供状态、结果、续接和取消。",
+  "author": { "name": "JocuperDARY" },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/JocuperDARY/dw-marketplace/tree/master/plugins/deepseek-harness-bridge",
+  "repository": "https://github.com/JocuperDARY/dw-marketplace",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "DeepSeek Harness Bridge",
+    "shortDescription": "让 Codex 委派任务给独立 Flash 工作者",
+    "longDescription": "本地 MCP 桥接官方 DeepSeek Harness SDK。支持单工作者异步任务、幂等提交、结果分页、续接与取消；需 Node.js 24.18+、安装依赖和单独配置 DeepSeek API Key。",
+    "defaultPrompt": "使用 DeepSeek Harness Bridge 委派一个范围明确的任务，并由 Codex 验证结果。"
+  },
+  "extensions": { "com.openai": { "onboardingSkill": "./skills/deepseek-setup" } }
+}

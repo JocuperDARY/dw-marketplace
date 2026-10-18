@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "deepseek-harness-bridge": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/index.js"],
+      "env_vars": ["DEEPSEEK_API_KEY", "DSH_BRIDGE_DATA_DIR", "PLUGIN_DATA", "CLAUDE_PLUGIN_DATA", "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 60
+    }
+  }
+}

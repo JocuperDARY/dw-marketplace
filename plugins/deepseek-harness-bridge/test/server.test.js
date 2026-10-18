@@ -1,0 +1,60 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { fileURLToPath } from 'node:url';
+import { TaskManager } from '../src/tasks.js';
+import { createServer } from '../src/server.js';
+import { workerEnvironment } from '../src/sdk-runner.js';
+
+test('MCP client can submit, wait, fetch, continue and reject invalid input', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-mcp-'));
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const manager = await new TaskManager({ dataDir: join(root, 'state'), runner: async ({ prompt }) => ({ terminal: 'completed', text: prompt, cleanup: 'confirmed' }) }).open();
+  const server = createServer({ manager, doctor: () => ({ modelCalls: 0 }) });
+  const client = new Client({ name: 'test', version: '1' });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  t.after(async () => { await client.close(); await server.close(); await manager.close(); await rm(root, { recursive: true, force: true }); });
+  await server.connect(serverSide);
+  await client.connect(clientSide);
+  assert.equal((await client.listTools()).tools.length, 8);
+  const call = async (name, args = {}) => {
+    const response = await client.callTool({ name, arguments: args });
+    assert.notEqual(response.isError, true);
+    return JSON.parse(response.content[0].text);
+  };
+  const task = await call('dsh_submit', { requestId: 'mcp-1', prompt: 'Task', workspace });
+  assert.equal((await call('dsh_wait', { taskId: task.taskId })).status, 'completed');
+  assert.equal((await call('dsh_result', { taskId: task.taskId })).text, 'Task');
+  await call('dsh_continue', { taskId: task.taskId, requestId: 'mcp-2', prompt: 'More' });
+  await call('dsh_wait', { taskId: task.taskId });
+  assert.equal((await call('dsh_status', { taskId: task.taskId })).number, 2);
+  assert.equal((await call('dsh_list')).total, 1);
+  assert.equal((await call('dsh_doctor')).modelCalls, 0);
+  assert.equal((await call('dsh_cancel', { taskId: task.taskId })).status, 'completed');
+  assert.equal((await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'mcp-3', prompt: 'Task', workspace, arbitraryModel: 'other' } })).isError, true);
+});
+
+test('production stdio entry starts without a key and doctor makes no model calls', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-stdio-'));
+  const env = workerEnvironment();
+  delete env.DEEPSEEK_API_KEY;
+  env.DSH_BRIDGE_DATA_DIR = join(root, 'state');
+  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' });
+  const client = new Client({ name: 'stdio-test', version: '1' });
+  t.after(async () => { await client.close(); await rm(root, { recursive: true, force: true }); });
+  await client.connect(transport);
+  const response = await client.callTool({ name: 'dsh_doctor', arguments: {} });
+  const status = JSON.parse(response.content[0].text);
+  assert.equal(status.credentialConfigured, false);
+  assert.equal(status.validation.modelCalls, 0);
+  assert.equal(status.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.1-rc.2');
+  const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'no-key', workspace: root, prompt: 'Task' } });
+  assert.equal(JSON.parse(missingKey.content[0].text).error.code, 'MISSING_CREDENTIAL');
+  await client.close();
+});
