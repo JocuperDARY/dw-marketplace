@@ -1,4 +1,8 @@
-# Authorized budget orchestration
+# Authorized budget orchestration — historical 0.2.0 contract
+
+For new submissions, the [1.0.0 reliability contract](budget-reliability.md)
+supersedes opt-in admission, effort allocation and truncation behavior below.
+This document records the original ledger/checkpoint design and release scope.
 
 ## Contract
 

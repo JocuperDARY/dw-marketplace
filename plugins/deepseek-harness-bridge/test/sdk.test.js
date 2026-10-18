@@ -33,6 +33,19 @@ test('official SDK transports an identified prompt and reaps the fixture process
   assert.equal(output.error, undefined);
 });
 
+test('provider truncation distinguishes visible partial text from reasoning-only output', async t => {
+  for (const mode of ['truncated', 'reasoning-only']) {
+    const f = await fixture(t);
+    const output = await f.runner({ ...f, prompt: mode, resume: false, signal: new AbortController().signal });
+    assert.equal(output.terminal, 'max-tokens');
+    assert.equal(output.error.code, 'OUTPUT_TRUNCATED');
+    assert.equal(output.output.modelTruncated, true);
+    assert.equal(output.output.kind, mode === 'truncated' ? 'partial_text' : 'reasoning_only');
+    assert.equal(output.text, mode === 'truncated' ? 'fresh result' : '');
+    assert.ok(!JSON.stringify(output).includes('private-reasoning-marker'));
+  }
+});
+
 for (const mode of ['truncated', 'missing-terminal', 'empty', 'malformed', 'fail', 'tool-limit']) {
   test(`SDK ${mode} cannot become successful completion`, async t => {
     const f = await fixture(t);

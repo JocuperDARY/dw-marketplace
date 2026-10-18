@@ -21,9 +21,10 @@ lines.on('line', line => {
     if (mode === 'hang') return;
     if (mode === 'fail') { send({ id: request.id, error: { code: -32000, message: 'dummy-provider-secret' } }); return; }
     if (mode === 'tool-limit') for (let i = 0; i < 3; i++) event('tool/call', { name: 'bridge_read' });
-    if (mode !== 'empty') event('assistant/message', { message: { content: [{ type: 'text', text: mode === 'redact' ? process.env.DEEPSEEK_API_KEY : 'fresh result' }] } });
+    if (mode === 'reasoning-only') event('assistant/message', { message: { content: [{ type: 'reasoning', text: 'private-reasoning-marker' }] } });
+    else if (mode !== 'empty') event('assistant/message', { message: { content: [{ type: 'text', text: mode === 'redact' ? process.env.DEEPSEEK_API_KEY : 'fresh result' }] } });
     if (mode === 'malformed') event('turn/end', {});
-    else if (mode !== 'missing-terminal') event('turn/end', { reason: { kind: mode === 'truncated' ? 'max-tokens' : 'completed' } });
+    else if (mode !== 'missing-terminal') event('turn/end', { reason: { kind: ['truncated', 'reasoning-only'].includes(mode) ? 'max-tokens' : 'completed' } });
     respond({});
   } else if (request.method === 'shutdown') { respond({}); process.exitCode = 0; lines.close(); process.stdin.destroy(); }
 });

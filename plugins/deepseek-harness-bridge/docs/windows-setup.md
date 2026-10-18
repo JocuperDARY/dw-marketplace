@@ -24,6 +24,6 @@ powershell.exe -NoProfile -File "C:\实际插件目录\scripts\set-api-key.ps1"
 
 ## 一次真实连接测试
 
-明确授权后，只提交一次：`capabilityProfile: inference-only`、`access: read-only`、`maxModelRequests: 1`、`maxTokens: 512`、`maxRequestBytes: 8192`、`maxToolCalls: 0`、`timeoutMs: 60000`、`effort: high`。prompt 只要求返回固定标记，不包含项目资料。失败或截断如实记录，不自动重试。
+明确授权后，只提交一次：`executionMode: single-request`、`capabilityProfile: inference-only`、`access: read-only`、`maxModelRequests: 1`、`maxTokens: 512`、`maxRequestBytes: 8192`、`maxToolCalls: 0`、`timeoutMs: 60000`、`effort: off`。prompt 只要求返回固定标记，不包含项目资料。失败或截断如实记录，不自动重试。
 
 请求次数和序列化输入字节数在 provider adapter 前检查，输出上限发送给官方 API；只有初始化及能力检查完成后才解锁调用。每次 attempt 返回 `budget`：请求数、输入字节和逐调用 provider usage；未报告 usage 时保留 `null`，不能当作零费用。`maxTokens` 包含服务提供方在该上限内计量的输出；本插件不将字节数等同于精确输入 token，也不承诺人民币/美元硬扣费上限。最终账单以提供方为准。

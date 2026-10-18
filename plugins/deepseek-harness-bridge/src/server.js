@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { safeError } from './errors.js';
 import { capabilities } from './capabilities.js';
 
-export const VERSION = '0.2.0';
+export const VERSION = '1.0.0';
 const taskId = z.string().uuid();
 const requestId = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const prompt = z.string().min(1).max(65536).describe('Bounded assignment with context, file ownership, acceptance criteria and required evidence.');
@@ -15,16 +15,19 @@ const budget = z.object({
   totalOutputTokens: z.number().int().min(512).max(33554432),
   totalToolCalls: z.number().int().min(0).max(4096),
   totalDurationMs: z.number().int().min(1000).max(86400000),
-}).strict().optional().describe('Opt-in task-wide authorization across automatic checkpoint stages and later continuations. Required totals bound model requests, output tokens, tool calls and elapsed milliseconds, not currency. Stage limits allocate from the remaining total; at least 2 stage requests are required.');
+}).strict().optional().describe('REQUIRED for default budgeted execution. Preauthorized task-wide totals across checkpoint stages, one text-only truncation recovery and continuations. Output includes reasoning; input bytes are separately capped. Totals are not a currency cap. At least 2 stage requests are required.');
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
-    { name: 'dsh_submit', description: 'Start one independent official DeepSeek Flash worker. Paid calls require existing user authorization and an API key. Returns immediately. Default tools are bounded text files; select a reviewed local capabilityProfile for additional installed DSH capabilities. No desktop-login/session reuse.',
+    { name: 'dsh_submit', description: 'Start an independent official DeepSeek Flash worker with existing user authorization. Long/multi-step work MUST supply budget: the default budgeted mode rejects missing totals before any model call. Select workload for effort/headroom, and a minimal reviewed capabilityProfile. Explicit single-request mode permits only one inference call without tools or continuation. Returns immediately; never reuses a desktop conversation.',
       schema: z.object({ requestId, prompt, workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state.'),
-        access: z.enum(['read-only', 'workspace-write']).optional(), effort: z.enum(['high', 'max']).optional(), timeoutMs, budget,
-        maxTokens: z.number().int().min(256).max(32768).optional().describe('Output token cap per model request, default 8192; not a whole-task currency/token cap.'),
+        access: z.enum(['read-only', 'workspace-write']).optional(),
+        executionMode: z.enum(['budgeted', 'single-request']).optional().describe('Default budgeted requires explicit totals. single-request is an explicit opt-out limited to one inference-only request, no tools or continuation.'),
+        workload: z.enum(['mechanical', 'standard', 'reasoning']).optional().describe('mechanical: extraction/reformatting, off/4096; standard (default): low/8192; reasoning: high/16384. Explicit effort and maxTokens override these defaults within totals.'),
+        effort: z.enum(['off', 'low', 'high', 'max']).optional().describe('Work request effort. Checkpoint and truncation recovery requests always use off. Reasoning shares the output token allowance.'), timeoutMs, budget,
+        maxTokens: z.number().int().min(256).max(32768).optional().describe('Per-request ceiling including reasoning, never silently raised. Defaults by effort: off 4096, low 8192, high 16384, max 32768. Actual work allowance uses remaining stage output minus a checkpoint reserve of up to 2048.'),
         maxToolCalls: z.number().int().min(0).max(128).optional(),
-        maxModelRequests: z.number().int().min(1).max(128).optional().describe('Official SDK model-request ceiling per attempt, or per stage with budget, including auxiliary and checkpoint calls. Default 16. No automatic failure retries.'),
+        maxModelRequests: z.number().int().min(1).max(128).optional().describe('Per-stage ceiling including auxiliary/checkpoint calls, default 6 (minimum 2 in budgeted mode). single-request requires 1. Confirmed max-tokens can use at most one tool-free recovery per task from the same total; other failures never auto-retry.'),
         maxRequestBytes: z.number().int().min(1024).max(1048576).optional().describe('Maximum serialized model input bytes per request, default 262144. Not a tokenizer or currency estimate.'),
         capabilityProfile: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional().describe('files (default), inference-only, or a reviewed profile from dsh_capabilities.') }).strict(),
       run: input => manager.submit(input, preflight), write: true, network: true },
@@ -34,7 +37,7 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
       schema: z.object({}).strict(), run: () => manager.list() },
     { name: 'dsh_wait', description: 'Wait up to 30 seconds for a task and return compact status. Reuse status/result; do not submit a duplicate task.',
       schema: z.object({ taskId, timeoutMs: z.number().int().min(0).max(30000).optional() }).strict(), run: input => manager.wait(input) },
-    { name: 'dsh_result', description: 'Read a bounded page of the final worker text, including failure/cleanup evidence. Offset and nextOffset count JavaScript UTF-16 code units.',
+    { name: 'dsh_result', description: 'Read worker text and completion evidence. output.kind distinguishes complete_text, partial_text, reasoning_only and empty; output.modelTruncated is provider truncation, outputTruncated is storage clipping only. resultAvailable/nextOffset do not prove completion. Short ownership conflicts are retried as reads only. Offset and nextOffset count UTF-16 code units.',
       schema: z.object({ taskId, attempt, offset: z.number().int().min(0).max(1048576).optional(), limit: z.number().int().min(1).max(32000).optional() }).strict(),
       run: input => manager.result(input) },
     { name: 'dsh_continue', description: 'Continue a completed worker session, or a safely paused budgeted task from its checkpoint. Budgeted tasks retain the original total authorization and deadline; continuation cannot refill them. Keeps workspace, model and access. At most 16 attempts; cannot inject input while running.',
@@ -59,7 +62,10 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
     try {
       const result = await definition.run(parsed.data);
       return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result };
-    } catch (error) { return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: safeError(error) }) }] }; }
+    } catch (error) {
+      const result = { error: safeError(error) };
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result };
+    }
   });
   return server;
 }
