@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -10,6 +10,29 @@ import { fileURLToPath } from 'node:url';
 import { TaskManager } from '../src/tasks.js';
 import { createServer } from '../src/server.js';
 import { workerEnvironment } from '../src/sdk-runner.js';
+
+test('multiple production connections discover tools without reserving task ownership', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-discovery-'));
+  const state = join(root, 'state');
+  const clients = [];
+  t.after(async () => {
+    await Promise.all(clients.map(client => client.close()));
+    await rm(root, { recursive: true, force: true });
+  });
+  for (let index = 0; index < 2; index++) {
+    const env = workerEnvironment();
+    delete env.DEEPSEEK_API_KEY;
+    env.DSH_BRIDGE_DATA_DIR = state;
+    const client = new Client({ name: 'discovery-test', version: '1' });
+    clients.push(client);
+    await client.connect(new StdioClientTransport({ command: process.execPath,
+      args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' }));
+    assert.equal((await client.listTools()).tools.length, 9);
+    const result = await client.callTool({ name: 'dsh_doctor', arguments: {} });
+    assert.equal(JSON.parse(result.content[0].text).validation.modelCalls, 0);
+  }
+  await assert.rejects(access(join(state, 'owner.lock')), { code: 'ENOENT' });
+});
 
 test('MCP client can submit, wait, fetch, continue and reject invalid input', async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-mcp-'));
