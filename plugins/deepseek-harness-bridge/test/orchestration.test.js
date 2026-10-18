@@ -241,6 +241,33 @@ test('failed continuation publication preserves prior completed work and consume
   assert.equal(f.manager.requests.has('unsaved'), false);
 });
 
+test('clipped partial context is labeled for recovery and failed publication starts no recovery', async t => {
+  for (const failPublication of [false, true]) {
+    let launches = 0;
+    const partialText = 'visible'.repeat(3000) + 'tail-marker';
+    const f = await fixture(t, async ({ task, prompt }) => {
+      if (++launches === 1) return { ...reply(task, 'completed', 'unused'), terminal: 'max-tokens', text: partialText,
+        output: { kind: 'partial_text', modelTruncated: true }, error: { code: 'OUTPUT_TRUNCATED' } };
+      assert.match(prompt, /"contextTruncated":true/);
+      assert.match(prompt, /partial-1\.json/);
+      assert.match(prompt, /"kind":"partial_text"/);
+      assert.ok(!prompt.includes('tail-marker'));
+      return reply(task, 'completed', 'Regenerated result', '');
+    });
+    if (failPublication) {
+      const persist = f.manager.persist.bind(f.manager);
+      f.manager.persist = async record => { if (record.orchestration.lastPartial) throw new Error('disk failed'); await persist(record); };
+    }
+    const task = await f.manager.submit(f.input);
+    const done = await f.manager.wait({ taskId: task.taskId });
+    assert.equal(done.status, failPublication ? 'state_write_failed' : 'completed');
+    assert.equal(launches, failPublication ? 1 : 2);
+    assert.equal(f.manager.blocked, failPublication);
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'partial-1.json'), 'utf8'));
+    assert.equal(saved.text, partialText);
+  }
+});
+
 test('corrupt persisted spending cannot increase authorization after restart', async t => {
   let launches = 0;
   const runner = async ({ task }) => { launches++; return reply(task, 'completed', 'done', ''); };

@@ -14,6 +14,7 @@ export function apply(ctx) {
       if (options.reasoningEffort !== 'off' || options.tools?.length) throw new Error('Recovery must be off and tool-free');
       block = { type: 'text', text: JSON.stringify({ state: 'completed', summary: 'Finished recovery from supplied evidence', nextSteps: '' }) };
     } else if (truncate) {
+      if (messages.includes('reasoning-only') && options.reasoningEffort !== 'high') throw new Error('Expected explicit high-effort truncation fixture');
       block = messages.includes('reasoning-only') ? { type: 'reasoning', text: 'private-reasoning-marker' } : { type: 'text', text: '{"state":"completed","summary":"partial' };
     } else if (!continued && calls === 1) {
       if (!options.tools.some(tool => tool.name === 'bridge_read')) throw new Error('Expected work-stage file tool');

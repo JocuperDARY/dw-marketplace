@@ -85,7 +85,7 @@ for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers $
   const manager = await new TaskManager({ dataDir: join(root, 'state'), runner, resolveCapabilities: async () => profile }).open();
   t.after(async () => { await manager.close(); await rm(root, { recursive: true, force: true }); });
   const submitted = await manager.submit({ requestId: 'offline-truncation', prompt: `offline-truncate ${mode}: Summarize the supplied text.`, workspace,
-    capabilityProfile: 'offline', workload: 'mechanical', maxTokens: 4096, maxModelRequests: 2, maxToolCalls: 0, timeoutMs: 10000,
+    capabilityProfile: 'offline', workload: mode === 'reasoning-only' ? 'reasoning' : 'mechanical', maxTokens: 4096, maxModelRequests: 2, maxToolCalls: 0, timeoutMs: 10000,
     budget: { totalModelRequests: 4, totalOutputTokens: 12288, totalToolCalls: 0, totalDurationMs: 25000 } });
   const done = await manager.wait({ taskId: submitted.taskId, timeoutMs: 25000 });
   assert.equal(done.status, 'completed', JSON.stringify(done));
