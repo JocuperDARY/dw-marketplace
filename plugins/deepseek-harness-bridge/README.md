@@ -37,6 +37,8 @@ codex plugin add deepseek-harness-bridge@dw-marketplace
 
 MCP 入口使用 `node launch.js`。本机 `config.json` 的 `nodePath` 可指定现有 Node 24.21，由启动器重新执行，无须修改系统 PATH。Windows 可用包内脚本将 API Key 加密保存，详见 [Windows 安装和凭据配置](docs/windows-setup.md)。不要把 Electron 桌面主程序当成 Node。
 
+Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名单，以转发 `DEEPSEEK_API_KEY` 等配置。portable stdio schema 不支持 `env_vars`；不要将它移入根目录 `mcp.json`。可用 `codex mcp get deepseek-harness-bridge --json` 核对有效 `transport.env_vars`，不要输出或粘贴凭据值。其他宿主和非 Windows 平台的真实凭据传递需要分别验证。`npm run test:package` 还会生成真实归档并检查 portable 和兼容清单均被打包。
+
 | 环境变量 | 用途 |
 | --- | --- |
 | `DEEPSEEK_API_KEY` | 由用户在 MCP 进程环境配置；不要放进聊天、仓库、工具参数或共享配置。 |

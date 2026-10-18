@@ -58,6 +58,12 @@ test('portable Codex MCP entry uses supported fields and expands the plugin root
   const manifest = await json('plugin.json');
   assert.equal(manifest.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.ok(Array.isArray(manifest.extensions['com.openai'].interface.defaultPrompt));
+  // Codex merges this retained compatibility entry's environment allowlist.
+  // env_vars is intentionally absent from the closed portable stdio schema.
+  const compatibility = (await json('.mcp.json')).mcpServers['deepseek-harness-bridge'];
+  for (const name of ['DEEPSEEK_API_KEY', 'DSH_BRIDGE_CONFIG_DIR', 'LOCALAPPDATA']) {
+    assert.ok(compatibility.env_vars.includes(name));
+  }
 });
 
 test('MCP entry, onboarding and packaged skill references resolve without shell wrappers', async () => {

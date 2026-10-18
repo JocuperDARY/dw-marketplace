@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node index.js",
     "test": "node --test test/*.test.js",
-    "test:package": "node --test test/package.test.js",
+    "test:package": "node --test test/package.test.js && node scripts/test-package.js",
     "doctor": "node index.js --doctor"
   },
   "files": ["plugin.json", "mcp.json", "index.js", "launch.js", "src", "scripts", "skills", "docs", "test", ".codex-plugin", ".claude-plugin", ".mcp.json", "npm-shrinkwrap.json", "README.md", "CHANGELOG.md", "LICENSE"],
