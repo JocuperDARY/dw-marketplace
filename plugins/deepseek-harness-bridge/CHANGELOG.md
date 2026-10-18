@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-10-18
+
+- Add portable Agent Plugins manifests so Codex expands `${PLUGIN_ROOT}` before starting the MCP server; retain legacy compatibility manifests.
+- Include the portable manifests in npm packages and test their supported fields and onboarding path.
+- Clarify that marketplace source metadata does not identify the installed runtime directory. Verified nine MCP tools through the local Codex desktop engine; paid inference is a separate check.
+
 ## 0.1.1 — 2026-10-18
 
 - Add explicit installed-DSH capability inventory and pinned headless module/skill profiles.

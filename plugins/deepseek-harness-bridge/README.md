@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 0.1.1
+# DeepSeek Harness Bridge 0.1.2
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -24,7 +24,7 @@ node launch.js --doctor
 
 依赖通过 `npm-shrinkwrap.json` 锁定。官方 SDK 固定为 `@deepseek-ai/dsh-sdk-client@0.2.1-rc.2`，它加载同版本 `@deepseek-ai/dsh`。不使用 npm 的可漂移 latest 标签，不在启动时自动下载安装。`--doctor` 即使缺少依赖也可输出诊断，但退出码 0 只表示诊断运行完成；请检查 Node 支持和依赖状态。
 
-在 Codex 中添加或刷新 `JocuperDARY/dw-marketplace`，安装 `deepseek-harness-bridge`，运行插件的 `deepseek-setup` 技能。市场沿用仓库的 `.claude-plugin/marketplace.json`；Codex 使用插件自身的 `.codex-plugin/plugin.json`，其中声明本地执行需求、技能和 MCP 入口。也保留 Claude 兼容清单；真实宿主支持分别验证。
+在 Codex 中添加或刷新 `JocuperDARY/dw-marketplace`，安装 `deepseek-harness-bridge`，运行插件的 `deepseek-setup` 技能。市场沿用仓库的 `.claude-plugin/marketplace.json`；当前 Codex 使用插件根目录的 portable `plugin.json` 和 `mcp.json`，通过 `${PLUGIN_ROOT}` 解析启动路径。保留 `.codex-plugin`、`.claude-plugin` 和 `.mcp.json` 兼容清单；各宿主支持分别验证。
 
 支持插件管理命令的 Codex CLI 可在版本发布到市场后使用：
 
@@ -33,7 +33,7 @@ codex plugin marketplace add JocuperDARY/dw-marketplace
 codex plugin add deepseek-harness-bridge@dw-marketplace
 ```
 
-本地候选测试可将第一条的来源替换为本地市场仓库的绝对路径。请从安装返回信息确认真实插件目录，再在该目录执行 npm ci；不要把源码目录的 node_modules 当成已安装副本的依赖。
+本地候选测试可将第一条的来源替换为本地市场仓库的绝对路径。运行 `codex mcp get deepseek-harness-bridge --json`，从已展开的 `transport.args` 确认实际安装目录，再在该目录执行 npm ci。`plugin/installed` 的 `source.path` 可能只表示市场来源；不要把源码目录的 node_modules 当成已安装副本的依赖。
 
 MCP 入口使用 `node launch.js`。本机 `config.json` 的 `nodePath` 可指定现有 Node 24.21，由启动器重新执行，无须修改系统 PATH。Windows 可用包内脚本将 API Key 加密保存，详见 [Windows 安装和凭据配置](docs/windows-setup.md)。不要把 Electron 桌面主程序当成 Node。
 
@@ -82,7 +82,7 @@ MCP 入口使用 `node launch.js`。本机 `config.json` 的 `nodePath` 可指�
 }
 ```
 
-主智能体收到 taskId 后继续独立工作，随后等待和取回结果。插件不主动向 Codex 聊天发送消息，也不能唤醒已经结束的主回合。v0.1.1 不支持执行中插入消息；成功结束后可以续接，急需改方向时取消并提交明确的新任务。
+主智能体收到 taskId 后继续独立工作，随后等待和取回结果。插件不主动向 Codex 聊天发送消息，也不能唤醒已经结束的主回合。v0.1.2 不支持执行中插入消息；成功结束后可以续接，急需改方向时取消并提交明确的新任务。
 
 插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 的模型目录将此别名标为 DeepSeek-V4.1-Flash；服务端别名的实际版本仍以服务提供方为准。支持 high / max，默认 high；不切换到其他模型，不修改宿主自动模型白名单。模型能力、200 tok/s 和整体加速效果需要真实任务测量，本插件不预设这些结论。
 

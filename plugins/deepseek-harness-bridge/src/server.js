@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { safeError } from './errors.js';
 import { capabilities } from './capabilities.js';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 const taskId = z.string().uuid();
 const requestId = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const prompt = z.string().min(1).max(65536).describe('Bounded assignment with context, file ownership, acceptance criteria and required evidence.');

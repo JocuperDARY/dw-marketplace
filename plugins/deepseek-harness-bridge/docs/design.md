@@ -1,4 +1,4 @@
-# DeepSeek Harness bridge 0.1.1
+# DeepSeek Harness bridge 0.1.2
 
 ## Goal and scope
 
