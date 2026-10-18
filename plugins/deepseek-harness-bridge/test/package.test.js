@@ -5,12 +5,19 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { VERSION } from '../src/server.js';
 import { SDK_VERSION } from '../src/sdk-runner.js';
+import { doctor } from '../index.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const json = async path => JSON.parse(await readFile(join(root, path), 'utf8'));
 
 test('package, plugin manifests, runtime and source marketplace versions agree', async () => {
   const pkg = await json('package.json');
   assert.ok(pkg.files.includes('npm-shrinkwrap.json'));
+  const portable = await json('plugin.json');
+  assert.equal(portable.name, pkg.name);
+  assert.equal(portable.version, pkg.version);
+  assert.equal(portable.extensions['com.openai'].requires_local_executor, true);
+  await access(join(root, portable.extensions['com.openai'].onboardingSkill));
+  for (const name of ['plugin.json', 'mcp.json']) assert.ok(pkg.files.includes(name));
   const native = await json('.codex-plugin/plugin.json');
   const compatible = await json('.claude-plugin/plugin.json');
   for (const manifest of [native, compatible]) {
@@ -20,6 +27,7 @@ test('package, plugin manifests, runtime and source marketplace versions agree',
     await access(join(root, manifest.mcpServers));
   }
   assert.equal(VERSION, pkg.version);
+  assert.equal((await doctor({})).version, pkg.version);
   assert.equal(SDK_VERSION, pkg.dependencies['@deepseek-ai/dsh-sdk-client']);
   assert.equal(native.requires_local_executor, true);
   const lock = await json('npm-shrinkwrap.json');
@@ -34,6 +42,27 @@ test('package, plugin manifests, runtime and source marketplace versions agree',
     const entry = marketplace.plugins.find(plugin => plugin.name === pkg.name);
     assert.equal(entry.version, pkg.version);
     assert.equal(entry.source, `./plugins/${pkg.name}`);
+  }
+});
+
+test('portable Codex MCP entry uses supported fields and expands the plugin root', async () => {
+  const config = await json('mcp.json');
+  assert.equal(config.$schema, 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json');
+  const mcp = config.mcpServers['deepseek-harness-bridge'];
+  assert.deepEqual(Object.keys(mcp).sort(), ['args', 'command', 'cwd', 'type']);
+  assert.equal(mcp.type, 'stdio');
+  assert.equal(mcp.command, 'node');
+  assert.equal(mcp.cwd, '${PLUGIN_ROOT}');
+  assert.deepEqual(mcp.args, ['${PLUGIN_ROOT}/launch.js']);
+  await access(join(root, mcp.args[0].replace('${PLUGIN_ROOT}/', '')));
+  const manifest = await json('plugin.json');
+  assert.equal(manifest.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
+  assert.ok(Array.isArray(manifest.extensions['com.openai'].interface.defaultPrompt));
+  // Codex merges this retained compatibility entry's environment allowlist.
+  // env_vars is intentionally absent from the closed portable stdio schema.
+  const compatibility = (await json('.mcp.json')).mcpServers['deepseek-harness-bridge'];
+  for (const name of ['DEEPSEEK_API_KEY', 'DSH_BRIDGE_CONFIG_DIR', 'LOCALAPPDATA']) {
+    assert.ok(compatibility.env_vars.includes(name));
   }
 });
 

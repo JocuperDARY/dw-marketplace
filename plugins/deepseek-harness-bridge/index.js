@@ -10,6 +10,7 @@ export function stateDirectory(env = process.env) {
 }
 
 export async function doctor(env = process.env) {
+  const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
   const dependencies = {};
   for (const name of ['@deepseek-ai/dsh-sdk-client', '@deepseek-ai/dsh', '@modelcontextprotocol/sdk']) {
     try {
@@ -20,7 +21,7 @@ export async function doctor(env = process.env) {
   let ownerLockPresent = false;
   try { await access(join(stateDirectory(env), 'owner.lock')); ownerLockPresent = true; } catch (error) { if (error.code !== 'ENOENT') ownerLockPresent = 'unknown'; }
   const [major, minor] = process.versions.node.split('.').map(Number);
-  return { plugin: 'deepseek-harness-bridge', version: '0.1.1', node: process.versions.node,
+  return { plugin: 'deepseek-harness-bridge', version, node: process.versions.node,
     nodeSupported: major > 24 || (major === 24 && minor >= 18), dependencies,
     credentialConfigured: Boolean(env.DEEPSEEK_API_KEY?.trim()), stateDirectory: stateDirectory(env), ownerLockPresent,
     route: { provider: 'deepseek-official', model: 'deepseek-flash', displayName: 'DeepSeek-V4.1-Flash (SDK catalog)' },

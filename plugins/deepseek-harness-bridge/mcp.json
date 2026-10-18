@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "deepseek-harness-bridge": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/launch.js"
+      ],
+      "type": "stdio",
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  },
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+}
