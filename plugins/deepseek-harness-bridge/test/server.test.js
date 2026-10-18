@@ -45,7 +45,11 @@ test('MCP enforces total authorization and the explicit one-request exception', 
   t.after(async () => { await client.close(); await server.close(); await manager.close(); await rm(root, { recursive: true, force: true }); });
   await server.connect(serverSide);
   await client.connect(clientSide);
-  assert.equal((await client.listTools()).tools.length, 9);
+  const tools = (await client.listTools()).tools;
+  assert.equal(tools.length, 9);
+  const submitSchema = tools.find(tool => tool.name === 'dsh_submit').inputSchema;
+  assert.ok(submitSchema.properties.workload.enum.includes('verification'));
+  assert.ok(submitSchema.properties.reviewContract.required.includes('checkIds'));
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args });
     assert.notEqual(response.isError, true);
@@ -53,6 +57,11 @@ test('MCP enforces total authorization and the explicit one-request exception', 
   };
   const missing = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'missing-budget', prompt: 'Task', workspace } });
   assert.equal(missing.structuredContent.error.code, 'BUDGET_REQUIRED');
+  assert.equal(manager.list().total, 0);
+  const noContract = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', workload: 'verification', requestId: 'no-contract', prompt: 'Rules', workspace } });
+  assert.equal(noContract.structuredContent.error.code, 'REVIEW_CONTRACT_REQUIRED');
+  const duplicateIds = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', requestId: 'duplicate-contract', prompt: 'Rules', workspace, reviewContract: { caseIds: ['C1', 'C1'], ruleIds: ['R1'], checkIds: [] } } });
+  assert.equal(JSON.parse(duplicateIds.content[0].text).error.code, 'INVALID_ARGUMENT');
   assert.equal(manager.list().total, 0);
   const task = await call('dsh_submit', { executionMode: 'single-request', requestId: 'mcp-1', prompt: 'Task', workspace });
   assert.equal((await call('dsh_wait', { taskId: task.taskId })).status, 'completed');

@@ -8,9 +8,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.5.2 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
-| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 1.0.0 | Codex MCP 插件：官方 SDK 独立 Flash 工作者、总预算编排、低开销检查点、截断恢复与 DSH 能力选择 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 1.1.0 | Codex MCP 插件：独立 Flash 工作者、总预算编排、验证类委派与交付清单检查 |
 
-**deepseek-harness-bridge 1.0.0**：新多阶段任务必须携带预授权总预算；按工作类型选择推理档位，单请求额度为检查点留出余量。保存截断和部分结果证据，在原预算内最多执行一次关闭推理、禁止工具的恢复；短暂锁冲突只重试读取。显式单请求模式和旧记录兼容规则见[当前预算契约](./plugins/deepseek-harness-bridge/docs/budget-reliability.md)。本次只做离线验证，不重复付费测试。
+**deepseek-harness-bridge 1.1.0**：路径分类、例外规则和测试预期使用 verification 工作负载，默认 high，并通过 reviewContract 要求逐项依据与必做检查。结构完整性、运行完成和父级内容验收分别报告；缺项或语义错误不自动重试。[委派质量契约](./plugins/deepseek-harness-bridge/docs/delegation-quality.md)包含原有额度兼容规则与离线验证边界。本次不重复付费测试。
+
+**deepseek-harness-bridge 1.0.0（历史，预算契约继续适用）**：新多阶段任务必须携带预授权总预算；按工作类型选择推理档位，单请求额度为检查点留出余量。保存截断和部分结果证据，在原预算内最多执行一次关闭推理、禁止工具的恢复；短暂锁冲突只重试读取。显式单请求模式和旧记录兼容规则见[当前预算契约](./plugins/deepseek-harness-bridge/docs/budget-reliability.md)。
 
 **deepseek-harness-bridge 0.2.0（历史）**：引入可选总预算与检查点编排，续接与重启不重置预算。[原版设计](./plugins/deepseek-harness-bridge/docs/budget-orchestration.md)保留供兼容性参考；新任务使用上方 1.0.0 契约。
 
