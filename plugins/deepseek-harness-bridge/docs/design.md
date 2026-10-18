@@ -1,4 +1,4 @@
-# DeepSeek Harness bridge 0.1.2
+# DeepSeek Harness bridge 0.1.3
 
 ## Goal and scope
 
@@ -10,7 +10,8 @@ Add an independently versioned Codex plugin to DW Marketplace. Codex submits a b
 - Pin SDK and its matching runtime to 0.2.1-rc.2. Use the SDK's supported Node runtime, not private Desktop IPC or GUI automation. Desktop login and GUI sessions are not reused.
 - One active task per bridge data directory, no implicit queue and no automatic task retry. A caller-supplied request ID makes submission idempotent; conflicting reuse is rejected.
 - Each new task has its own Harness home and session. A continuation keeps its task's workspace, route, access mode and home. It creates a separate attempt; a task cannot be continued while running or cleanup is uncertain.
-- Tasks survive as durable records. A bridge restart marks unfinished attempts interrupted and prevents automatic resubmission. Lock ownership is never recovered merely from a saved PID; an unclean bridge exit requires explicit operator reconciliation.
+- MCP discovery does not reserve the task store. A connection acquires exclusive ownership on its first task operation and releases it after confirmed terminal persistence and idle readers. Other connections can then recover results and continue the same saved session. Active-worker ownership and unresolved cleanup locks remain exclusive.
+- Tasks survive as durable records. Opening an unlocked store marks unfinished attempts interrupted and prevents automatic resubmission. Lock ownership is never recovered merely from a saved PID; an unclean bridge exit requires explicit operator reconciliation.
 - Default access is read-only. Built-in files exposes bounded read/list and optionally guarded writes; inference-only omits file tools. Local capability profiles can explicitly select pinned reviewed headless modules and skills. Installed desktop metadata is advisory, never automatic authority to load code. Exact runtime tool names are checked before prompting. Third-party modules and their dependencies are trusted code, responsible for their own path/effect policy; this is not an OS sandbox. See capabilities.md.
 - Paths must remain inside the resolved task workspace, including symlink resolution. Protected metadata and credentials are unavailable. Runtime state is outside the task workspace.
 - Task timeout, official SDK request count, request content bytes, per-request output tokens and tool calls have finite limits. The llm/stream hook reserves a request before adapter dispatch; initialization cannot spend. Automatic retries, compaction and title generation are disabled. Missing usage is unknown. These limits reset for an explicitly requested continuation attempt, and cannot constrain third-party code bypassing the SDK. No exact total currency cap is claimed. Cancellation closes the owned runtime and reports cleanup failure honestly.

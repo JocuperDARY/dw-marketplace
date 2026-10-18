@@ -32,10 +32,10 @@ export async function doctor(env = process.env) {
 export async function main(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--doctor') { process.stdout.write(`${JSON.stringify(await doctor(), null, 2)}\n`); return; }
   if (args.length) throw new Error('Unsupported arguments');
-  const [{ StdioServerTransport }, { TaskManager }, { createSdkRunner, preflight }, { createServer }] = await Promise.all([
-    import('@modelcontextprotocol/sdk/server/stdio.js'), import('./src/tasks.js'), import('./src/sdk-runner.js'), import('./src/server.js'),
+  const [{ StdioServerTransport }, { ConnectionTasks }, { createSdkRunner, preflight }, { createServer }] = await Promise.all([
+    import('@modelcontextprotocol/sdk/server/stdio.js'), import('./src/connection-tasks.js'), import('./src/sdk-runner.js'), import('./src/server.js'),
   ]);
-  const manager = await new TaskManager({ dataDir: stateDirectory(), runner: createSdkRunner() }).open();
+  const manager = new ConnectionTasks({ dataDir: stateDirectory(), runner: createSdkRunner() });
   const server = createServer({ manager, doctor, preflight });
   let shutdown;
   const stop = () => (shutdown ??= (async () => { await manager.close(); await server.close(); })());

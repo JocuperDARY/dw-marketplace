@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — 2026-10-18
+
+- Keep MCP discovery and diagnostics available across simultaneous desktop connections by acquiring task-store ownership only when a task tool needs it.
+- Release ownership after a confirmed terminal result and idle readers, preserving active-worker exclusion and unresolved cleanup locks. A later connection can retrieve or continue the saved session.
+- Add production stdio discovery regression coverage and connection lifecycle checks for continuation, replay, cancellation, unpolled completion and unverified cleanup.
+
 ## 0.1.2 — 2026-10-18
 
 - Add portable Agent Plugins manifests so Codex expands `${PLUGIN_ROOT}` before starting the MCP server; retain legacy compatibility manifests.
