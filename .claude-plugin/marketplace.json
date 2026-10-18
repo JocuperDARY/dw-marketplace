@@ -1,6 +1,6 @@
 {
   "name": "dw-marketplace",
-  "description": "Development Workflow 工具集：全流程开发准则 + GPT 模型桥接",
+  "description": "Development Workflow 工具集：开发准则、GPT 桥接与 DeepSeek Harness 任务委派",
   "owner": { "name": "JocuperDARY" },
   "plugins": [
     {
@@ -25,6 +25,18 @@
       "repository": "https://github.com/JocuperDARY/dw-marketplace",
       "license": "Apache-2.0",
       "keywords": ["gpt", "codex", "mcp", "bridge", "openai"],
+      "category": "ai-integration"
+    },
+    {
+      "name": "deepseek-harness-bridge",
+      "source": "./plugins/deepseek-harness-bridge",
+      "description": "Codex 本地 MCP 插件：通过官方 SDK 委派有界任务给独立 DeepSeek Flash 工作者，含状态、结果、续接和取消。",
+      "version": "0.1.1",
+      "author": { "name": "JocuperDARY" },
+      "homepage": "https://github.com/JocuperDARY/dw-marketplace/tree/master/plugins/deepseek-harness-bridge",
+      "repository": "https://github.com/JocuperDARY/dw-marketplace",
+      "license": "Apache-2.0",
+      "keywords": ["codex", "deepseek", "harness", "mcp", "delegation"],
       "category": "ai-integration"
     }
   ]

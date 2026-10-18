@@ -7,7 +7,8 @@ Multi-plugin marketplace repository. `plugins/` 下各插件独立维护。
 ```
 plugins/
 ├── development-workflow/   # Hooks + Skills + Rules
-└── gpt-bridge/             # MCP Server: Codex ↔ GPT
+├── gpt-bridge/             # MCP Server: Codex ↔ GPT
+└── deepseek-harness-bridge/ # Codex MCP: independent official Harness worker
 ```
 
 ## Working on development-workflow
@@ -24,6 +25,8 @@ Before modifying: identify target sub-skill/hook/rule; update the aligned versio
 - Uses `@modelcontextprotocol/sdk`.
 
 ## Pull Request Requirements
+
+For `deepseek-harness-bridge`, run `npm test` under Node.js 24.18+ after installing the locked dependencies. Tests use a local fake model runtime and a real SDK initialization with no inference. Paid model calls and real Codex installation need separate authorization and evidence. Keep `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, package metadata, marketplace entry and README aligned. Do not read GUI credentials or broaden the worker tool profile implicitly.
 
 - One change per PR
 - Update relevant plugin.json version

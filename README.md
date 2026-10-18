@@ -1,6 +1,6 @@
 # DW Marketplace
 
-Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + GPT 模型桥接。
+Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥接与 DeepSeek Harness 任务委派。
 
 ## 插件
 
@@ -8,6 +8,9 @@ Development Workflow 工具集 —— AI 编程助手的开发工作方法论 + 
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.5.2 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 0.1.1 | Codex MCP 插件：官方 SDK 独立 Flash 工作者、预算闸门、DSH 能力选择与 Windows 加密凭据 |
+
+**deepseek-harness-bridge 0.1.1**：新增独立插件，通过官方 DeepSeek Harness SDK 委派有界任务，按已安装 DSH 插件选择经审查的能力配置，限制模型请求次数并返回 usage 回执。支持指定现有 Node 和 Windows DPAPI 凭据；详见[安装与使用](./plugins/deepseek-harness-bridge/README.md)。离线验证、实际 Codex 加载和付费 Flash 执行分别记录。
 
 **5.5.2 写作准确性完善**：[dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 补充符号与别名的取舍、明确且一致的命名、按阅读需要合并重复说明，以及与条件和证据强度一致的结论；适用于技术说明、推导解释、报告与交接，保留必要定义、限定条件和正式标识。
 

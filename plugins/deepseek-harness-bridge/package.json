@@ -1,0 +1,27 @@
+{
+  "name": "deepseek-harness-bridge",
+  "version": "0.1.1",
+  "description": "A Codex MCP plugin delegating bounded tasks to an independent DeepSeek Harness worker",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=24.18.0" },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js",
+    "test:package": "node --test test/package.test.js",
+    "doctor": "node index.js --doctor"
+  },
+  "files": ["index.js", "launch.js", "src", "scripts", "skills", "docs", "test", ".codex-plugin", ".claude-plugin", ".mcp.json", "npm-shrinkwrap.json", "README.md", "CHANGELOG.md", "LICENSE"],
+  "dependencies": {
+    "@deepseek-ai/dsh-sdk-client": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.3.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JocuperDARY/dw-marketplace.git",
+    "directory": "plugins/deepseek-harness-bridge"
+  },
+  "author": { "name": "JocuperDARY" }
+}
