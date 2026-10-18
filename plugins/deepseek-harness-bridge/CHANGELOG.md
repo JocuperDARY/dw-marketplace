@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0 — 2026-10-19
+
+- New long/multi-step submissions require preauthorized total budgets. Explicit single-request inference remains available without tools or continuation; persisted legacy records keep replay compatibility.
+- Workload-aware off/low/high defaults and per-request allocation reserve up to 2048 tokens for tool-free/off checkpoints. Explicit token caps remain binding.
+- Preserve max-tokens, visible partial text and reasoning-only metadata; save partial artifacts before at most one tool-free/off recovery from the same remaining total.
+- Retry short observation-only lock conflicts with bounded backoff, preserve mutation ownership and report safe read-retry metadata.
+- Offline tests use the pinned SDK with fake streams and blocked network. No paid smoke test was run for this release.
+
 ## 0.2.0 — 2026-10-18
 
 - Add opt-in task-wide request, output-token, tool-call and elapsed-time authorization, with stage allocations and durable accounting shared by automatic stages and later continuations.

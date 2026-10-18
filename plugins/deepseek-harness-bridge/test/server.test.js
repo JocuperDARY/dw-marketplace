@@ -34,7 +34,7 @@ test('multiple production connections discover tools without reserving task owne
   await assert.rejects(access(join(state, 'owner.lock')), { code: 'ENOENT' });
 });
 
-test('MCP client can submit, wait, fetch, continue and reject invalid input', async t => {
+test('MCP enforces total authorization and the explicit one-request exception', async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-mcp-'));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
@@ -51,12 +51,15 @@ test('MCP client can submit, wait, fetch, continue and reject invalid input', as
     assert.notEqual(response.isError, true);
     return JSON.parse(response.content[0].text);
   };
-  const task = await call('dsh_submit', { requestId: 'mcp-1', prompt: 'Task', workspace });
+  const missing = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'missing-budget', prompt: 'Task', workspace } });
+  assert.equal(missing.structuredContent.error.code, 'BUDGET_REQUIRED');
+  assert.equal(manager.list().total, 0);
+  const task = await call('dsh_submit', { executionMode: 'single-request', requestId: 'mcp-1', prompt: 'Task', workspace });
   assert.equal((await call('dsh_wait', { taskId: task.taskId })).status, 'completed');
   assert.equal((await call('dsh_result', { taskId: task.taskId })).text, 'Task');
-  await call('dsh_continue', { taskId: task.taskId, requestId: 'mcp-2', prompt: 'More' });
-  await call('dsh_wait', { taskId: task.taskId });
-  assert.equal((await call('dsh_status', { taskId: task.taskId })).number, 2);
+  const continuation = await client.callTool({ name: 'dsh_continue', arguments: { taskId: task.taskId, requestId: 'mcp-2', prompt: 'More' } });
+  assert.equal(continuation.structuredContent.error.code, 'NOT_RESUMABLE');
+  assert.equal((await call('dsh_status', { taskId: task.taskId })).number, 1);
   assert.equal((await call('dsh_list')).total, 1);
   assert.equal((await call('dsh_doctor')).modelCalls, 0);
   assert.equal((await call('dsh_cancel', { taskId: task.taskId })).status, 'completed');
@@ -79,7 +82,7 @@ test('production stdio entry starts without a key and doctor makes no model call
   assert.equal(status.credentialConfigured, false);
   assert.equal(status.validation.modelCalls, 0);
   assert.equal(status.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.1-rc.2');
-  const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'no-key', workspace, prompt: 'Task' } });
+  const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', requestId: 'no-key', workspace, prompt: 'Task' } });
   assert.equal(JSON.parse(missingKey.content[0].text).error.code, 'MISSING_CREDENTIAL');
   await client.close();
 });

@@ -172,6 +172,102 @@ test('invalid total authorization is rejected without launching a worker', async
   assert.equal(launches, 0);
 });
 
+test('truncation saves partial evidence before one tool-free recovery charged to the original total', async t => {
+  const seen = [];
+  const f = await fixture(t, async args => {
+    seen.push(args);
+    if (seen.length === 1) return { ...reply(args.task, 'completed', 'unused'), terminal: 'max-tokens', text: '{"rows":[1,2',
+      output: { kind: 'partial_text', modelTruncated: true }, error: { code: 'OUTPUT_TRUNCATED', message: 'bounded fixture' } };
+    if (seen.length > 2) return reply(args.task, 'completed', 'Reviewed result', '');
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', args.task.taskId, 'partial-1.json'), 'utf8'));
+    assert.equal(saved.text, '{"rows":[1,2');
+    assert.equal(args.task.route.effort, 'off');
+    assert.equal(args.task.maxModelRequests, 1);
+    assert.equal(args.task.maxToolCalls, 0);
+    assert.equal(args.task.stageBudget.forcedCheckpoint, true);
+    assert.equal(args.resume, false);
+    assert.match(args.prompt, /NOT a completed result/);
+    return reply(args.task, 'completed', 'Recovered from visible evidence', '');
+  });
+  const task = await f.manager.submit(f.input);
+  const done = await f.manager.wait({ taskId: task.taskId });
+  assert.equal(done.status, 'completed');
+  assert.equal(done.orchestration.charged.modelRequests, 2);
+  assert.equal(done.orchestration.charged.outputTokens, 200);
+  assert.equal(done.orchestration.truncationRecoveries, 1);
+  assert.equal(done.recovery.status, 'completed');
+  assert.equal(seen.length, 2);
+  const followup = { taskId: task.taskId, requestId: 'recovered-followup', prompt: 'Review the result' };
+  await f.manager.continue(followup);
+  await f.manager.wait({ taskId: task.taskId });
+  assert.equal((await f.manager.continue(followup)).duplicate, true);
+});
+
+test('exhaustion, uncertain accounting, failed cleanup and repeated truncation never refill or loop', async t => {
+  for (const mode of ['exhausted', 'unknown', 'cleanup', 'twice']) {
+    let launches = 0;
+    const f = await fixture(t, async ({ task }) => {
+      launches++;
+      const result = { ...reply(task, 'completed', 'unused', '', mode === 'exhausted' ? null : 100), terminal: 'max-tokens', text: '{"partial":',
+        error: { code: 'OUTPUT_TRUNCATED', message: 'bounded fixture' } };
+      if (mode === 'exhausted') {
+        result.budget.modelRequests = 2;
+        result.budget.calls.push({ ...result.budget.calls[0], number: 2 });
+      }
+      if (mode === 'unknown') result.budget = null;
+      if (mode === 'cleanup') result.cleanup = 'unverified';
+      return result;
+    });
+    const task = await f.manager.submit(mode === 'exhausted' ? { ...f.input, budget: { ...authorization, totalModelRequests: 2, totalOutputTokens: 1024 } } : f.input);
+    const done = await f.manager.wait({ taskId: task.taskId });
+    assert.equal(launches, mode === 'twice' ? 2 : 1);
+    assert.equal(done.status, mode === 'cleanup' ? 'cleanup_failed' : 'failed');
+    assert.equal(done.terminal, 'max-tokens');
+    assert.ok(done.orchestration.charged.outputTokens <= done.orchestration.authorized.totalOutputTokens);
+    assert.equal((await f.manager.result({ taskId: task.taskId })).text, '{"partial":');
+  }
+});
+
+test('failed continuation publication preserves prior completed work and consumes no request', async t => {
+  let launches = 0;
+  const f = await fixture(t, async ({ task }) => { launches++; return reply(task, 'completed', 'done', ''); });
+  const first = await f.manager.submit(f.input);
+  await f.manager.wait({ taskId: first.taskId });
+  f.manager.persist = async () => { throw new Error('offline disk failure'); };
+  await assert.rejects(f.manager.continue({ taskId: first.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'STATE_WRITE_FAILED' });
+  assert.equal(f.manager.status({ taskId: first.taskId }).status, 'completed');
+  assert.equal(f.manager.status({ taskId: first.taskId }).number, 1);
+  assert.equal(launches, 1);
+  assert.equal(f.manager.requests.has('unsaved'), false);
+});
+
+test('clipped partial context is labeled for recovery and failed publication starts no recovery', async t => {
+  for (const failPublication of [false, true]) {
+    let launches = 0;
+    const partialText = 'visible'.repeat(3000) + 'tail-marker';
+    const f = await fixture(t, async ({ task, prompt }) => {
+      if (++launches === 1) return { ...reply(task, 'completed', 'unused'), terminal: 'max-tokens', text: partialText,
+        output: { kind: 'partial_text', modelTruncated: true }, error: { code: 'OUTPUT_TRUNCATED' } };
+      assert.match(prompt, /"contextTruncated":true/);
+      assert.match(prompt, /partial-1\.json/);
+      assert.match(prompt, /"kind":"partial_text"/);
+      assert.ok(!prompt.includes('tail-marker'));
+      return reply(task, 'completed', 'Regenerated result', '');
+    });
+    if (failPublication) {
+      const persist = f.manager.persist.bind(f.manager);
+      f.manager.persist = async record => { if (record.orchestration.lastPartial) throw new Error('disk failed'); await persist(record); };
+    }
+    const task = await f.manager.submit(f.input);
+    const done = await f.manager.wait({ taskId: task.taskId });
+    assert.equal(done.status, failPublication ? 'state_write_failed' : 'completed');
+    assert.equal(launches, failPublication ? 1 : 2);
+    assert.equal(f.manager.blocked, failPublication);
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'partial-1.json'), 'utf8'));
+    assert.equal(saved.text, partialText);
+  }
+});
+
 test('corrupt persisted spending cannot increase authorization after restart', async t => {
   let launches = 0;
   const runner = async ({ task }) => { launches++; return reply(task, 'completed', 'done', ''); };

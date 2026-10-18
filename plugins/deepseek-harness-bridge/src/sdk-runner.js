@@ -51,7 +51,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
     { insert: [{ id: 'bridge-budget', name: new URL('./worker-budget.js', import.meta.url).href,
       config: { budgetPath, armedPath, nonce, effort: task.route.effort, maxTokens: task.maxTokens,
         maxModelRequests: task.maxModelRequests ?? 16, maxRequestBytes: task.maxRequestBytes ?? 262144,
-        ...(task.stageBudget ? { maxOutputTokens: task.stageBudget.maxOutputTokens, checkpoint: { softDeadline: task.stageBudget.softDeadline }, toolReceiptPath: receiptPath, maxToolCalls: task.maxToolCalls } : {}) } }] },
+        ...(task.stageBudget ? { maxOutputTokens: task.stageBudget.maxOutputTokens, checkpoint: { softDeadline: task.stageBudget.softDeadline, maxTokens: task.stageBudget.checkpointTokens ?? task.maxTokens, forced: !!task.stageBudget.forcedCheckpoint }, toolReceiptPath: receiptPath, maxToolCalls: task.maxToolCalls } : {}) } }] },
     ...profile.modules.map((module, index) => ({ insert: [{ id: `bridge-extension-${index}`, name: pathToFileURL(module.path).href,
       config: { ...module.config, workspace: task.workspace, access: task.access } }] })),
     { insert: [{ id: 'bridge-files', name: new URL('./worker-tools.js', import.meta.url).href,
@@ -96,6 +96,7 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
     let failure;
     let terminal = 'unknown';
     let text = '';
+    let reasoningObserved = false;
     let cleanup = 'confirmed';
     let closePromise;
     let toolCalls = 0;
@@ -106,7 +107,7 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
     try {
       preflight(env);
       signal.throwIfAborted();
-      requireValue(task.route.provider === ROUTE.provider && task.route.model === ROUTE.model && ['high', 'max'].includes(task.route.effort),
+      requireValue(task.route.provider === ROUTE.provider && task.route.model === ROUTE.model && ['off', 'low', 'high', 'max'].includes(task.route.effort),
         'ROUTE_DENIED', 'Only the configured official Flash route is available.');
       prepared = await prepareRuntime({ task, home, env, resolveCapabilities });
       signal.throwIfAborted();
@@ -141,6 +142,7 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
         if (!received) received = receiptMatches(event, messageId);
         if (!received) return;
         if (event.type === 'assistant/message') {
+          reasoningObserved = event.data.message.content.some(block => block.type === 'reasoning');
           const blocks = event.data.message.content.filter(block => block.type === 'text');
           requireValue(blocks.every(block => typeof block.text === 'string'), 'PROTOCOL_ERROR', 'Assistant text had an invalid shape.');
           text = blocks.map(block => block.text).join('');
@@ -163,6 +165,7 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
       subscription.close();
       await pump;
       if (failure) throw failure;
+      requireValue(terminal !== 'max-tokens', 'OUTPUT_TRUNCATED', 'The provider exhausted its output allowance, which includes reasoning. Visible text is partial; an empty result may contain reasoning only.');
       requireValue(terminal === 'completed', 'INCOMPLETE_TURN', 'The worker did not produce a completed terminal event.');
       requireValue(text.trim().length > 0, 'EMPTY_RESULT', 'The completed worker supplied no text result.');
     } catch (error) {
@@ -184,8 +187,11 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
     }
     const key = env.DEEPSEEK_API_KEY;
     if (key) text = text.replaceAll(key, '[REDACTED]');
-    if (Buffer.byteLength(text) > 1024 * 1024) text = text.slice(0, 262144);
-    return { text, terminal: failure ? (terminal === 'completed' ? 'error' : terminal) : terminal, cleanup, toolCalls, budget,
+    const storageTruncated = Buffer.byteLength(text) > 1024 * 1024;
+    if (storageTruncated) text = text.slice(0, 262144);
+    const modelTruncated = terminal === 'max-tokens';
+    const output = { kind: text.trim() ? (terminal === 'completed' && !failure ? 'complete_text' : 'partial_text') : reasoningObserved ? 'reasoning_only' : 'empty', modelTruncated, reasoningObserved, visibleCharacters: text.length, storageTruncated };
+    return { text, output, terminal: failure ? (terminal === 'completed' ? 'error' : terminal) : terminal, cleanup, toolCalls, budget,
       ...(failure ? { error: failure instanceof BridgeError ? safeError(failure) : { code: signal.aborted ? 'ABORTED' : 'SDK_ERROR', message: signal.aborted ? 'Worker was stopped.' : 'Official SDK execution failed; raw provider and process diagnostics are withheld.' } } : {}) };
   };
 }

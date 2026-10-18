@@ -10,9 +10,10 @@ async function gate(t, overrides = {}) {
   t.after(() => rm(home, { recursive: true, force: true }));
   let listener;
   let assemble;
+  let prepare;
   const config = { nonce: 'attempt:1', budgetPath: join(home, 'budget.json'), armedPath: join(home, 'armed'),
     maxModelRequests: 1, maxTokens: 512, maxRequestBytes: 1024, effort: 'high', ...overrides };
-  await installBudget({ on: (event, handler) => { if (event === 'llm/stream') listener = handler; else if (event === 'system-prompt/assemble') assemble = handler; else assert.fail(event); } }, config);
+  await installBudget({ on: (event, handler) => { if (event === 'llm/stream') listener = handler; else if (event === 'system-prompt/assemble') assemble = handler; else if (event === 'agent/request') prepare = handler; else assert.fail(event); } }, config);
   const request = { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'high', maxTokens: 512,
     messages: [{ role: 'user', content: [{ type: 'text', text: 'ok' }] }] };
   const arm = () => writeFile(config.armedPath, config.nonce);
@@ -23,6 +24,7 @@ async function gate(t, overrides = {}) {
       const prepared = await assemble(assembly, {}, async () => assembly);
       options = Object.assign(options, { system: prepared.sections.map(s => s.text).join('\n'), tools: prepared.tools });
     }
+    if (prepare) Object.assign(options, await prepare({}, async () => ({ provider: options.provider, model: options.model, reasoningEffort: options.reasoningEffort, maxTokens: options.maxTokens })));
     beforeStream();
     for await (const _chunk of listener(Object.freeze(options), next)) { /* consume */ }
   };
@@ -49,8 +51,26 @@ test('stage gate reserves a final text-only checkpoint request and counts it in 
   const receipt = await g.receipt();
   assert.equal(receipt.calls[1].checkpoint, true);
   assert.equal(receipt.calls[1].reservedOutputTokens, 512);
+  assert.equal(receipt.calls[0].effort, 'high');
+  assert.equal(receipt.calls[1].effort, 'off');
   assert.equal(receipt.modelRequests, 2);
   await assert.rejects(g.collect(g.request, adapter), /MODEL_REQUEST_LIMIT|CHECKPOINT_CLOSED/);
+});
+
+test('per-request allocation keeps a small checkpoint reserve and uses released actual usage', async t => {
+  const g = await gate(t, { maxTokens: 8192, maxModelRequests: 4, maxOutputTokens: 12288, maxRequestBytes: 16384,
+    checkpoint: { maxTokens: 2048, softDeadline: Date.now() + 10000 } });
+  await g.arm();
+  const adapter = async function* () { yield { type: 'usage', usage: { outputTokens: 5000 } }; yield { type: 'finish', reason: { kind: 'tool-calls' } }; };
+  await g.collect({ ...g.request }, adapter);
+  await g.collect({ ...g.request }, adapter);
+  const afterWork = await g.receipt();
+  assert.deepEqual(afterWork.calls.map(call => call.reservedOutputTokens), [8192, 5240]);
+  await g.collect({ ...g.request }, async function* () { yield { type: 'usage', usage: { outputTokens: 100 } }; yield { type: 'finish', reason: { kind: 'stop' } }; });
+  const last = (await g.receipt()).calls[2];
+  assert.equal(last.checkpoint, true);
+  assert.equal(last.effort, 'off');
+  assert.equal(last.reservedOutputTokens, 2048);
 });
 
 test('one request is reserved before dispatch and the second cannot reach the adapter', async t => {

@@ -1,5 +1,8 @@
 export class BridgeError extends Error {
-  constructor(code, message) { super(message); this.name = 'BridgeError'; this.code = code; }
+  constructor(code, message, details = {}) {
+    super(message); this.name = 'BridgeError'; this.code = code;
+    if (details.operation === 'observation') { this.operation = 'observation'; this.retryable = details.retryable === true; this.retryAfterMs = details.retryAfterMs; }
+  }
 }
 
 export function requireValue(condition, code, message) {
@@ -8,7 +11,7 @@ export function requireValue(condition, code, message) {
 
 export function safeError(error) {
   return error instanceof BridgeError
-    ? { code: error.code, message: error.message }
+    ? { code: error.code, message: error.message, ...(error.operation === 'observation' ? { operation: error.operation, retryable: error.retryable, retryAfterMs: error.retryAfterMs } : {}) }
     : { code: 'INTERNAL_ERROR', message: 'The operation failed. Provider stderr and exception details are not exposed.' };
 }
 

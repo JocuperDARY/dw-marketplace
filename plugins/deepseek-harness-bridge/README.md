@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 0.2.0
+# DeepSeek Harness Bridge 1.0.0
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -74,13 +74,20 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
   "workspace": "D:\\worktrees\\docs-review",
   "prompt": "检查 docs/ 中的接口说明是否与 src/ 一致。仅阅读文件，返回差异、文件路径和证据。其他智能体可能同时工作，不修改或覆盖他们的内容。没有执行测试时明确说明。",
   "access": "read-only",
-  "effort": "high",
+  "executionMode": "budgeted",
+  "workload": "standard",
   "timeoutMs": 300000,
   "maxTokens": 8192,
   "maxToolCalls": 32,
-  "maxModelRequests": 16,
+  "maxModelRequests": 6,
   "maxRequestBytes": 262144,
-  "capabilityProfile": "files"
+  "capabilityProfile": "files",
+  "budget": {
+    "totalModelRequests": 32,
+    "totalOutputTokens": 65536,
+    "totalToolCalls": 64,
+    "totalDurationMs": 1200000
+  }
 }
 ```
 
@@ -88,7 +95,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 ### 在总预算内自动分阶段推进
 
-长任务可在上述参数中增加 `budget`，四项总额度均需来自用户的预先授权。例如下面的配置授权整个逻辑任务最多 32 次模型请求、65,536 输出 token、64 次工具调用和 20 分钟；这只是参数示例，不会自动执行：
+新任务默认使用 `executionMode: budgeted`，必须提供 `budget` 的四项预授权总额度。遗漏时返回 `BUDGET_REQUIRED`，不启动工作者。上例的总额度覆盖整个逻辑任务：最多 32 次模型请求、65,536 输出 token、64 次工具调用和 20 分钟。这些只是参数示例，不会自动执行；必须根据已有授权填写，不能把示例当成授权。只有一次自包含文本推理才使用显式 `single-request`：inference-only、read-only、零工具且不能续接。
 
 ```json
 {
@@ -101,13 +108,13 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 }
 ```
 
-启用后，`maxModelRequests`、`maxTokens`、`maxToolCalls`、`timeoutMs` 限制每个阶段；阶段请求数至少为 2。桥接器从剩余额度自主分配阶段预算，并预留一次文本请求保存进度。接近阶段请求数、输出额度、工具额度或时间上限时，通过 SDK 的提示组装接口要求返回检查点；保存完成、消耗已登记且进程清理确认后，自动开始下一阶段。阶段间使用新的隔离 SDK 会话，带入原始任务和已保存进度，避免历史无限增长；不复用其他桌面对话。
+`maxModelRequests`、`maxTokens`、`maxToolCalls`、`timeoutMs` 是阶段或单请求上限。桥接器从剩余总额度分配阶段预算，预留一次请求及最多 2048 输出 token 保存进度，其余工作请求按剩余额度动态分配。显式 `maxTokens` 不会被擅自提高。收尾请求使用 `off` 并禁用工具，减少推理挤占正文的风险。检查点保存、消耗登记和进程清理确认后自动开始下一阶段；各阶段使用新的隔离 SDK 会话，不复用其他桌面对话。
 
 `dsh_status` / `dsh_result` 的 `orchestration` 显示授权、已计入消耗、剩余额度、阶段数和检查点路径。总额度无法再支持工作及进度保存时返回 `paused` / `TOTAL_BUDGET_EXHAUSTED`；重复相同进度返回 `paused` / `NO_PROGRESS`。重启、幂等重放和 `dsh_continue` 都不会补充额度或延长原截止时间。需要扩大预算时由主智能体取得新授权后建立新任务。
 
-未知输出用量按该请求的预留上限计入；整阶段回执无效时保留整阶段预留额度。这里约束输出 token、请求数、工具数及经过时间，不是金额或精确输入 token 上限。检查点在请求边界生效：单次供应商请求卡住、输出截断、忽略检查点格式、清理或写盘失败仍会停止，并保留此前检查点；不会把失败自动重试成新一轮消费。详见[预算编排契约](docs/budget-orchestration.md)。
+未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。供应商 `max-tokens` 会保留部分正文到 `partial-N.json`；仅在清理和记账确认后，允许从同一总预算执行一次 `off`、零工具的恢复请求。它重新生成有效阶段 JSON，不拼接残缺 JSON，也不重复文件操作。整个任务最多一次截断恢复；其他失败不自动重试。预算不足、再次截断、格式错误或清理失败都保留非成功状态。详见[1.0.0 预算可靠性契约](docs/budget-reliability.md)。
 
-插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 的模型目录将此别名标为 DeepSeek-V4.1-Flash；服务端别名的实际版本仍以服务提供方为准。支持 high / max，默认 high；不切换到其他模型，不修改宿主自动模型白名单。模型能力、200 tok/s 和整体加速效果需要真实任务测量，本插件不预设这些结论。
+插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 的目录将别名标为 DeepSeek-V4.1-Flash；实际服务版本以提供方为准。工作类型 `mechanical`（提取/格式转换）默认 off/4096，`standard`（一般维护）默认 low/8192，`reasoning` 默认 high/16384；可显式指定 off/low/high/max，max 默认 32768。检查点和恢复请求使用 off。模型能力、200 tok/s 和整体加速效果需要真实测量，这些默认值不代表性能保证，也不修改宿主模型白名单。
 
 ## 工作区、预算和状态
 
@@ -119,15 +126,15 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 读取按最多 16384 个 UTF-16 字符分页，`sha256` 覆盖完整文件，`nextOffset` 指示下一页；任务累计历史仍受请求字节预算约束。写入先完成同目录临时文件，再原子发布；同一工作区的桥接写入方共享 `.dsh-bridge-write.lock`。锁不会自动抢占，异常退出后须核实现场再处理。该锁不约束外部编辑器或第三方工具，哈希检查与发布也不是针对所有进程的通用 CAS；文件归属和独立副本仍必需。
 
-默认时限 5 分钟，范围 1 秒至 30 分钟；maxToolCalls 默认 32（0–128），maxTokens 每请求默认 8192（256–32768）；maxModelRequests 默认 16（普通 attempt 为 1–128，编排阶段为 2–128），maxRequestBytes 默认 262144（1024–1048576）。模型请求进入 adapter 前受次数、路由、字节数和输出配置约束，初始化阶段禁止付费调用。状态返回逐调用 provider usage，未知时为 null。maxTokens 不是任务总 token 或金额上限，输入字节也不是精确 token 数。自动失败重试、标题请求和自动压缩关闭；取消后的 SDK 清理可能多用数秒。每项任务最多 16 次父级 attempt；未传 budget 的传统任务每次续接仍使用独立 attempt 预算，编排任务则始终扣减同一个总预算。状态最多 1000 项任务；prompt 最多 64 KiB，结果最多 1 MiB，单页最多 32000 个 UTF-16 code units。
+默认阶段时限 5 分钟（1 秒至 30 分钟）；maxToolCalls 默认 32，inference-only 默认 0；maxTokens 范围 256–32768；maxModelRequests 默认 6（编排阶段 2–128），单请求模式固定为 1；maxRequestBytes 默认 262144（1024–1048576）。请求在 adapter 前受次数、路由、字节数和输出配置约束，初始化禁止消费。标题请求、自动压缩和供应商通用失败重试关闭。每项任务最多 16 次父级 attempt，新多阶段任务始终使用同一总预算；旧记录保留原规则用于兼容。状态最多 1000 项任务；prompt 最多 64 KiB，结果最多 1 MiB，单页最多 32000 个 UTF-16 code units；取消后的清理可能多用数秒。
 
-只有当前 prompt 的 durable inbox 回执、`session/wait`、`turn/end: completed`、非空结果和已确认的进程退出都成立时，才报告 completed。parentAcceptance 始终由主智能体另行判断。max-tokens、缺少 terminal、SDK 错误、超时和取消均保留为非成功；不自动重试。取消不会回滚已完成的文件写入。
+只有当前 prompt 回执、`session/wait`、`turn/end: completed`、非空结果和确认的进程退出都成立时才报告 completed；编排还验证阶段 JSON。parentAcceptance 由主智能体判断。`output.kind` 区分完整正文、部分正文、仅推理、空输出；`output.modelTruncated` 表示供应商截断，`outputTruncated` 仅表示存储裁剪。`resultAvailable`、`nextOffset: null` 都不能证明完成。若截断恢复成功，仍保留原失败证据和恢复回执；其他错误如实报告。取消不回滚已写文件。
 
 任务元数据与结果写入状态目录；Harness 在每项任务的隔离 home 中保存会话历史和工具记录，方便成功后的续接。不要把该目录提交到仓库或随插件打包。桥接器不把原始 provider stderr 返回给模型；错误使用固定类别。MCP 的配置诊断成功不等于 API Key 有效或付费推理成功。
 
 ## 异常退出与恢复
 
-MCP 握手、工具发现、doctor 和 capabilities 不独占任务状态目录，因此桌面发现连接与聊天连接可以并存。任务工具按需取得 owner.lock；活动任务及其自动阶段之间保持独占，结果持久化且清理确认后，在读操作结束时自动释放。后续连接可以读取结果或续接逻辑任务；传统任务恢复原 SDK sessionId，预算编排任务从检查点建立新的隔离 SDK 会话。其他连接在任务执行期间访问同一状态目录会收到 STATE_LOCKED，应等待所属连接完成；不能删除它的锁。
+MCP 握手、工具发现、doctor 和 capabilities 不独占状态目录。任务工具按需取得 owner.lock，活动任务和自动阶段之间保持独占，结果持久化且清理确认后释放。观察操作遇到短暂冲突最多等待 1500 ms，`dsh_wait` 与原超时共用此额度；仍冲突时返回 `STATE_LOCKED`、`operation: observation` 和重试间隔。仅重试原读取，不重新提交或消费。持续冲突需核对持有者，不能删除锁；这不证明旧持有者是否仍存活。新的预算阶段使用隔离 SDK 会话，不影响其他桌面对话。
 
 正常关闭会先取消该连接的活动任务、等待 SDK 进程退出，再释放 owner.lock。无法确认清理或写入失败时保留锁并阻止新任务。已有锁不会因为 PID 不存在就被自动删除。
 

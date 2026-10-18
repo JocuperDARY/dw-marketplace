@@ -12,6 +12,7 @@ import { resolveProfile } from '../src/capabilities.js';
 import { createSdkRunner, workerEnvironment } from '../src/sdk-runner.js';
 import { ConnectionTasks } from '../src/connection-tasks.js';
 import { createServer } from '../src/server.js';
+import { TaskManager } from '../src/tasks.js';
 
 test('real SDK and MCP complete checkpoint orchestration using an offline model with network blocked', { timeout: 45000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-orchestration-sdk-'));
@@ -59,5 +60,43 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
   assert.match((await call('dsh_result', { taskId: submitted.taskId })).text, /Finished using saved evidence/);
   const saved = JSON.parse(await readFile(join(root, 'state', 'tasks', submitted.taskId, 'task.json'), 'utf8'));
   assert.notEqual(saved.orchestration.stages[0].sessionId, saved.orchestration.stages[1].sessionId);
+  const followup = { taskId: submitted.taskId, requestId: 'offline-continue', prompt: 'Confirm the saved summary.' };
+  await call('dsh_continue', followup);
+  const continued = await call('dsh_wait', { taskId: submitted.taskId, timeoutMs: 30000 });
+  assert.equal(continued.status, 'completed');
+  assert.equal(continued.orchestration.charged.modelRequests, 4);
+  assert.equal(continued.orchestration.deadlineAt, done.orchestration.deadlineAt);
+  assert.equal((await call('dsh_continue', followup)).duplicate, true);
   await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
+});
+
+for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers ${mode} with one off request and no network`, { timeout: 30000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-truncation-sdk-'));
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const modulePath = fileURLToPath(new URL('./fixtures/checkpoint-model.js', import.meta.url));
+  const profile = await resolveProfile('offline', { capabilityProfiles: [{ id: 'offline', access: 'read-only', fileTools: false,
+    modules: [{ path: modulePath, sha256: createHash('sha256').update(await readFile(modulePath)).digest('hex'), tools: [] }] }] });
+  const runner = createSdkRunner({ resolveCapabilities: async () => profile,
+    env: { ...workerEnvironment(), DEEPSEEK_API_KEY: 'offline-not-a-credential' },
+    clientFactory: options => new HarnessClient({ ...options, env: { ...options.env,
+      NODE_OPTIONS: `${options.env.NODE_OPTIONS} --import=${new URL('./fixtures/offline-network.js', import.meta.url).href}` } }),
+  });
+  const manager = await new TaskManager({ dataDir: join(root, 'state'), runner, resolveCapabilities: async () => profile }).open();
+  t.after(async () => { await manager.close(); await rm(root, { recursive: true, force: true }); });
+  const submitted = await manager.submit({ requestId: 'offline-truncation', prompt: `offline-truncate ${mode}: Summarize the supplied text.`, workspace,
+    capabilityProfile: 'offline', workload: mode === 'reasoning-only' ? 'reasoning' : 'mechanical', maxTokens: 4096, maxModelRequests: 2, maxToolCalls: 0, timeoutMs: 10000,
+    budget: { totalModelRequests: 4, totalOutputTokens: 12288, totalToolCalls: 0, totalDurationMs: 25000 } });
+  const done = await manager.wait({ taskId: submitted.taskId, timeoutMs: 25000 });
+  assert.equal(done.status, 'completed', JSON.stringify(done));
+  assert.equal(done.recovery.status, 'completed');
+  assert.equal(done.orchestration.charged.modelRequests, 2);
+  assert.equal(done.orchestration.charged.outputTokens, 4196);
+  assert.equal(done.orchestration.charged.toolCalls, 0);
+  const result = await manager.result({ taskId: submitted.taskId });
+  assert.equal(JSON.parse(result.text).state, 'completed');
+  const partial = JSON.parse(await readFile(done.orchestration.lastPartial.path, 'utf8'));
+  assert.equal(partial.output.kind, mode === 'partial-json' ? 'partial_text' : 'reasoning_only');
+  assert.equal(partial.output.modelTruncated, true);
+  assert.ok(!JSON.stringify({ partial, result }).includes('private-reasoning-marker'));
 });

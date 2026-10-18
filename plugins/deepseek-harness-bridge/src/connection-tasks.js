@@ -1,5 +1,8 @@
 import { TaskManager } from './tasks.js';
-import { requireValue } from './errors.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { BridgeError, requireValue } from './errors.js';
+
+const OBSERVATIONS = new Set(['status', 'list', 'wait', 'result']);
 
 // Tool discovery must not take the exclusive task-store lock. Desktop hosts
 // may open a discovery connection and several conversation connections at once.
@@ -12,6 +15,7 @@ export class ConnectionTasks {
     this.releaseFailed = false;
     this.transitions = Promise.resolve();
     this.watched = new WeakSet();
+    this.closing = new AbortController();
   }
 
   transition(operation) {
@@ -41,13 +45,32 @@ export class ConnectionTasks {
   }
 
   async use(method, ...args) {
-    const manager = await this.transition(async () => {
-      requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
-      requireValue(!this.releaseFailed, 'RECOVERY_REQUIRED', 'Task ownership release failed; reconcile the saved state.');
-      this.manager ??= await new TaskManager(this.options).open();
-      this.users++;
-      return this.manager;
-    });
+    const startedAt = Date.now();
+    const waitMs = method === 'wait' ? args[0]?.timeoutMs ?? 10000 : Infinity;
+    const allowance = OBSERVATIONS.has(method) ? Math.min(this.options.observationWaitMs ?? 1500, waitMs) : 0;
+    let manager;
+    let backoff = 25;
+    while (!manager) {
+      try {
+        manager = await this.transition(async () => {
+          requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+          requireValue(!this.releaseFailed, 'RECOVERY_REQUIRED', 'Task ownership release failed; reconcile the saved state.');
+          this.manager ??= await new TaskManager(this.options).open();
+          this.users++;
+          return this.manager;
+        });
+      } catch (error) {
+        if (error.code !== 'STATE_LOCKED' || !OBSERVATIONS.has(method)) throw error;
+        const remaining = allowance - (Date.now() - startedAt);
+        if (remaining <= 0) throw new BridgeError('STATE_LOCKED', 'Ownership remains unavailable after a bounded read wait. Retry this observation only; if it persists, reconcile the owner. No worker was launched and no lock was removed.', { retryable: true, operation: 'observation', retryAfterMs: 1000 });
+        // Never sleep inside the transition queue: shutdown and an existing owner
+        // must be able to release their lease while this connection is waiting.
+        try { await delay(Math.min(backoff, remaining), undefined, { signal: this.closing.signal }); }
+        catch { throw new BridgeError('CLOSED', 'The bridge is closing.'); }
+        backoff = Math.min(200, backoff * 2);
+      }
+    }
+    if (method === 'wait') args[0] = { ...args[0], timeoutMs: Math.max(0, waitMs - (Date.now() - startedAt)) };
     try { return await manager[method](...args); }
     finally {
       this.watch(manager);
@@ -65,6 +88,7 @@ export class ConnectionTasks {
 
   close() {
     this.closed = true;
+    this.closing.abort();
     return this.transition(async () => {
       if (this.manager) await this.manager.close();
       this.manager = null;

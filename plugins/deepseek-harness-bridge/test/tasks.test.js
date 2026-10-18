@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,7 @@ async function fixture(t, runner) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-bridge-'));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
-  const manager = new TaskManager({ dataDir: join(root, 'state'), runner });
+  const manager = new TaskManager({ dataDir: join(root, 'state'), runner, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) });
   await manager.open();
   t.after(async () => { await manager.close(); await rm(root, { recursive: true, force: true }); });
   return { manager, workspace, root };
@@ -17,7 +18,7 @@ async function fixture(t, runner) {
 
 test('a submitted task finishes with durable status and retrievable output', async t => {
   const { manager, workspace } = await fixture(t, async () => ({ terminal: 'completed', text: 'result', cleanup: 'confirmed' }));
-  const submitted = await manager.submit({ requestId: 'request-1', prompt: 'Summarize the files.', workspace });
+  const submitted = await manager.submit({ executionMode: 'single-request', requestId: 'request-1', prompt: 'Summarize the files.', workspace });
   assert.equal(submitted.status, 'running');
   const done = await manager.wait({ taskId: submitted.taskId, timeoutMs: 1000 });
   assert.equal(done.status, 'completed');
@@ -34,7 +35,7 @@ test('first-save failure does not publish a phantom task or request', async t =>
   let launches = 0;
   const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
   manager.persist = async () => { throw new Error('offline disk failure'); };
-  const input = { requestId: 'disk-failure', prompt: 'task', workspace };
+  const input = { executionMode: 'single-request', requestId: 'disk-failure', prompt: 'task', workspace };
   await assert.rejects(manager.submit(input), { code: 'STATE_WRITE_FAILED' });
   assert.equal(launches, 0);
   assert.equal(manager.records.size, 0);
@@ -43,12 +44,11 @@ test('first-save failure does not publish a phantom task or request', async t =>
   await assert.rejects(manager.submit(input), { code: 'RECOVERY_REQUIRED' });
 });
 
-test('failed continuation save preserves the completed attempt and its receipt', async t => {
+test('single-request authorization cannot be continued or refilled', async t => {
   const { manager, workspace } = await fixture(t, completed);
-  const task = await manager.submit({ requestId: 'saved', prompt: 'task', workspace });
+  const task = await manager.submit({ executionMode: 'single-request', requestId: 'saved', prompt: 'task', workspace });
   await manager.wait({ taskId: task.taskId });
-  manager.persist = async () => { throw new Error('offline disk failure'); };
-  await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'STATE_WRITE_FAILED' });
+  await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'NOT_RESUMABLE' });
   assert.equal(manager.status({ taskId: task.taskId }).number, 1);
   assert.equal(manager.status({ taskId: task.taskId }).status, 'completed');
   assert.equal(manager.requests.has('unsaved'), false);
@@ -72,38 +72,33 @@ test('startup removes only an empty unpublished task directory', async t => {
 test('idempotent retries do not require credentials or start a new attempt', async t => {
   let launches = 0;
   const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
-  const input = { requestId: 'accepted', prompt: 'task', workspace };
+  const input = { executionMode: 'single-request', requestId: 'accepted', prompt: 'task', workspace };
   const first = await manager.submit(input);
   await manager.wait({ taskId: first.taskId });
   const deny = () => { throw Object.assign(new Error('not configured'), { code: 'MISSING_CREDENTIAL' }); };
   assert.equal((await manager.submit(input, deny)).duplicate, true);
-  await assert.rejects(manager.submit({ ...input, prompt: 'changed' }, deny), { code: 'REQUEST_CONFLICT' });
-  await assert.rejects(manager.submit({ ...input, requestId: 'new' }, deny), { code: 'MISSING_CREDENTIAL' });
-  const followup = { taskId: first.taskId, requestId: 'accepted-next', prompt: 'more' };
-  await manager.continue(followup);
-  await manager.wait({ taskId: first.taskId });
-  assert.equal((await manager.continue(followup, deny)).duplicate, true);
-  await assert.rejects(manager.continue({ ...followup, requestId: 'new-next' }, deny), { code: 'MISSING_CREDENTIAL' });
-  assert.equal(launches, 2);
+  await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, prompt: 'changed' }, deny), { code: 'REQUEST_CONFLICT' });
+  await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, requestId: 'new' }, deny), { code: 'MISSING_CREDENTIAL' });
+  assert.equal(launches, 1);
 });
 
 test('concurrent duplicate submissions launch once; changed input conflicts and other tasks are busy', async t => {
   let launches = 0;
   const { manager, workspace } = await fixture(t, args => { launches++; return untilAborted(args); });
-  const input = { requestId: 'idempotent-1', prompt: 'Task', workspace };
+  const input = { executionMode: 'single-request', requestId: 'idempotent-1', prompt: 'Task', workspace };
   const [first, duplicate] = await Promise.all([manager.submit(input), manager.submit(input)]);
   assert.equal(first.taskId, duplicate.taskId);
   assert.equal(duplicate.duplicate, true);
   assert.equal(launches, 1);
-  await assert.rejects(manager.submit({ ...input, prompt: 'Changed' }), { code: 'REQUEST_CONFLICT' });
-  await assert.rejects(manager.submit({ ...input, requestId: 'other' }), { code: 'BUSY' });
+  await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, prompt: 'Changed' }), { code: 'REQUEST_CONFLICT' });
+  await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, requestId: 'other' }), { code: 'BUSY' });
   assert.equal((await manager.cancel({ taskId: first.taskId })).status, 'cancelled');
   assert.equal((await manager.result({ taskId: first.taskId })).text, 'partial');
 });
 
 test('wall timeout stops and reaps the worker before publishing timed_out', async t => {
   const { manager, workspace } = await fixture(t, untilAborted);
-  const task = await manager.submit({ requestId: 'timed', prompt: 'Task', workspace, timeoutMs: 1000 });
+  const task = await manager.submit({ executionMode: 'single-request', requestId: 'timed', prompt: 'Task', workspace, timeoutMs: 1000 });
   const done = await manager.wait({ taskId: task.taskId, timeoutMs: 3000 });
   assert.equal(done.status, 'timed_out');
   assert.equal(done.cleanup, 'confirmed');
@@ -112,23 +107,28 @@ test('wall timeout stops and reaps the worker before publishing timed_out', asyn
 
 test('cleanup failure retains ownership and blocks later workers and restarts', async t => {
   const { manager, workspace, root } = await fixture(t, async () => ({ terminal: 'completed', text: 'result', cleanup: 'unverified' }));
-  const task = await manager.submit({ requestId: 'unclean', prompt: 'Task', workspace });
+  const task = await manager.submit({ executionMode: 'single-request', requestId: 'unclean', prompt: 'Task', workspace });
   assert.equal((await manager.wait({ taskId: task.taskId, timeoutMs: 1000 })).status, 'cleanup_failed');
-  await assert.rejects(manager.submit({ requestId: 'blocked', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
+  await assert.rejects(manager.submit({ executionMode: 'single-request', requestId: 'blocked', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
   await manager.close();
   await access(join(root, 'state', 'owner.lock'));
   const next = new TaskManager({ dataDir: join(root, 'state'), runner: completed });
   await assert.rejects(next.open(), { code: 'STATE_LOCKED' });
 });
 
-test('completed records survive restart and continuation preserves session and old result', async t => {
+test('legacy records retain idempotent replay and same-session continuation after upgrade', async t => {
   const { manager, workspace, root } = await fixture(t, completed);
-  const input = { requestId: 'first', prompt: 'Task', workspace };
-  const first = await manager.submit(input);
+  const input = { requestId: 'first', prompt: 'Task', workspace, effort: 'high', maxTokens: 8192, maxModelRequests: 1, maxToolCalls: 0, capabilityProfile: 'inference-only' };
+  const first = await manager.submit({ ...input, executionMode: 'single-request' });
   await manager.wait({ taskId: first.taskId, timeoutMs: 1000 });
+  // Serialize the exact pre-1.0 record/fingerprint shape, including explicit caps.
+  const record = manager.record(first.taskId);
+  delete record.planning;
+  record.attempts[0].fingerprint = createHash('sha256').update(JSON.stringify({ prompt: input.prompt, workspace: record.workspace, access: 'read-only', effort: 'high', timeoutMs: 300000, maxTokens: 8192, maxToolCalls: 0, maxModelRequests: 1, maxRequestBytes: 262144, capabilityProfile: 'inference-only', capabilityDigest: 'offline' })).digest('hex');
+  await manager.persist(record);
   await manager.close();
   let resumed;
-  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: async args => { resumed = args; return { terminal: 'completed', text: 'continued', cleanup: 'confirmed' }; } }).open();
+  const next = await new TaskManager({ dataDir: join(root, 'state'), resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }), runner: async args => { resumed = args; return { terminal: 'completed', text: 'continued', cleanup: 'confirmed' }; } }).open();
   t.after(() => next.close());
   assert.equal((await next.submit(input)).duplicate, true);
   const second = await next.continue({ taskId: first.taskId, requestId: 'second', prompt: 'More' });
@@ -144,9 +144,9 @@ test('completed records survive restart and continuation preserves session and o
 test('state/workspace overlap and input limits reject before launching', async t => {
   let launches = 0;
   const { manager, workspace, root } = await fixture(t, async () => { launches++; return completed(); });
-  const input = { requestId: 'invalid', prompt: 'Task', workspace };
-  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 32769 }, { maxToolCalls: -1 }, { maxModelRequests: 0 }, { maxRequestBytes: 1023 }, { effort: 'low' }, { timeoutMs: 1 }]) {
-    await assert.rejects(manager.submit({ ...input, ...overrides }), { code: 'INVALID_ARGUMENT' });
+  const input = { executionMode: 'single-request', requestId: 'invalid', prompt: 'Task', workspace };
+  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 32769 }, { maxToolCalls: -1 }, { maxModelRequests: 0 }, { maxRequestBytes: 1023 }, { effort: 'invalid' }, { timeoutMs: 1 }]) {
+    await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, ...overrides }), { code: 'INVALID_ARGUMENT' });
   }
   assert.equal(launches, 0);
 });
@@ -154,7 +154,7 @@ test('state/workspace overlap and input limits reject before launching', async t
 test('noncompleted and oversized results are failed, not accepted', async t => {
   const { manager, workspace } = await fixture(t, async ({ prompt }) => ({ terminal: prompt === 'truncated' ? 'max-tokens' : 'completed', text: prompt === 'truncated' ? 'partial' : 'x'.repeat(1048577), cleanup: 'confirmed' }));
   for (const prompt of ['truncated', 'oversized']) {
-    const task = await manager.submit({ requestId: prompt, prompt, workspace });
+    const task = await manager.submit({ executionMode: 'single-request', requestId: prompt, prompt, workspace });
     const done = await manager.wait({ taskId: task.taskId, timeoutMs: 1000 });
     assert.equal(done.status, 'failed');
     assert.equal(done.parentAcceptance, 'not_assessed');
@@ -163,7 +163,7 @@ test('noncompleted and oversized results are failed, not accepted', async t => {
 
 test('incomplete saved execution is marked interrupted and cannot silently resume', async t => {
   const { manager, workspace, root } = await fixture(t, completed);
-  const task = await manager.submit({ requestId: 'saved', prompt: 'Task', workspace });
+  const task = await manager.submit({ executionMode: 'single-request', requestId: 'saved', prompt: 'Task', workspace });
   await manager.wait({ taskId: task.taskId, timeoutMs: 1000 });
   await manager.close();
   const path = join(root, 'state', 'tasks', task.taskId, 'task.json');
@@ -171,9 +171,9 @@ test('incomplete saved execution is marked interrupted and cannot silently resum
   record.attempts[0].status = 'running';
   record.attempts[0].cleanup = 'pending';
   await writeFile(path, JSON.stringify(record));
-  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
   assert.equal(next.status({ taskId: task.taskId }).status, 'interrupted');
-  await assert.rejects(next.submit({ requestId: 'other', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
+  await assert.rejects(next.submit({ executionMode: 'single-request', requestId: 'other', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
   await next.close();
 });
 
@@ -189,7 +189,7 @@ for (const stage of ['saveResult', 'persist']) {
       if (stage === 'saveResult' || args[0].attempts.at(-1).status === 'completed') { entered(); await gate; }
       return original(...args);
     };
-    const task = await manager.submit({ requestId: `publish-${stage}`, prompt: 'Task', workspace });
+    const task = await manager.submit({ executionMode: 'single-request', requestId: `publish-${stage}`, prompt: 'Task', workspace });
     await reached;
     try {
       assert.equal(manager.status({ taskId: task.taskId }).status, 'running');

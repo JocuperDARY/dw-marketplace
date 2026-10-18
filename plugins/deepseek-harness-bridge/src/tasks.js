@@ -3,7 +3,8 @@ import { mkdir, open, readFile, readdir, realpath, rename, rmdir, stat, unlink, 
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { resolveProfile } from './capabilities.js';
-import { allocateStage, budgetSummary, normalizeBudget, runOrchestrated, validateSavedBudget } from './orchestration.js';
+import { allocateStage, budgetSummary, runOrchestrated, validateSavedBudget } from './orchestration.js';
+import { planExecution } from './planning.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -124,20 +125,19 @@ export class TaskManager {
       const id = requestId(input.requestId);
       const workspace = await this.workspace(input.workspace);
       const access = input.access ?? 'read-only';
-      const effort = input.effort ?? 'high';
+      const previous = this.requests.get(id);
+      const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined;
+      const planned = planExecution(input, { legacy: !!legacy });
+      const { effort, maxTokens, maxToolCalls, maxModelRequests, budget } = planned;
       requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
-      requireValue(['high', 'max'].includes(effort), 'INVALID_ARGUMENT', 'effort must be high or max.');
       const timeoutMs = boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
-      const maxTokens = boundedInteger(input.maxTokens, 8192, 256, 32768, 'maxTokens');
-      const maxToolCalls = boundedInteger(input.maxToolCalls, 32, 0, 128, 'maxToolCalls');
-      const maxModelRequests = boundedInteger(input.maxModelRequests, 16, 1, 128, 'maxModelRequests');
       const maxRequestBytes = boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes');
-      const budget = normalizeBudget(input.budget, maxModelRequests);
-      const profile = await this.resolveCapabilities(input.capabilityProfile || 'files');
+      const profile = await this.resolveCapabilities(planned.capabilityProfile);
       requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}) });
+      const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings };
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
@@ -146,7 +146,7 @@ export class TaskManager {
       const record = { schemaVersion: 1, taskId: randomUUID(), sessionId: `bridge-${randomUUID()}`, workspace,
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
-        createdAt: new Date().toISOString(), attempts: [] };
+        createdAt: new Date().toISOString(), planning, attempts: [] };
       if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [] };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
       try { return await this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false }); }
@@ -168,6 +168,7 @@ export class TaskManager {
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
+      requireValue(record.planning?.executionMode !== 'single-request', 'NOT_RESUMABLE', 'A single-request authorization is spent; continuing requires a new explicitly authorized task.');
       requireValue(record.attempts.length < 16, 'ATTEMPT_LIMIT', 'A task supports at most 16 attempts.');
       requireValue(record.attempts.at(-1).status === 'completed' || (record.orchestration && record.attempts.at(-1).status === 'paused'), 'NOT_RESUMABLE', 'Only a completed or safely paused orchestrated task can continue; failed execution needs explicit recovery.');
       if (record.orchestration) allocateStage(record, timeoutMs);
@@ -205,6 +206,10 @@ export class TaskManager {
             const path = join(this.tasksDir, record.taskId, `checkpoint-${number}.json`);
             await atomicWrite(path, text);
             return path;
+          }, savePartial: async (number, partial) => {
+            const path = join(this.tasksDir, record.taskId, `partial-${number}.json`);
+            await atomicWrite(path, JSON.stringify(partial));
+            return path;
           } }) : await this.runner({ task: clone(record), prompt, resume, signal: active.controller.signal, home });
       } catch (error) {
         if (record.orchestration) throw error;
@@ -216,12 +221,16 @@ export class TaskManager {
       finished.toolCalls = output.toolCalls ?? null;
       finished.budget = output.budget ?? null;
       finished.error = output.error ?? null;
+      finished.output = output.output ?? { kind: output.text?.trim() ? (output.terminal === 'completed' ? 'complete_text' : 'partial_text') : 'empty', modelTruncated: output.terminal === 'max-tokens', reasoningObserved: false };
+      if (output.recovery) finished.recovery = output.recovery;
       finished.status = active.reason ?? (['completed', 'paused'].includes(finished.terminal) ? finished.terminal : 'failed');
       if (output.pauseReason) finished.pauseReason = output.pauseReason;
       const bytes = Buffer.from(typeof output.text === 'string' ? output.text : '', 'utf8');
-      finished.outputTruncated = bytes.length > MAX_RESULT_BYTES;
+      finished.outputTruncated = output.output?.storageTruncated === true || bytes.length > MAX_RESULT_BYTES;
+      finished.output.storageTruncated = finished.outputTruncated;
       const text = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8');
       if (finished.outputTruncated && finished.status === 'completed') finished.status = 'failed';
+      if (finished.outputTruncated && finished.output.kind === 'complete_text') finished.output.kind = 'partial_text';
       if (finished.cleanup !== 'confirmed') { finished.status = 'cleanup_failed'; this.blocked = true; }
       await this.saveResult(record, finished, text);
       finished.outputBytes = Buffer.byteLength(text);
@@ -253,6 +262,7 @@ export class TaskManager {
       access: record.access, maxTokensPerRequest: record.maxTokens, maxToolCalls: record.maxToolCalls,
       maxModelRequests: record.maxModelRequests ?? 16, maxRequestBytes: record.maxRequestBytes ?? 262144,
       capabilityProfile: record.capabilityProfile || 'files', capabilityDigest: record.capabilityDigest ?? null,
+      planning: record.planning ?? { executionMode: 'legacy' },
       ...(record.orchestration ? { orchestration: budgetSummary(record.orchestration) } : {}),
       ...publicAttempt, parentAcceptance: 'not_assessed' });
   }
