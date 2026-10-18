@@ -88,7 +88,7 @@ test('state/workspace overlap and input limits reject before launching', async t
   let launches = 0;
   const { manager, workspace, root } = await fixture(t, async () => { launches++; return completed(); });
   const input = { requestId: 'invalid', prompt: 'Task', workspace };
-  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 32769 }, { maxToolCalls: 0 }, { effort: 'low' }, { timeoutMs: 1 }]) {
+  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 32769 }, { maxToolCalls: -1 }, { maxModelRequests: 0 }, { maxRequestBytes: 1023 }, { effort: 'low' }, { timeoutMs: 1 }]) {
     await assert.rejects(manager.submit({ ...input, ...overrides }), { code: 'INVALID_ARGUMENT' });
   }
   assert.equal(launches, 0);

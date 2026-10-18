@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Codex MCP plugin delegating bounded tasks to an independent DeepSeek Harness worker",
   "type": "module",
   "license": "Apache-2.0",
@@ -11,7 +11,7 @@
     "test:package": "node --test test/package.test.js",
     "doctor": "node index.js --doctor"
   },
-  "files": ["index.js", "src", "skills", "docs", "test", ".codex-plugin", ".claude-plugin", ".mcp.json", "npm-shrinkwrap.json", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["index.js", "launch.js", "src", "scripts", "skills", "docs", "test", ".codex-plugin", ".claude-plugin", ".mcp.json", "npm-shrinkwrap.json", "README.md", "CHANGELOG.md", "LICENSE"],
   "dependencies": {
     "@deepseek-ai/dsh-sdk-client": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",

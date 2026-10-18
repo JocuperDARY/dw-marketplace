@@ -2,8 +2,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { safeError } from './errors.js';
+import { capabilities } from './capabilities.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 const taskId = z.string().uuid();
 const requestId = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const prompt = z.string().min(1).max(65536).describe('Bounded assignment with context, file ownership, acceptance criteria and required evidence.');
@@ -12,11 +13,14 @@ const attempt = z.number().int().min(1).max(16).optional();
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
-    { name: 'dsh_submit', description: 'Start one independent official DeepSeek Flash worker. Paid model calls require existing user authorization and a configured API key. Use an isolated workspace. Returns immediately with a task ID. Only bounded text file tools are available; no shell, tests, subagents, GUI control or desktop-login reuse.',
+    { name: 'dsh_submit', description: 'Start one independent official DeepSeek Flash worker. Paid calls require existing user authorization and an API key. Returns immediately. Default tools are bounded text files; select a reviewed local capabilityProfile for additional installed DSH capabilities. No desktop-login/session reuse.',
       schema: z.object({ requestId, prompt, workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state.'),
         access: z.enum(['read-only', 'workspace-write']).optional(), effort: z.enum(['high', 'max']).optional(), timeoutMs,
         maxTokens: z.number().int().min(256).max(32768).optional().describe('Output token cap per model request, default 8192; not a whole-task currency/token cap.'),
-        maxToolCalls: z.number().int().min(1).max(128).optional() }).strict(),
+        maxToolCalls: z.number().int().min(0).max(128).optional(),
+        maxModelRequests: z.number().int().min(1).max(128).optional().describe('Hard official SDK model-request limit per attempt, including auxiliary calls. Default 16. No automatic retries.'),
+        maxRequestBytes: z.number().int().min(1024).max(1048576).optional().describe('Maximum serialized model input bytes per request, default 262144. Not a tokenizer or currency estimate.'),
+        capabilityProfile: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional().describe('files (default), inference-only, or a reviewed profile from dsh_capabilities.') }).strict(),
       run: input => { preflight(); return manager.submit(input); }, write: true, network: true },
     { name: 'dsh_status', description: 'Read one task attempt and its process-cleanup status. completed means worker completion; parent acceptance is separate.',
       schema: z.object({ taskId, attempt }).strict(), run: input => manager.status(input) },
@@ -33,6 +37,8 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
       schema: z.object({ taskId }).strict(), run: input => manager.cancel(input), write: true },
     { name: 'dsh_doctor', description: 'Check local configuration and dependency versions without model calls or credential values. Does not prove paid execution or desktop integration.',
       schema: z.object({}).strict(), run: () => doctor() },
+    { name: 'dsh_capabilities', description: 'Inventory installed DSH package metadata and available reviewed worker profiles, without executing third-party code or reading credentials. Installed and runtime-verified are separate states. Use this to choose a minimal task-specific capabilityProfile.',
+      schema: z.object({}).strict(), run: () => capabilities() },
   ];
   const server = new Server({ name: 'deepseek-harness-bridge', version: VERSION }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: definitions.map(({ name, description, schema, write, network }) => ({

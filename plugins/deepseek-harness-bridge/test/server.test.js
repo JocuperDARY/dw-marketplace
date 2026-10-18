@@ -22,7 +22,7 @@ test('MCP client can submit, wait, fetch, continue and reject invalid input', as
   t.after(async () => { await client.close(); await server.close(); await manager.close(); await rm(root, { recursive: true, force: true }); });
   await server.connect(serverSide);
   await client.connect(clientSide);
-  assert.equal((await client.listTools()).tools.length, 8);
+  assert.equal((await client.listTools()).tools.length, 9);
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args });
     assert.notEqual(response.isError, true);

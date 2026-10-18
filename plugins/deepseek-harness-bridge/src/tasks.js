@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { BridgeError, boundedInteger, requireValue } from './errors.js';
+import { resolveProfile } from './capabilities.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -29,9 +30,10 @@ function requestId(value) {
 }
 
 export class TaskManager {
-  constructor({ dataDir, runner }) {
+  constructor({ dataDir, runner, resolveCapabilities = resolveProfile }) {
     this.dataDir = dataDir;
     this.runner = runner;
+    this.resolveCapabilities = resolveCapabilities;
     this.records = new Map();
     this.requests = new Map();
     this.active = null;
@@ -118,14 +120,21 @@ export class TaskManager {
       requireValue(['high', 'max'].includes(effort), 'INVALID_ARGUMENT', 'effort must be high or max.');
       const timeoutMs = boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
       const maxTokens = boundedInteger(input.maxTokens, 8192, 256, 32768, 'maxTokens');
-      const maxToolCalls = boundedInteger(input.maxToolCalls, 32, 1, 128, 'maxToolCalls');
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls });
+      const maxToolCalls = boundedInteger(input.maxToolCalls, 32, 0, 128, 'maxToolCalls');
+      const maxModelRequests = boundedInteger(input.maxModelRequests, 16, 1, 128, 'maxModelRequests');
+      const maxRequestBytes = boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes');
+      const profile = await this.resolveCapabilities(input.capabilityProfile || 'files');
+      requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
+      const capabilityProfile = profile.id;
+      const capabilityDigest = profile.digest;
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
       requireValue(this.records.size < 1000, 'STORE_LIMIT', 'The bridge has reached its 1000-task retention limit; archive old state while stopped.');
       const record = { schemaVersion: 1, taskId: randomUUID(), sessionId: `bridge-${randomUUID()}`, workspace,
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
+        maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), attempts: [] };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
       this.records.set(record.taskId, record);
@@ -178,6 +187,7 @@ export class TaskManager {
       finished.cleanup = output.cleanup === 'confirmed' ? 'confirmed' : 'unverified';
       finished.terminal = output.terminal ?? 'unknown';
       finished.toolCalls = output.toolCalls ?? null;
+      finished.budget = output.budget ?? null;
       finished.error = output.error ?? null;
       finished.status = active.reason ?? (finished.terminal === 'completed' ? 'completed' : 'failed');
       const bytes = Buffer.from(typeof output.text === 'string' ? output.text : '', 'utf8');
@@ -213,6 +223,8 @@ export class TaskManager {
     const { fingerprint, ...publicAttempt } = attempt;
     return clone({ taskId: record.taskId, sessionId: record.sessionId, route: record.route, workspace: record.workspace,
       access: record.access, maxTokensPerRequest: record.maxTokens, maxToolCalls: record.maxToolCalls,
+      maxModelRequests: record.maxModelRequests ?? 16, maxRequestBytes: record.maxRequestBytes ?? 262144,
+      capabilityProfile: record.capabilityProfile || 'files', capabilityDigest: record.capabilityDigest ?? null,
       ...publicAttempt, parentAcceptance: 'not_assessed' });
   }
 

@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, sep, win32 } from 'node:path';
 import { requireValue } from './errors.js';
 
 const MAX_FILE_BYTES = 262144;
-const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.env(?:\..*)?|\.credentials(?:\..*)?|credentials(?:\..*)?|node_modules)$/i;
+const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.env(?:\..*)?|\.credentials(?:\..*)?|credentials(?:\..*)?|api-key\.dpapi|DeepSeekHarnessBridge|node_modules)$/i;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const contained = (root, target) => {
   const value = relative(root, target);

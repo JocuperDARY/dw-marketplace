@@ -41,7 +41,7 @@ test('MCP entry, onboarding and packaged skill references resolve without shell 
   const native = await json('.codex-plugin/plugin.json');
   const mcp = (await json('.mcp.json')).mcpServers['deepseek-harness-bridge'];
   assert.equal(mcp.command, 'node');
-  assert.deepEqual(mcp.args, ['${CLAUDE_PLUGIN_ROOT}/index.js']);
+  assert.deepEqual(mcp.args, ['${CLAUDE_PLUGIN_ROOT}/launch.js']);
   assert.ok(mcp.env_vars.includes('DEEPSEEK_API_KEY'));
   assert.ok(mcp.env_vars.includes('DSH_BRIDGE_DATA_DIR'));
   assert.ok(mcp.tool_timeout_sec > 30);

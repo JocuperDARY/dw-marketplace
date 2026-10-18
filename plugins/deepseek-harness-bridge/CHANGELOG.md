@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 — 2026-10-18
+## 0.1.1 — 2026-10-18
+
+- Add explicit installed-DSH capability inventory and pinned headless module/skill profiles.
+- Enforce per-attempt model-request and request-byte limits before provider dispatch; publish provider usage receipts and allow zero-tool inference profiles.
+- Add an existing-Node launcher and Windows DPAPI API-key setup helper.
+- Fix the SDK event-pump/drain race that could discard a tool-limit failure or reorder assistant text at completion.
+
+## 0.1.0 — unreleased PR candidate
 
 - 新增独立 Codex 插件及 DW Marketplace 条目，通过锁定版本的官方 SDK 启动 DeepSeek Flash 工作者。
 - 提供提交、状态、任务列表、等待、分页结果、成功后续接、取消和配置诊断。

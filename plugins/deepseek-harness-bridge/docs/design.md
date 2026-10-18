@@ -1,8 +1,8 @@
-# DeepSeek Harness bridge 0.1.0
+# DeepSeek Harness bridge 0.1.1
 
 ## Goal and scope
 
-Add an independently versioned Codex plugin to DW Marketplace. Codex submits a bounded task to one independently owned DeepSeek Harness runtime through the official SDK. The bridge provides submit, status, wait, result, continue and cancel, plus a non-model diagnostic tool. Existing plugins and user installations remain unchanged.
+Add an independently versioned Codex plugin to DW Marketplace. Codex submits a bounded task to one independently owned DeepSeek Harness runtime through the official SDK. The bridge provides submit, status, list, wait, result, continue, cancel, diagnostics and installed-capability inventory. Existing marketplace plugins keep their versions. Installation/configuration occurs within explicit user authorization.
 
 ## Execution contract
 
@@ -11,10 +11,11 @@ Add an independently versioned Codex plugin to DW Marketplace. Codex submits a b
 - One active task per bridge data directory, no implicit queue and no automatic task retry. A caller-supplied request ID makes submission idempotent; conflicting reuse is rejected.
 - Each new task has its own Harness home and session. A continuation keeps its task's workspace, route, access mode and home. It creates a separate attempt; a task cannot be continued while running or cleanup is uncertain.
 - Tasks survive as durable records. A bridge restart marks unfinished attempts interrupted and prevents automatic resubmission. Lock ownership is never recovered merely from a saved PID; an unclean bridge exit requires explicit operator reconciliation.
-- Default access is read-only. The worker profile exposes only bounded filesystem read/list tools; workspace-write additionally exposes bounded write. No shell, external MCP, recursive agents, arbitrary plugins, user skills, or GUI credential access. This is a tool-level file boundary, not an OS sandbox.
+- Default access is read-only. Built-in files exposes bounded read/list and optionally guarded writes; inference-only omits file tools. Local capability profiles can explicitly select pinned reviewed headless modules and skills. Installed desktop metadata is advisory, never automatic authority to load code. Exact runtime tool names are checked before prompting. Third-party modules and their dependencies are trusted code, responsible for their own path/effect policy; this is not an OS sandbox. See capabilities.md.
 - Paths must remain inside the resolved task workspace, including symlink resolution. Protected metadata and credentials are unavailable. Runtime state is outside the task workspace.
-- Task timeout is bounded; output tokens are capped per model request. No claim of an exact total currency/token cap. Tool calls have a separate finite limit. Cancellation closes the owned SDK runtime and reports cleanup failure honestly.
-- Subscribe before enqueue; wait through `session/wait`; inspect durable `turn/end`. Only a completed terminal is successful. Truncation, blocked, error, unknown termination and cleanup failure remain distinct from success. Runtime completion does not mean parent acceptance.
+- Task timeout, official SDK request count, request content bytes, per-request output tokens and tool calls have finite limits. The llm/stream hook reserves a request before adapter dispatch; initialization cannot spend. Automatic retries, compaction and title generation are disabled. Missing usage is unknown. These limits reset for an explicitly requested continuation attempt, and cannot constrain third-party code bypassing the SDK. No exact total currency cap is claimed. Cancellation closes the owned runtime and reports cleanup failure honestly.
+- Subscribe before enqueue; wait through session/wait and a single-consumer delivery fence; inspect durable turn/end. No competing queue drainer may discard an in-flight event or reorder assistant text. Only a completed terminal is successful. Truncation, blocked, error, unknown termination and cleanup failure remain distinct from success. Runtime completion does not mean parent acceptance.
+- Windows launch selects a configured existing Node executable and optionally decrypts a DPAPI credential into process memory. No secret is placed in argv/config/diagnostic output. Environment credentials have precedence. Desktop credentials remain separate.
 - Return a concise task summary and paged result. Raw model/tool traffic is not echoed into MCP or written by the bridge. Harness keeps its own transcript in its isolated home. Bridge errors use safe categories, not raw provider stderr or credential-bearing exception text.
 
 ## Implementation order and acceptance

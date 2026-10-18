@@ -31,7 +31,7 @@
       "name": "deepseek-harness-bridge",
       "source": "./plugins/deepseek-harness-bridge",
       "description": "Codex 本地 MCP 插件：通过官方 SDK 委派有界任务给独立 DeepSeek Flash 工作者，含状态、结果、续接和取消。",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": { "name": "JocuperDARY" },
       "homepage": "https://github.com/JocuperDARY/dw-marketplace/tree/master/plugins/deepseek-harness-bridge",
       "repository": "https://github.com/JocuperDARY/dw-marketplace",
