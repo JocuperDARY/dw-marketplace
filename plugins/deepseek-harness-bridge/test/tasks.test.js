@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskManager } from '../src/tasks.js';
@@ -28,6 +28,63 @@ const completed = async () => ({ terminal: 'completed', text: 'result', cleanup:
 const untilAborted = ({ signal }) => new Promise(resolve => {
   const done = () => resolve({ terminal: 'aborted', text: 'partial', cleanup: 'confirmed' });
   if (signal.aborted) done(); else signal.addEventListener('abort', done, { once: true });
+});
+
+test('first-save failure does not publish a phantom task or request', async t => {
+  let launches = 0;
+  const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
+  manager.persist = async () => { throw new Error('offline disk failure'); };
+  const input = { requestId: 'disk-failure', prompt: 'task', workspace };
+  await assert.rejects(manager.submit(input), { code: 'STATE_WRITE_FAILED' });
+  assert.equal(launches, 0);
+  assert.equal(manager.records.size, 0);
+  assert.equal(manager.requests.size, 0);
+  assert.deepEqual(await readdir(manager.tasksDir), []);
+  await assert.rejects(manager.submit(input), { code: 'RECOVERY_REQUIRED' });
+});
+
+test('failed continuation save preserves the completed attempt and its receipt', async t => {
+  const { manager, workspace } = await fixture(t, completed);
+  const task = await manager.submit({ requestId: 'saved', prompt: 'task', workspace });
+  await manager.wait({ taskId: task.taskId });
+  manager.persist = async () => { throw new Error('offline disk failure'); };
+  await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'STATE_WRITE_FAILED' });
+  assert.equal(manager.status({ taskId: task.taskId }).number, 1);
+  assert.equal(manager.status({ taskId: task.taskId }).status, 'completed');
+  assert.equal(manager.requests.has('unsaved'), false);
+});
+
+test('startup removes only an empty unpublished task directory', async t => {
+  const { manager, root } = await fixture(t, completed);
+  await manager.close();
+  const orphan = join(root, 'state', 'tasks', '00000000-0000-0000-0000-000000000000');
+  await mkdir(orphan);
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
+  assert.equal(next.list().total, 0);
+  await next.close();
+  await mkdir(orphan);
+  await writeFile(join(orphan, 'unknown'), 'preserve');
+  const blocked = new TaskManager({ dataDir: join(root, 'state'), runner: completed });
+  await assert.rejects(blocked.open(), { code: 'INVALID_STATE' });
+  assert.equal(await readFile(join(orphan, 'unknown'), 'utf8'), 'preserve');
+});
+
+test('idempotent retries do not require credentials or start a new attempt', async t => {
+  let launches = 0;
+  const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
+  const input = { requestId: 'accepted', prompt: 'task', workspace };
+  const first = await manager.submit(input);
+  await manager.wait({ taskId: first.taskId });
+  const deny = () => { throw Object.assign(new Error('not configured'), { code: 'MISSING_CREDENTIAL' }); };
+  assert.equal((await manager.submit(input, deny)).duplicate, true);
+  await assert.rejects(manager.submit({ ...input, prompt: 'changed' }, deny), { code: 'REQUEST_CONFLICT' });
+  await assert.rejects(manager.submit({ ...input, requestId: 'new' }, deny), { code: 'MISSING_CREDENTIAL' });
+  const followup = { taskId: first.taskId, requestId: 'accepted-next', prompt: 'more' };
+  await manager.continue(followup);
+  await manager.wait({ taskId: first.taskId });
+  assert.equal((await manager.continue(followup, deny)).duplicate, true);
+  await assert.rejects(manager.continue({ ...followup, requestId: 'new-next' }, deny), { code: 'MISSING_CREDENTIAL' });
+  assert.equal(launches, 2);
 });
 
 test('concurrent duplicate submissions launch once; changed input conflicts and other tasks are busy', async t => {

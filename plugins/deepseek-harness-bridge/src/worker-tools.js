@@ -44,7 +44,8 @@ export async function apply(ctx, config) {
   }));
   if (config.fileTools !== false) {
     register('bridge_list', 'List at most 1000 entries in one workspace directory.', { path }, (args, signal) => files.list(args.path, signal));
-    register('bridge_read', 'Read a UTF-8 file up to 256 KiB and its sha256.', { path }, (args, signal) => files.read(args.path, signal));
+    register('bridge_read', 'Read a page of at most 16384 UTF-16 characters from a UTF-8 file up to 256 KiB. sha256 covers the whole file; use nextOffset for more pages.',
+      { path, offset: { type: 'number', description: 'Optional nonnegative UTF-16 character offset, default 0.' } }, (args, signal) => files.read(args.path, signal, args.offset));
     if (config.access === 'workspace-write') register('bridge_write', 'Create or replace a bounded text file. Existing contents are backed up. Supply the sha256 from bridge_read, or new for creation.', {
     path, text: { type: 'string', required: true }, expectedSha256: { type: 'string', required: true },
     }, (args, signal) => files.write(args.path, args.text, args.expectedSha256, signal));

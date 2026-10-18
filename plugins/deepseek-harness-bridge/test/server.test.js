@@ -42,6 +42,8 @@ test('MCP client can submit, wait, fetch, continue and reject invalid input', as
 
 test('production stdio entry starts without a key and doctor makes no model calls', async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-stdio-'));
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
   const env = workerEnvironment();
   delete env.DEEPSEEK_API_KEY;
   env.DSH_BRIDGE_DATA_DIR = join(root, 'state');
@@ -54,7 +56,7 @@ test('production stdio entry starts without a key and doctor makes no model call
   assert.equal(status.credentialConfigured, false);
   assert.equal(status.validation.modelCalls, 0);
   assert.equal(status.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.1-rc.2');
-  const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'no-key', workspace: root, prompt: 'Task' } });
+  const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'no-key', workspace, prompt: 'Task' } });
   assert.equal(JSON.parse(missingKey.content[0].text).error.code, 'MISSING_CREDENTIAL');
   await client.close();
 });

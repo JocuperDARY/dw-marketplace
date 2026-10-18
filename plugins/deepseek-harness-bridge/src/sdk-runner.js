@@ -33,6 +33,14 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
   const armedPath = join(home, 'worker-armed.txt');
   const nonce = `${task.taskId}:${task.attempts.at(-1).number}`;
   const expectedTools = [...(profile.fileTools ? task.access === 'workspace-write' ? ['bridge_list', 'bridge_read', 'bridge_write'] : ['bridge_list', 'bridge_read'] : []), ...profile.tools].sort();
+  const runtimeEnvironment = workerEnvironment(env);
+  if (profile.modules.length) {
+    const preloadPath = join(home, 'module-pins.mjs');
+    const pins = profile.modules.map(module => [pathToFileURL(module.path).href, module.sha256]);
+    await writeFile(preloadPath, `import { registerModulePins } from ${JSON.stringify(new URL('./module-pins.js', import.meta.url).href)};\nregisterModulePins(${JSON.stringify(pins)});\n`, { mode: 0o600 });
+    // Only this bridge-generated preload is allowed; caller NODE_OPTIONS is filtered.
+    runtimeEnvironment.NODE_OPTIONS = `--import=${pathToFileURL(preloadPath).href}`;
+  }
   const patch = [
     ...DISABLED.map(id => ({ id, disabled: true })),
     { id: 'sandbox-policy', config: { mode: task.access, workspaceRoot: task.workspace } },
@@ -51,7 +59,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
   const patchPath = join(home, 'worker.patch.yml');
   await writeFile(patchPath, JSON.stringify(patch, null, 2), { mode: 0o600 });
   return { options: { profile: 'sdk-minimal', patches: [patchPath], dshHome: home, processCwd: home,
-    env: workerEnvironment(env), initializeTimeoutMs: 30000, requestTimeoutMs: task.attempts.at(-1).timeoutMs,
+    env: runtimeEnvironment, initializeTimeoutMs: 30000, requestTimeoutMs: task.attempts.at(-1).timeoutMs,
     shutdownTimeoutMs: 1000, disposeEofGraceMs: 3000, disposeGraceMs: 2000 }, receiptPath, budgetPath, armedPath, nonce, expectedTools };
 }
 

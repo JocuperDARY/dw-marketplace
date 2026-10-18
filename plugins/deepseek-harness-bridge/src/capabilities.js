@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
@@ -64,6 +64,11 @@ export async function installedInventory(config) {
 export async function resolveProfile(id = 'files', config) {
   config ??= await localConfig();
   requireValue(typeof id === 'string' && ID.test(id), 'INVALID_PROFILE', 'Invalid capability profile ID.');
+  const configured = config.capabilityProfiles ?? [];
+  requireValue(Array.isArray(configured) && configured.length <= 16, 'INVALID_PROFILE', 'At most 16 capability profiles may be configured.');
+  const ids = configured.map(value => value?.id);
+  requireValue(ids.every(value => typeof value === 'string' && ID.test(value) && !['files', 'inference-only'].includes(value)) && new Set(ids).size === ids.length,
+    'INVALID_PROFILE', 'Configured capability IDs must be unique and cannot shadow built-in profiles.');
   if (id === 'files' || id === 'inference-only') {
     return { id, digest: digest(`builtin-v1:${id}`), fileTools: id === 'files', modules: [], tools: [], skills: [], access: 'read-only' };
   }
@@ -87,7 +92,7 @@ export async function resolveProfile(id = 'files', config) {
         requireValue(Array.isArray(entry.tools) && entry.tools.length <= 32 && entry.tools.every(value => TOOL.test(value) && !value.startsWith('bridge_')),
           'INVALID_PROFILE', 'Each module must declare its exact tool names.');
         tools.push(...entry.tools);
-        resolvedModules.push({ path: entry.path, sha256: entry.sha256, tools: entry.tools, config: entry.config || {} });
+        resolvedModules.push({ path: await realpath(entry.path), sha256: entry.sha256, tools: entry.tools, config: entry.config || {} });
       } else result.push({ path: entry.path, sha256: entry.sha256, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) });
     }
   }

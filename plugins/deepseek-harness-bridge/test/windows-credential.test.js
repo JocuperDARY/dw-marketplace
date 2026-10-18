@@ -15,7 +15,7 @@ test('Windows helper saves a DPAPI credential with inherited PS7 module paths, a
     const keyDir = join(root, 'credential');
     const scriptPath = fileURLToPath(new URL('../scripts/set-api-key.ps1', import.meta.url));
     const windowsRoot = process.env.SYSTEMROOT || 'C:\\Windows';
-    const program = 'function Read-Host { param($Prompt, [switch]$AsSecureString); if ($AsSecureString) { ConvertTo-SecureString "offline-fixture-key" -AsPlainText -Force } else { "" } }; & $env:BRIDGE_KEY_SCRIPT -Directory $env:BRIDGE_KEY_DIRECTORY';
+    const program = 'function Read-Host { param($Prompt, [switch]$AsSecureString); if ($AsSecureString) { ConvertTo-SecureString "offline-fixture-key" -AsPlainText -Force } else { "" } }; & $env:BRIDGE_KEY_SCRIPT';
     const env = { ...process.env, BRIDGE_KEY_SCRIPT: scriptPath, BRIDGE_KEY_DIRECTORY: keyDir, DSH_BRIDGE_CONFIG_DIR: keyDir };
     delete env.DEEPSEEK_API_KEY;
     const { stdout } = await promisify(execFile)(join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),

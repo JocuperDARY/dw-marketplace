@@ -30,7 +30,13 @@ export async function launch(args = process.argv.slice(2)) {
     const child = spawn(config.nodePath, [fileURLToPath(import.meta.url), ...args], {
       stdio: 'inherit', windowsHide: true, env: { ...process.env, DSH_BRIDGE_REEXEC: '1' },
     });
-    await new Promise((done, reject) => { child.once('error', reject); child.once('exit', code => { process.exitCode = code ?? 1; done(); }); });
+    const stop = signal => { if (child.exitCode === null && child.signalCode === null) child.kill(signal); };
+    const interrupt = () => stop('SIGINT');
+    const terminate = () => stop('SIGTERM');
+    process.on('SIGINT', interrupt);
+    process.on('SIGTERM', terminate);
+    try { await new Promise((done, reject) => { child.once('error', reject); child.once('exit', code => { process.exitCode = code ?? 1; done(); }); }); }
+    finally { process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); }
     return;
   }
   if (config.dataDir) {

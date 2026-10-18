@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HarnessClient } from '@deepseek-ai/dsh-sdk-client';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { installedInventory, resolveProfile, capabilities } from '../src/capabilities.js';
-import { prepareRuntime, confirmCapabilities, workerEnvironment, ROUTE } from '../src/sdk-runner.js';
+import { createSdkRunner, prepareRuntime, confirmCapabilities, workerEnvironment, ROUTE } from '../src/sdk-runner.js';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 async function fixture(t) {
@@ -25,7 +26,12 @@ test('inventory reads installed package metadata without executing its code or c
   await writeFile(join(profile, 'package.json'), JSON.stringify({ dependencies: { 'dsh-ops': '^0.2.9', 'missing-plugin': '1' }, dsh: { profile: { bundles: ['dsh-ops'] } } }));
   await writeFile(join(module, 'package.json'), JSON.stringify({ name: 'dsh-ops', version: '0.2.9', main: 'index.js' }));
   await writeFile(join(module, 'index.js'), 'throw new Error("must never import during inventory")');
-  const result = await installedInventory({ inventoryHome: root });
+  const packageRoot = fileURLToPath(new URL('../', import.meta.url));
+  const allowed = [packageRoot, join(profile, 'package.json'), join(module, 'package.json'),
+    join(profile, 'node_modules', 'missing-plugin', 'package.json'), join(root, 'profiles', 'web', 'package.json')];
+  const script = `import { installedInventory } from ${JSON.stringify(new URL('../src/capabilities.js', import.meta.url).href)}; console.log(JSON.stringify(await installedInventory(${JSON.stringify({ inventoryHome: root })})));`;
+  // Node's permission boundary rejects even discarded reads of the credential fixture.
+  const result = JSON.parse(execFileSync(process.execPath, ['--permission', ...allowed.map(path => `--allow-fs-read=${path}`), '--input-type=module', '-e', script], { encoding: 'utf8' }));
   const [installed, missing] = result.profiles[0].packages;
   assert.equal(installed.version, '0.2.9');
   assert.equal(installed.declaredBundle, true);
@@ -57,15 +63,47 @@ test('an asynchronously initialized module reaches the exact capability set befo
   const task = { taskId: 'capability-test', workspace: root, route: { ...ROUTE, effort: 'high' }, access: 'read-only', maxTokens: 512,
     maxToolCalls: 1, maxModelRequests: 1, maxRequestBytes: 8192, capabilityProfile: 'echo', capabilityDigest: profile.digest,
     attempts: [{ number: 1, timeoutMs: 30000 }] };
-  const prepared = await prepareRuntime({ task, home: join(root, 'home'), resolveCapabilities: async () => profile,
-    env: { ...workerEnvironment(), DEEPSEEK_API_KEY: 'offline-not-a-real-key' } });
-  const client = new HarnessClient(prepared.options);
-  try {
-    await client.initialize({ cwd: root, ...ROUTE, reasoningEffort: 'high', maxTokens: 512 });
-    await confirmCapabilities(prepared, new AbortController().signal);
-    assert.deepEqual(JSON.parse(await readFile(prepared.receiptPath, 'utf8')).tools, ['sample_echo']);
-    assert.equal(JSON.parse(await readFile(prepared.budgetPath, 'utf8')).modelRequests, 0);
-  } finally { await client.close(); }
+  let readyAtPrompt = false;
+  let prompts = 0;
+  const home = join(root, 'home');
+  const runner = createSdkRunner({ resolveCapabilities: async () => profile, env: { ...workerEnvironment(), DEEPSEEK_API_KEY: 'offline-not-a-real-key' },
+    clientFactory(options) {
+      const client = new HarnessClient(options);
+      client.prompt = async () => {
+        prompts++;
+        readyAtPrompt = JSON.stringify(JSON.parse(await readFile(join(home, 'worker-capabilities.json'), 'utf8')).tools) === '["sample_echo"]';
+        throw new Error('Offline recording client: stop before inference.');
+      };
+      return client;
+    },
+  });
+  const result = await runner({ task, home, prompt: 'offline only', resume: false, signal: new AbortController().signal });
+  assert.equal(prompts, 1);
+  assert.equal(readyAtPrompt, true);
+  assert.equal(result.budget.modelRequests, 0);
+  assert.equal(result.cleanup, 'confirmed');
+});
+
+test('duplicate and built-in capability IDs are rejected', async () => {
+  for (const capabilityProfiles of [[{ id: 'files' }], [{ id: 'same' }, { id: 'same' }]]) {
+    await assert.rejects(resolveProfile('files', { capabilityProfiles }), { code: 'INVALID_PROFILE' });
+  }
+});
+
+test('worker load hook rejects an entry replaced after profile resolution', async t => {
+  const root = await fixture(t);
+  const modulePath = join(root, 'entry.mjs');
+  await writeFile(modulePath, 'export const apply = () => {};');
+  const profile = await resolveProfile('pinned', { capabilityProfiles: [{ id: 'pinned', access: 'read-only', fileTools: false,
+    modules: [{ path: modulePath, sha256: sha256(await readFile(modulePath)), tools: [] }] }] });
+  const prepared = await prepareRuntime({ task: { taskId: 'pin', workspace: root, route: { ...ROUTE, effort: 'high' }, access: 'read-only', maxTokens: 512,
+    maxToolCalls: 0, maxModelRequests: 1, maxRequestBytes: 8192, capabilityProfile: 'pinned', capabilityDigest: profile.digest, attempts: [{ number: 1, timeoutMs: 1000 }] },
+    home: join(root, 'home'), resolveCapabilities: async () => profile, env: workerEnvironment() });
+  await writeFile(modulePath, 'throw new Error("UNREVIEWED_ENTRY_EXECUTED");');
+  const child = spawnSync(process.execPath, [modulePath], { env: prepared.options.env, encoding: 'utf8' });
+  assert.notEqual(child.status, 0);
+  assert.match(child.stderr, /Pinned module source changed/);
+  assert.doesNotMatch(child.stderr, /Error: UNREVIEWED_ENTRY_EXECUTED/);
 });
 
 test('unexpected and missing tools cannot pass the readiness gate', async t => {

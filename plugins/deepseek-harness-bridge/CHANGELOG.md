@@ -6,6 +6,10 @@
 - Enforce per-attempt model-request and request-byte limits before provider dispatch; publish provider usage receipts and allow zero-tool inference profiles.
 - Add an existing-Node launcher and Windows DPAPI API-key setup helper.
 - Fix the SDK event-pump/drain race that could discard a tool-limit failure or reorder assistant text at completion.
+- Address review findings with atomic file publication, a shared bridge write lock, protected configuration paths and Windows alias rejection, and bounded read pages.
+- Validate pinned module source at load time, reject duplicate profile IDs, and test actual readiness ordering and denied credential-file access.
+- Publish task/request receipts only after the first durable save, retain successful attempts on continuation-save failure, and resolve idempotent retries before credential preflight.
+- Honor the configured credential directory and forward catchable launcher shutdown signals; document host authorization and cooperative-writer limits.
 
 ## 0.1.0 — unreleased PR candidate
 

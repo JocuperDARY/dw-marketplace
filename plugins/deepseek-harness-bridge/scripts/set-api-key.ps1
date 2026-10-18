@@ -1,4 +1,4 @@
-param([string]$Directory = (Join-Path $env:LOCALAPPDATA 'DeepSeekHarnessBridge'))
+param([string]$Directory = $(if ($env:DSH_BRIDGE_CONFIG_DIR) { $env:DSH_BRIDGE_CONFIG_DIR } else { Join-Path $env:LOCALAPPDATA 'DeepSeekHarnessBridge' }))
 $ErrorActionPreference = 'Stop'
 # A Windows PowerShell child can inherit PowerShell 7's incompatible PSModulePath.
 # Import the security commands from this interpreter's own module directory.

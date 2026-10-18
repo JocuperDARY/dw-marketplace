@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, realpath, rename, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { resolveProfile } from './capabilities.js';
@@ -57,7 +57,14 @@ export class TaskManager {
       await mkdir(this.tasksDir, { recursive: true, mode: 0o700 });
       for (const entry of await readdir(this.tasksDir, { withFileTypes: true })) {
         requireValue(entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name), 'INVALID_STATE', 'Unexpected task entry in bridge state.');
-        const record = JSON.parse(await readFile(join(this.tasksDir, entry.name, 'task.json'), 'utf8'));
+        let record;
+        try { record = JSON.parse(await readFile(join(this.tasksDir, entry.name, 'task.json'), 'utf8')); }
+        catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          // Only an empty, unpublished directory is provably safe to remove.
+          await rmdir(join(this.tasksDir, entry.name));
+          continue;
+        }
         requireValue(record.schemaVersion === 1 && record.taskId === entry.name && Array.isArray(record.attempts), 'INVALID_STATE', 'The saved task record is invalid.');
         this.records.set(record.taskId, record);
         for (const attempt of record.attempts) {
@@ -109,7 +116,7 @@ export class TaskManager {
     return { ...this.status({ taskId: receipt.taskId, attempt: receipt.attempt }), duplicate: true };
   }
 
-  submit(input) {
+  submit(input, beforeLaunch = () => {}) {
     return this.serialize(async () => {
       const prompt = inputPrompt(input.prompt);
       const id = requestId(input.requestId);
@@ -131,18 +138,23 @@ export class TaskManager {
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
+      await beforeLaunch();
       requireValue(this.records.size < 1000, 'STORE_LIMIT', 'The bridge has reached its 1000-task retention limit; archive old state while stopped.');
       const record = { schemaVersion: 1, taskId: randomUUID(), sessionId: `bridge-${randomUUID()}`, workspace,
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), attempts: [] };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
-      this.records.set(record.taskId, record);
-      return this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false });
+      try { return await this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false }); }
+      catch (error) {
+        try { await rmdir(join(this.tasksDir, record.taskId)); }
+        catch { this.blocked = true; }
+        throw error;
+      }
     });
   }
 
-  continue(input) {
+  continue(input, beforeLaunch = () => {}) {
     return this.serialize(async () => {
       const record = this.record(input.taskId);
       const prompt = inputPrompt(input.prompt);
@@ -155,6 +167,7 @@ export class TaskManager {
       requireValue(record.attempts.length < 16, 'ATTEMPT_LIMIT', 'A task supports at most 16 attempts.');
       requireValue(record.attempts.at(-1).status === 'completed', 'NOT_RESUMABLE', 'Only a completed task can be continued; interrupted or failed execution needs a new task with explicit context.');
       requireValue(await this.workspace(record.workspace) === record.workspace, 'WORKSPACE_CHANGED', 'The task workspace identity changed.');
+      await beforeLaunch();
       return this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: true });
     });
   }
@@ -162,10 +175,11 @@ export class TaskManager {
   async begin(record, { id, fingerprint, prompt, timeoutMs, resume }) {
     const attempt = { number: record.attempts.length + 1, requestId: id, fingerprint, status: 'running',
       startedAt: new Date().toISOString(), timeoutMs, cleanup: 'pending', terminal: null };
-    record.attempts.push(attempt);
-    this.requests.set(id, { taskId: record.taskId, attempt: attempt.number, fingerprint });
-    try { await this.persist(record); }
+    try { await this.persist({ ...record, attempts: [...record.attempts, attempt] }); }
     catch { this.blocked = true; throw new BridgeError('STATE_WRITE_FAILED', 'Task state could not be saved; no worker was launched.'); }
+    record.attempts.push(attempt);
+    this.records.set(record.taskId, record);
+    this.requests.set(id, { taskId: record.taskId, attempt: attempt.number, fingerprint });
     const controller = new AbortController();
     const active = { taskId: record.taskId, controller, reason: null, promise: null };
     this.active = active;

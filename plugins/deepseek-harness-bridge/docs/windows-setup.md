@@ -10,6 +10,8 @@
 
 在用户自己的 PowerShell 窗口运行包内 `scripts/set-api-key.ps1`。脚本通过 `Read-Host -AsSecureString` 隐藏输入，以 Windows DPAPI 加密保存 `api-key.dpapi`，并将目录 ACL 限制为当前用户。不要把 Key 粘贴到聊天、工具参数、命令行字面量、仓库、`.mcp.json` 或 `config.json`。
 
+设置脚本和启动器都优先使用 `DSH_BRIDGE_CONFIG_DIR`；显式的 `-Directory` 参数可覆盖设置脚本的目录。启动器转发可捕获的 SIGINT/SIGTERM 并等待子进程退出；Windows 强制终止等无法被 JavaScript 捕获的情况仍须依据所有权锁核实恢复，不能保证自动清理。
+
 ```powershell
 powershell.exe -NoProfile -File "C:\实际插件目录\scripts\set-api-key.ps1"
 ```

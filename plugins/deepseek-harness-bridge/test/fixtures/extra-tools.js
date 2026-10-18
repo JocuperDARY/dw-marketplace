@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { echoValue } from './echo-value.js';
 export const name = 'bridge-test-echo';
 export const inject = ['tools'];
 export async function apply(ctx, config = {}) {
@@ -6,5 +7,5 @@ export async function apply(ctx, config = {}) {
   ctx.tools.register(defineTool({ name: 'sample_echo', description: 'Offline fixture echo.',
     parameters: { text: { type: 'string', required: true } },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
-    execute: args => args.text }));
+    execute: echoValue }));
 }
