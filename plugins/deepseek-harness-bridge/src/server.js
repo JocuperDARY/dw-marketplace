@@ -4,21 +4,27 @@ import { z } from 'zod';
 import { safeError } from './errors.js';
 import { capabilities } from './capabilities.js';
 
-export const VERSION = '0.1.3';
+export const VERSION = '0.2.0';
 const taskId = z.string().uuid();
 const requestId = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const prompt = z.string().min(1).max(65536).describe('Bounded assignment with context, file ownership, acceptance criteria and required evidence.');
-const timeoutMs = z.number().int().min(1000).max(1800000).optional().describe('Wall-clock task limit in milliseconds, default 300000; teardown may take several more seconds.');
+const timeoutMs = z.number().int().min(1000).max(1800000).optional().describe('Wall-clock attempt limit, or stage ceiling with budget, in milliseconds; default 300000. Teardown may take several more seconds.');
 const attempt = z.number().int().min(1).max(16).optional();
+const budget = z.object({
+  totalModelRequests: z.number().int().min(2).max(1024),
+  totalOutputTokens: z.number().int().min(512).max(33554432),
+  totalToolCalls: z.number().int().min(0).max(4096),
+  totalDurationMs: z.number().int().min(1000).max(86400000),
+}).strict().optional().describe('Opt-in task-wide authorization across automatic checkpoint stages and later continuations. Required totals bound model requests, output tokens, tool calls and elapsed milliseconds, not currency. Stage limits allocate from the remaining total; at least 2 stage requests are required.');
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
     { name: 'dsh_submit', description: 'Start one independent official DeepSeek Flash worker. Paid calls require existing user authorization and an API key. Returns immediately. Default tools are bounded text files; select a reviewed local capabilityProfile for additional installed DSH capabilities. No desktop-login/session reuse.',
       schema: z.object({ requestId, prompt, workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state.'),
-        access: z.enum(['read-only', 'workspace-write']).optional(), effort: z.enum(['high', 'max']).optional(), timeoutMs,
+        access: z.enum(['read-only', 'workspace-write']).optional(), effort: z.enum(['high', 'max']).optional(), timeoutMs, budget,
         maxTokens: z.number().int().min(256).max(32768).optional().describe('Output token cap per model request, default 8192; not a whole-task currency/token cap.'),
         maxToolCalls: z.number().int().min(0).max(128).optional(),
-        maxModelRequests: z.number().int().min(1).max(128).optional().describe('Hard official SDK model-request limit per attempt, including auxiliary calls. Default 16. No automatic retries.'),
+        maxModelRequests: z.number().int().min(1).max(128).optional().describe('Official SDK model-request ceiling per attempt, or per stage with budget, including auxiliary and checkpoint calls. Default 16. No automatic failure retries.'),
         maxRequestBytes: z.number().int().min(1024).max(1048576).optional().describe('Maximum serialized model input bytes per request, default 262144. Not a tokenizer or currency estimate.'),
         capabilityProfile: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional().describe('files (default), inference-only, or a reviewed profile from dsh_capabilities.') }).strict(),
       run: input => manager.submit(input, preflight), write: true, network: true },
@@ -31,7 +37,7 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
     { name: 'dsh_result', description: 'Read a bounded page of the final worker text, including failure/cleanup evidence. Offset and nextOffset count JavaScript UTF-16 code units.',
       schema: z.object({ taskId, attempt, offset: z.number().int().min(0).max(1048576).optional(), limit: z.number().int().min(1).max(32000).optional() }).strict(),
       run: input => manager.result(input) },
-    { name: 'dsh_continue', description: 'Continue a successfully completed worker session with new bounded input. Keeps workspace, model, access and tool/token limits. At most 16 attempts per task; cannot inject input while running.',
+    { name: 'dsh_continue', description: 'Continue a completed worker session, or a safely paused budgeted task from its checkpoint. Budgeted tasks retain the original total authorization and deadline; continuation cannot refill them. Keeps workspace, model and access. At most 16 attempts; cannot inject input while running.',
       schema: z.object({ taskId, requestId, prompt, timeoutMs }).strict(), run: input => manager.continue(input, preflight), write: true, network: true },
     { name: 'dsh_cancel', description: 'Stop the SDK-owned runtime for this task and wait for cleanup confirmation. Partial file edits remain available for review.',
       schema: z.object({ taskId }).strict(), run: input => manager.cancel(input), write: true },

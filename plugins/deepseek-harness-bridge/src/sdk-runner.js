@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { HarnessClient, validatedSessionEvent } from '@deepseek-ai/dsh-sdk-client';
 import { BridgeError, requireValue, safeError } from './errors.js';
 import { resolveProfile } from './capabilities.js';
+import { STAGE_PROTOCOL } from './orchestration.js';
 
 export const SDK_VERSION = '0.2.1-rc.2';
 export const ROUTE = { provider: 'deepseek-official', model: 'deepseek-flash' };
@@ -31,7 +32,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
   const receiptPath = join(home, 'worker-capabilities.json');
   const budgetPath = join(home, 'worker-budget.json');
   const armedPath = join(home, 'worker-armed.txt');
-  const nonce = `${task.taskId}:${task.attempts.at(-1).number}`;
+  const nonce = task.stageBudget?.nonce ?? `${task.taskId}:${task.attempts.at(-1).number}`;
   const expectedTools = [...(profile.fileTools ? task.access === 'workspace-write' ? ['bridge_list', 'bridge_read', 'bridge_write'] : ['bridge_list', 'bridge_read'] : []), ...profile.tools].sort();
   const runtimeEnvironment = workerEnvironment(env);
   if (profile.modules.length) {
@@ -46,10 +47,11 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
     { id: 'sandbox-policy', config: { mode: task.access, workspaceRoot: task.workspace } },
     { id: 'tools', config: { mode: 'native', maxParallelSubCalls: 1 } },
     { id: 'system-prompt', config: { includeHarnessIdentity: false, includeRuntimeContext: false,
-      personaPrefix: SYSTEM_PROMPT + profile.skills.map(skill => `\n<skill-reference path=${JSON.stringify(skill.path)}>\n${skill.text}\n</skill-reference>`).join('') } },
+      personaPrefix: SYSTEM_PROMPT + (task.stageBudget ? `\n${STAGE_PROTOCOL}` : '') + profile.skills.map(skill => `\n<skill-reference path=${JSON.stringify(skill.path)}>\n${skill.text}\n</skill-reference>`).join('') } },
     { insert: [{ id: 'bridge-budget', name: new URL('./worker-budget.js', import.meta.url).href,
       config: { budgetPath, armedPath, nonce, effort: task.route.effort, maxTokens: task.maxTokens,
-        maxModelRequests: task.maxModelRequests ?? 16, maxRequestBytes: task.maxRequestBytes ?? 262144 } }] },
+        maxModelRequests: task.maxModelRequests ?? 16, maxRequestBytes: task.maxRequestBytes ?? 262144,
+        ...(task.stageBudget ? { maxOutputTokens: task.stageBudget.maxOutputTokens, checkpoint: { softDeadline: task.stageBudget.softDeadline }, toolReceiptPath: receiptPath, maxToolCalls: task.maxToolCalls } : {}) } }] },
     ...profile.modules.map((module, index) => ({ insert: [{ id: `bridge-extension-${index}`, name: pathToFileURL(module.path).href,
       config: { ...module.config, workspace: task.workspace, access: task.access } }] })),
     { insert: [{ id: 'bridge-files', name: new URL('./worker-tools.js', import.meta.url).href,

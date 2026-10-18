@@ -5,18 +5,27 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installBudget } from '../src/budget.js';
 
-async function gate(t) {
+async function gate(t, overrides = {}) {
   const home = await mkdtemp(join(tmpdir(), 'bridge-budget-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   let listener;
+  let assemble;
   const config = { nonce: 'attempt:1', budgetPath: join(home, 'budget.json'), armedPath: join(home, 'armed'),
-    maxModelRequests: 1, maxTokens: 512, maxRequestBytes: 1024, effort: 'high' };
-  await installBudget({ on: (event, handler) => { assert.equal(event, 'llm/stream'); listener = handler; } }, config);
+    maxModelRequests: 1, maxTokens: 512, maxRequestBytes: 1024, effort: 'high', ...overrides };
+  await installBudget({ on: (event, handler) => { if (event === 'llm/stream') listener = handler; else if (event === 'system-prompt/assemble') assemble = handler; else assert.fail(event); } }, config);
   const request = { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'high', maxTokens: 512,
     messages: [{ role: 'user', content: [{ type: 'text', text: 'ok' }] }] };
   const arm = () => writeFile(config.armedPath, config.nonce);
   const receipt = async () => JSON.parse(await readFile(config.budgetPath, 'utf8'));
-  const collect = async (options, next) => { for await (const _chunk of listener(options, next)) { /* consume */ } };
+  const collect = async (options, next, beforeStream = () => {}) => {
+    if (assemble) {
+      const assembly = { sections: [{ name: 'test', text: options.system ?? '' }], tools: options.tools ?? [] };
+      const prepared = await assemble(assembly, {}, async () => assembly);
+      options = Object.assign(options, { system: prepared.sections.map(s => s.text).join('\n'), tools: prepared.tools });
+    }
+    beforeStream();
+    for await (const _chunk of listener(Object.freeze(options), next)) { /* consume */ }
+  };
   return { config, request, arm, receipt, collect };
 }
 
@@ -26,6 +35,22 @@ test('worker initialization cannot call a provider; denied attempts do not consu
   await assert.rejects(g.collect(g.request, () => { sends++; }), /NOT_ARMED/);
   assert.equal(sends, 0);
   assert.equal((await g.receipt()).modelRequests, 0);
+});
+
+test('stage gate reserves a final text-only checkpoint request and counts it in the output budget', async t => {
+  const g = await gate(t, { maxModelRequests: 2, maxOutputTokens: 1024, maxRequestBytes: 16384, checkpoint: { softDeadline: Date.now() + 10000 } });
+  await g.arm();
+  async function* adapter() { yield { type: 'usage', usage: { outputTokens: 100 } }; yield { type: 'finish', reason: 'stop' }; }
+  await g.collect({ ...g.request, tools: [{ name: 'bridge_read' }] }, adapter);
+  const last = { ...g.request, tools: [{ name: 'bridge_read' }] };
+  await g.collect(last, adapter);
+  assert.deepEqual(last.tools, []);
+  assert.match(last.system, /checkpoint/);
+  const receipt = await g.receipt();
+  assert.equal(receipt.calls[1].checkpoint, true);
+  assert.equal(receipt.calls[1].reservedOutputTokens, 512);
+  assert.equal(receipt.modelRequests, 2);
+  await assert.rejects(g.collect(g.request, adapter), /MODEL_REQUEST_LIMIT|CHECKPOINT_CLOSED/);
 });
 
 test('one request is reserved before dispatch and the second cannot reach the adapter', async t => {
@@ -68,4 +93,45 @@ test('provider failure leaves reserved request and unknown usage; no retry is in
   assert.equal(receipt.modelRequests, 1);
   assert.equal(receipt.calls[0].usage, null);
   assert.equal(receipt.calls[0].finished, false);
+});
+
+test('concurrent calls cannot spend the same remaining output reservation', async t => {
+  const g = await gate(t, { maxModelRequests: 2, maxOutputTokens: 512 });
+  await g.arm();
+  let sends = 0;
+  async function* adapter() { sends++; yield { type: 'finish', reason: 'stop' }; }
+  const results = await Promise.allSettled([g.collect({ ...g.request }, adapter), g.collect({ ...g.request }, adapter)]);
+  assert.equal(results.filter(r => r.status === 'rejected').length, 1);
+  assert.equal(sends, 1);
+  assert.equal((await g.receipt()).calls[0].reservedOutputTokens, 512);
+});
+
+test('output headroom and the soft deadline request a checkpoint before the request-count cap', async t => {
+  for (const overrides of [{ maxOutputTokens: 512 }, { checkpoint: { softDeadline: 0 } }]) {
+    const g = await gate(t, { maxModelRequests: 8, maxOutputTokens: 4096, maxRequestBytes: 16384, checkpoint: { softDeadline: Date.now() + 10000 }, ...overrides });
+    await g.arm();
+    const request = { ...g.request, tools: [{ name: 'bridge_read' }] };
+    await g.collect(request, async function* () { yield { type: 'finish', reason: 'stop' }; });
+    assert.deepEqual(request.tools, []);
+    assert.equal((await g.receipt()).calls[0].checkpoint, true);
+  }
+});
+
+test('checkpoint response cannot smuggle a complete tool-call block to the executor', async t => {
+  const g = await gate(t, { maxModelRequests: 2, maxOutputTokens: 512, maxRequestBytes: 16384, checkpoint: { softDeadline: 0 } });
+  await g.arm();
+  await assert.rejects(g.collect({ ...g.request }, async function* () {
+    yield { type: 'block-end', index: 0, block: { type: 'tool-call', name: 'bridge_write' } };
+  }), /Checkpoint-only/);
+  assert.equal((await g.receipt()).denied, 'CHECKPOINT_TOOL_CALL');
+});
+
+test('a soft deadline crossing after assembly checkpoints the next request without rejecting prepared work', async t => {
+  const g = await gate(t, { maxModelRequests: 4, maxOutputTokens: 2048, maxRequestBytes: 16384, checkpoint: { softDeadline: Date.now() + 10000 } });
+  await g.arm();
+  const adapter = async function* () { yield { type: 'usage', usage: { outputTokens: 100 } }; yield { type: 'finish', reason: 'stop' }; };
+  await g.collect({ ...g.request, tools: [{ name: 'bridge_read' }] }, adapter, () => { g.config.checkpoint.softDeadline = 0; });
+  assert.equal((await g.receipt()).calls[0].checkpoint, false);
+  await g.collect({ ...g.request, tools: [{ name: 'bridge_read' }] }, adapter);
+  assert.equal((await g.receipt()).calls[1].checkpoint, true);
 });

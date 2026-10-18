@@ -3,6 +3,7 @@ import { mkdir, open, readFile, readdir, realpath, rename, rmdir, stat, unlink, 
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { resolveProfile } from './capabilities.js';
+import { allocateStage, budgetSummary, normalizeBudget, runOrchestrated, validateSavedBudget } from './orchestration.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -66,6 +67,7 @@ export class TaskManager {
           continue;
         }
         requireValue(record.schemaVersion === 1 && record.taskId === entry.name && Array.isArray(record.attempts), 'INVALID_STATE', 'The saved task record is invalid.');
+        validateSavedBudget(record);
         this.records.set(record.taskId, record);
         for (const attempt of record.attempts) {
           requireValue(!this.requests.has(attempt.requestId), 'INVALID_STATE', 'Duplicate request ID in saved state.');
@@ -130,11 +132,12 @@ export class TaskManager {
       const maxToolCalls = boundedInteger(input.maxToolCalls, 32, 0, 128, 'maxToolCalls');
       const maxModelRequests = boundedInteger(input.maxModelRequests, 16, 1, 128, 'maxModelRequests');
       const maxRequestBytes = boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes');
+      const budget = normalizeBudget(input.budget, maxModelRequests);
       const profile = await this.resolveCapabilities(input.capabilityProfile || 'files');
       requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest });
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
@@ -144,6 +147,7 @@ export class TaskManager {
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), attempts: [] };
+      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [] };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
       try { return await this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false }); }
       catch (error) {
@@ -165,7 +169,8 @@ export class TaskManager {
       if (existing) return existing;
       this.assertAvailable();
       requireValue(record.attempts.length < 16, 'ATTEMPT_LIMIT', 'A task supports at most 16 attempts.');
-      requireValue(record.attempts.at(-1).status === 'completed', 'NOT_RESUMABLE', 'Only a completed task can be continued; interrupted or failed execution needs a new task with explicit context.');
+      requireValue(record.attempts.at(-1).status === 'completed' || (record.orchestration && record.attempts.at(-1).status === 'paused'), 'NOT_RESUMABLE', 'Only a completed or safely paused orchestrated task can continue; failed execution needs explicit recovery.');
+      if (record.orchestration) allocateStage(record, timeoutMs);
       requireValue(await this.workspace(record.workspace) === record.workspace, 'WORKSPACE_CHANGED', 'The task workspace identity changed.');
       await beforeLaunch();
       return this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: true });
@@ -189,21 +194,30 @@ export class TaskManager {
   }
 
   async execute(record, attempt, prompt, resume, active) {
-    const timer = setTimeout(() => { active.reason ??= 'timed_out'; active.controller.abort(); }, attempt.timeoutMs);
+    const timer = setTimeout(() => { active.reason ??= 'timed_out'; active.controller.abort(); }, record.orchestration ? Math.max(1, record.orchestration.deadlineAt - Date.now()) : attempt.timeoutMs);
     const finished = clone(attempt);
     try {
       let output;
       try {
-        output = await this.runner({ task: clone(record), prompt, resume, signal: active.controller.signal,
-          home: join(this.tasksDir, record.taskId, 'harness') });
-      } catch { output = { terminal: 'error', text: '', cleanup: 'unverified', error: { code: 'RUNNER_FAILED', message: 'Worker execution failed without a confirmed cleanup receipt.' } }; }
+        const home = join(this.tasksDir, record.taskId, 'harness');
+        output = record.orchestration ? await runOrchestrated({ record, attempt, prompt, signal: active.controller.signal, home, runner: this.runner,
+          persist: () => this.persist(record), saveCheckpoint: async (number, text) => {
+            const path = join(this.tasksDir, record.taskId, `checkpoint-${number}.json`);
+            await atomicWrite(path, text);
+            return path;
+          } }) : await this.runner({ task: clone(record), prompt, resume, signal: active.controller.signal, home });
+      } catch (error) {
+        if (record.orchestration) throw error;
+        output = { terminal: 'error', text: '', cleanup: 'unverified', error: { code: 'RUNNER_FAILED', message: 'Worker execution failed without a confirmed cleanup receipt.' } };
+      }
       clearTimeout(timer);
       finished.cleanup = output.cleanup === 'confirmed' ? 'confirmed' : 'unverified';
       finished.terminal = output.terminal ?? 'unknown';
       finished.toolCalls = output.toolCalls ?? null;
       finished.budget = output.budget ?? null;
       finished.error = output.error ?? null;
-      finished.status = active.reason ?? (finished.terminal === 'completed' ? 'completed' : 'failed');
+      finished.status = active.reason ?? (['completed', 'paused'].includes(finished.terminal) ? finished.terminal : 'failed');
+      if (output.pauseReason) finished.pauseReason = output.pauseReason;
       const bytes = Buffer.from(typeof output.text === 'string' ? output.text : '', 'utf8');
       finished.outputTruncated = bytes.length > MAX_RESULT_BYTES;
       const text = bytes.subarray(0, MAX_RESULT_BYTES).toString('utf8');
@@ -239,6 +253,7 @@ export class TaskManager {
       access: record.access, maxTokensPerRequest: record.maxTokens, maxToolCalls: record.maxToolCalls,
       maxModelRequests: record.maxModelRequests ?? 16, maxRequestBytes: record.maxRequestBytes ?? 262144,
       capabilityProfile: record.capabilityProfile || 'files', capabilityDigest: record.capabilityDigest ?? null,
+      ...(record.orchestration ? { orchestration: budgetSummary(record.orchestration) } : {}),
       ...publicAttempt, parentAcceptance: 'not_assessed' });
   }
 

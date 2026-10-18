@@ -13,8 +13,9 @@ export async function apply(ctx, config) {
   const expected = JSON.stringify([...allowed].sort());
   let publication = Promise.resolve();
   let publicationError;
+  let calls = 0;
   const publish = () => {
-    const content = JSON.stringify({ nonce: config.nonce, tools: currentTools() });
+    const content = JSON.stringify({ nonce: config.nonce, tools: currentTools(), toolCalls: calls });
     publication = publication.then(async () => {
       await writeFile(`${config.receiptPath}.tmp`, content, { mode: 0o600 });
       await rename(`${config.receiptPath}.tmp`, config.receiptPath);
@@ -26,13 +27,15 @@ export async function apply(ctx, config) {
     await publication;
     if (publicationError || JSON.stringify(currentTools()) !== expected) throw new Error('Bridge capabilities changed before model dispatch.');
     yield* next();
-  });
-  let calls = 0;
-  ctx.on('tools/pre-execute', (exec, next) => {
+  }, { prepend: true });
+  ctx.on('tools/pre-execute', async (exec, next) => {
     if (!allowed.includes(exec.name)) return { kind: 'deny', reason: 'This tool is outside the bridge capability set.' };
-    if (++calls > config.maxToolCalls) return { kind: 'deny', reason: 'The bridge tool call budget is exhausted.' };
+    if (calls >= config.maxToolCalls) return { kind: 'deny', reason: 'The bridge tool call budget is exhausted.' };
+    calls++;
+    await publish();
+    if (publicationError) return { kind: 'deny', reason: 'The bridge tool receipt could not be saved.' };
     return next();
-  });
+  }, { prepend: true });
   const path = { type: 'string', required: true, description: 'Relative workspace path; no parent traversal, links or credential/config directories.' };
   const register = (name, description, parameters, run) => ctx.tools.register(defineTool({
     name, description, parameters,
