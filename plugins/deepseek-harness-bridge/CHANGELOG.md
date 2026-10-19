@@ -7,6 +7,12 @@
 - Port onto 2.0.2 while preserving native file boundaries, nullable omitted limits, explicit-v2/v1 replay, report fingerprints and prerequisite-evidence rules.
 - Cover the original S3 wrong-status case, network-blocked SDK/MCP, persistence, replay and explicit continuation. Offline evidence does not establish paid model quality or deployment.
 
+## 2.0.3 — 2026-10-20
+
+- Address OBS-1: verify same-name original-content backups are ordinary, nonlinked, single-link files with the expected SHA-256 before staging a replacement. Valid backups remain reusable; corrupt or partial backups block writes with BACKUP_INVALID and retain the original target and backup evidence. Preserve workspace writer lock ownership.
+- Address OBS-2: hide and deny `.agent-teams-bridge` in built-in list/read/write and guarded ops_replace at every depth and case. Keep native Teams state paths and tools compatible; this file-tool policy does not constrain explicitly selected Shell or trusted third-party code.
+- Add offline red/green coverage for backup integrity, links, lock ownership, shared ops_replace behavior, protected synthetic Teams state and ordinary project file controls. No paid provider call or real-model quality claim.
+
 ## 2.0.2 — 2026-10-20
 
 - Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require every asserted or newly added prerequisite to cite an explicit rule or a checkable derivation with its operation scope. A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.
