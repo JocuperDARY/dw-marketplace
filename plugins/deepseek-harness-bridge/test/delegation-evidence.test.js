@@ -48,12 +48,16 @@ for (const mode of ['single-request', 'budgeted']) {
     const outputText = mode === 'budgeted'
       ? JSON.stringify({ state: 'completed', summary: payloadText, nextSteps: '' }) : payloadText;
     let launches = 0;
+    let receiptNonce;
+    let reservedOutputTokens;
     const options = { dataDir, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) };
     const manager = await new TaskManager({ ...options, runner: async ({ task }) => {
       launches++;
+      receiptNonce = mode === 'budgeted' ? task.stageBudget.nonce : 'offline-single-request';
+      reservedOutputTokens = task.maxTokens;
       return { terminal: 'completed', text: outputText, cleanup: 'confirmed', toolCalls: 0,
-        ...(mode === 'budgeted' ? { budget: { nonce: task.stageBudget.nonce, modelRequests: 1,
-          calls: [{ number: 1, reservedOutputTokens: task.maxTokens, usage: { outputTokens: 100 }, finished: true }] } } : {}) };
+        budget: { nonce: receiptNonce, modelRequests: 1, maxRequestBytesObserved: 256, denied: null,
+          calls: [{ number: 1, reservedOutputTokens: task.maxTokens, usage: { outputTokens: 100 }, finished: true }] } };
     } }).open();
     let restarted;
     t.after(async () => {
@@ -67,7 +71,19 @@ for (const mode of ['single-request', 'budgeted']) {
     const submitted = await manager.submit(input);
     await manager.wait({ taskId: submitted.taskId });
     const done = await manager.result({ taskId: submitted.taskId });
-    assert.equal(done.status, 'completed');
+    const expectedReceipt = { nonce: receiptNonce, modelRequests: 1, maxRequestBytesObserved: 256, denied: null,
+      calls: [{ number: 1, reservedOutputTokens, usage: { outputTokens: 100 }, finished: true }] };
+    const assertPreserved = receipt => {
+      assert.equal(receipt.terminal, 'completed');
+      assert.equal(receipt.status, 'completed');
+      assert.equal(receipt.cleanup, 'confirmed');
+      assert.equal(receipt.toolCalls, 0);
+      assert.equal(receipt.error, null);
+      assert.deepEqual(receipt.budget, expectedReceipt, 'Retain the complete authored usage receipt, including call usage and denial state.');
+      assert.equal(receipt.recovery, undefined);
+    };
+    assertPreserved(done);
+    assertPreserved(manager.record(submitted.taskId).attempts[0]);
     assert.equal(done.outputValidation.status, 'valid');
     assert.equal(done.deliveryValidation.status, 'structure_complete');
     assert.equal(done.parentAcceptance, 'not_assessed');
@@ -79,7 +95,11 @@ for (const mode of ['single-request', 'budgeted']) {
     assert.equal(manager.record(submitted.taskId).attempts[0].recovery, undefined);
     if (mode === 'budgeted') {
       assert.equal(done.orchestration.stages, 1);
-      assert.equal(done.orchestration.charged.modelRequests, 1);
+      assert.deepEqual(done.orchestration.charged, { modelRequests: 1, outputTokens: 100, toolCalls: 0 });
+      const stage = manager.record(submitted.taskId).orchestration.stages[0];
+      assert.equal(stage.terminal, 'completed');
+      assert.equal(stage.status, 'completed');
+      assert.deepEqual(stage.budget, expectedReceipt);
     } else {
       await assert.rejects(manager.continue({ taskId: submitted.taskId, requestId: 'forbidden-repair', prompt: 'Repair the semantics.' }), { code: 'NOT_RESUMABLE' });
     }
@@ -87,6 +107,16 @@ for (const mode of ['single-request', 'budgeted']) {
     restarted = await new TaskManager({ ...options, runner: () => assert.fail('Restart/replay must not invoke a worker.') }).open();
     const replay = await restarted.submit(input);
     assert.equal(replay.duplicate, true);
+    assertPreserved(replay);
+    assertPreserved(await restarted.result({ taskId: submitted.taskId }));
+    assertPreserved(restarted.record(submitted.taskId).attempts[0]);
+    if (mode === 'budgeted') {
+      assert.deepEqual(replay.orchestration.charged, { modelRequests: 1, outputTokens: 100, toolCalls: 0 });
+      const stage = restarted.record(submitted.taskId).orchestration.stages[0];
+      assert.equal(stage.terminal, 'completed');
+      assert.equal(stage.status, 'completed');
+      assert.deepEqual(stage.budget, expectedReceipt);
+    }
     assert.equal(replay.parentAcceptance, 'not_assessed');
     assert.equal(replay.deliveryValidation.status, 'structure_complete');
     assert.equal((await restarted.result({ taskId: submitted.taskId })).text, outputText);

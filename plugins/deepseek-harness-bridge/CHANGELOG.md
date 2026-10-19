@@ -1,12 +1,26 @@
 # Changelog
 
-## 2.0.2-rc.1 — candidate, 2026-10-20
+## 2.0.2 — 2026-10-20
 
 - Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require every asserted or newly added prerequisite to cite an explicit rule or a checkable derivation with its operation scope. A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.
 - Distinguish explaining a general rule from executing a numerical instance, identity metadata from decision variables, and arbitrary optimal choices from requested unique/deterministic selectors. Review compound claims clause by clause.
 - Parent acceptance must independently check source roles, entailment and requested operation; valid rule IDs and complete JSON never certify content. Keep the existing strict schema and no-retry/budget behavior.
-- Synthetic offline counterexamples and controls verify delivery, preservation and non-acceptance boundaries only; no paid model test or accuracy claim. This candidate starts from 2.0.0 and does not include PR #24's native file-boundary changes.
+- Synthetic offline counterexamples and controls verify delivery, preservation and non-acceptance boundaries only; no paid model test or accuracy claim. Integrate the released 2.0.1 native file-boundary changes without altering their behavior. Document all six counterexamples and four controls, and explicitly assert preserved terminal and usage receipts across restart/replay.
 
+
+## 2.0.1 — 2026-10-20
+
+- Promote PR #24 candidate 233ea09 after DSH independently verified native file boundaries, capability consistency and SDK startup. The promotion changes release metadata and disclosure documentation only; functionality and tests retain the verified candidate implementation.
+- Reuse the verified candidate's 204/204 offline suite, 16/16 native regressions and 3/3 package checks as implementation evidence; rerun release packaging and zero-model installed MCP checks. No paid model test.
+- Disclose OBS-1 (an existing corrupt same-name backup can be reused) and OBS-2 (Teams state resides inside the workspace and is not protected by WorkspaceFiles names). Both remain non-blocking follow-up work, with impact and acceptance conditions in docs/capabilities.md. No claim that these behaviors were fixed or that real Teams execution was validated.
+
+
+## 2.0.1-rc.1 — candidate, 2026-10-20
+
+- DSH-FIT-001: stop mounting raw dsh-ops file tools in both access modes. Native file selection uses the existing workspace path, protected-name and link policy instead of host absolute paths/session cwd.
+- DSH-FIT-002: read-only no longer advertises ops_replace. Workspace-write retains a bridge-owned, single-file literal adapter with whole-file SHA-256, UTF-8 size checks, CAS and backup; recursive/regex/glob/dryRun behavior is not supported.
+- DSH-FIT-003: add actual offline sdk-minimal native read-only/workspace-write startup, asynchronous capability confirmation and component file-boundary regressions. No provider request or real task state; startup evidence is separate from model tool-loop quality.
+- Candidate only. Preserve raw failure evidence, existing installation/configuration, budget contracts and single-request no-retry; no paid test or release promotion.
 
 ## 2.0.0 — 2026-10-20
 

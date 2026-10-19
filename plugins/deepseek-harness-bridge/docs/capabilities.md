@@ -7,13 +7,29 @@
 | 能力 | 适配与证据 |
 | --- | --- |
 | Skills Manager / DSH skills | 官方 registry + filesystem provider；安装了 Skills Manager 时挂载其导出 provider，无管理 UI。先搜原生元数据、再按需加载正文；补充 Codex 来源必须先完成原生搜索并说明不适用理由。记录搜索、来源、哈希和加载证据；不等于已正确应用。 |
-| dsh-ops | Windows 原生文件工具及可用的 Shell runtime 选择；实际注册、调用与结果分别记录。第三方文件工具保留 DSH 原生策略，不能声称自动继承 bridge_* 的逐文件哈希/CAS或凭据名称过滤。 |
+| files | 两种 access 都采用 bridge_list/read，workspace-write 另有 bridge_write 与受保护的单文件字面 ops_replace。任务工作区相对路径、已知 protected-name、链接拒绝、整文件哈希/CAS和备份统一复用 WorkspaceFiles；不挂载原始 dsh-ops file 组件。 |
+| dsh-ops | 仅用于可用的 Windows Shell runtime 选择；原始 inspect/glob/grep/replace 不暴露给 native 任务。注册与成功执行仍分别记录。 |
 | Shell | 官方 PowerShell 沙箱与 job_list/output/kill；仅 workspace-write。移除凭据环境后执行。注册不等于命令成功，命令可能失败或转后台 job，交付前必须确认状态。 |
-| Agent Teams | 安装的团队插件使用官方 in-process 子智能体，@deepseek-ai peer 统一到锁定 SDK。父子调用经过共享计数器；状态目录为 .agent-teams-bridge/<taskId>，不复用桌面对话。独立调用 ctx.llm 之外客户端的任意第三方代码不在保证内。 |
+| Agent Teams | 安装的团队插件使用官方 in-process 子智能体，@deepseek-ai peer 统一到锁定 SDK。父子调用经过共享计数器；相对状态目录 `.agent-teams-bridge/<taskId>` 按会话 cwd 解析，新会话中位于任务工作区内，且该名称未受 WorkspaceFiles 保护；不复用桌面对话。独立调用 ctx.llm 之外客户端的任意第三方代码不在保证内。 |
 | 原生压缩 | automatic 原生会话使用官方 compaction-basic；辅助模型请求共享计数和明确上限。budgeted 模式以持久检查点阶段替代；single-request 禁止压缩。 |
 | Mnemon、Office、UI、自动化、归档 | 未自动适配，仍需按具体服务契约审查；不因已安装而自动宣称可用。 |
 
 提交固定 profile 摘要，启动核对入口哈希和实际工具。回执分别提供 registeredTools、usedTools、toolOutcomes、skills 和 contextStrategy。工具 returned 不等于业务成功，加载技能不等于正确执行；parentAcceptance 始终独立。原生工具的访问策略与结构限制、SDK 有限默认值见 remainingImplementationConstraints；父任务应使用隔离工作区并核验全部副作用。
+
+文件选择不是 host-scope opt-in：`nativePlugins: ["files"]` 仍只给受保护的 bridge 文件能力。read-only 不含 `ops_replace`；workspace-write 的同名工具是 bridge 适配器，必填 `path/pattern/replacement/expectedSha256`，仅单个既有 UTF-8 文件的大小写敏感字面替换。256 KiB 为已有文件上限，哈希覆盖完整文件；拒绝目录、外部绝对/父路径、已知保护名称、链接文件，拒绝 regex/glob/recursive/dryRun 参数。工作区外 tmpdir 也不作为写入根。SDK 进程 cwd 保持私有 worker home，现有 HarnessClient 初始化则明确传入 task.workspace 作为会话 cwd；这些文件工具仍独立按 task.workspace 解析。此修复不改变上述 cwd 设置或 Shell/Team 状态配置。
+
+安装齐全的本机组合中，read-only 为 4 个工具（两个 bridge 文件工具、两个技能工具）；workspace-write 为 24 个（另含 bridge_write、受保护 ops_replace、四个 Shell/job 与十四个 Team 工具）。缺少可选组件时以解析回执为准，启动必须与 expectedTools 精确一致。离线 native 初始化和组件级文件探针分别验证注册与边界，不冒充真实模型工具循环或团队执行。
+
+## 非阻断观察与后续加固
+
+PR #24 独立复核（2026-10-20，候选 `233ea09a523464c443d6131e509bb071de8bfc4f`）记录以下两项低优先级、非阻断观察。此处披露现有行为并记录后续工作，不改变实现，也不表示已完成加固。
+
+| 观察 | 证据类型与影响 | 后续最小修复选择与验收条件 |
+| --- | --- | --- |
+| OBS-1：同名损坏备份被静默复用 | 独立临时目录文件层探针确认：预置损坏同名备份后替换仍成功，目标内容正确，但备份仍损坏。共享 WorkspaceFiles.write 路径也供 bridge_write 使用；依赖该备份恢复可能得到损坏或旧内容。 | 同名备份存在时核对其内容摘要；不匹配则在写目标前失败，或使用新名称生成并验证原内容备份。回归验收须覆盖损坏同名备份：目标写入前失败，或取得经验证的原内容备份；正常路径继续保留正确备份。 |
+| OBS-2：Team 状态位于工作区内且未受文件层保护 | 静态路径核对及独立临时目录文件层探针：新会话 cwd 为 task.workspace，Teams 相对状态路径因此位于工作区内；合成 `.agent-teams-bridge/team-1/state.json` 可通过 WorkspaceFiles.read 读取。workspace-write 文件工具因该名称未受保护而具有读写这些状态文件的路径权限。未执行真实 Teams 创建、成员或模型调用，不构成端到端逃逸证据。 | 将 Teams 状态移至 worker home/任务私有目录，或把 `.agent-teams-bridge` 纳入文件层保护。验收须证明委派文件工具无法读取/改写受保护状态，并通过适当的后续 Teams 运行时验证确认正常创建、成员运行及状态持久化未受破坏；本次未执行该运行时验证。 |
+
+两项观察的证据为离线源码核对与临时目录探针；真实模型工具循环、Shell 和 Teams 运行仍为 NOT_RUN。未来实现或验收需要独立安排相应测试，不能以工具注册成功替代运行时验证。
 
 ## 原生工作区与来源诊断
 
