@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-native.1 — candidate, 2026-10-19
+
+- Preserve omitted resource limits as unspecified for new tasks; keep explicit caps, historical budgets, single-request no-retry and unknown usage semantics.
+- Prefer DSH-native skill discovery/loading and adapt installed Skills Manager, dsh-ops, sandboxed PowerShell and in-process Agent Teams with task-owned state and actual registration/use evidence. Bind native SDK peers to the locked runtime graph.
+- Prefer native repeated context compaction and meter auxiliary calls. Support durable checkpoint chains without a fixed stage/attempt ceiling; preserve cancellation, no-progress and failure boundaries.
+- Offline SDK fixtures cover repeated compaction, native tools/child execution and shared limits. No paid model test; candidate only, not a public marketplace release.
+
 ## 1.3.1 — 2026-10-19
 
 - Address DSH-001: deny common credential filenames and directories in built-in resolve/read/write/list at every depth, including Windows names and SSH private-key variants. Preserve ordinary project and public-key files. Describe this as a known-name policy, not arbitrary secret detection or a boundary for trusted custom modules.

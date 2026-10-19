@@ -34,7 +34,7 @@ test('multiple production connections discover tools without reserving task owne
   await assert.rejects(access(join(state, 'owner.lock')), { code: 'ENOENT' });
 });
 
-test('MCP enforces total authorization and the explicit one-request exception', async t => {
+test('MCP preserves omitted limits and enforces an explicit one-request contract', async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-mcp-'));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
@@ -62,9 +62,8 @@ test('MCP enforces total authorization and the explicit one-request exception', 
     assert.notEqual(response.isError, true);
     return JSON.parse(response.content[0].text);
   };
-  const missing = await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'missing-budget', prompt: 'Task', workspace } });
-  assert.equal(missing.structuredContent.error.code, 'BUDGET_REQUIRED');
-  assert.equal(manager.list().total, 0);
+  assert.equal(submitSchema.required.includes('budget'), false);
+  assert.ok(submitSchema.properties.executionMode.enum.includes('automatic'));
   const noContract = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', workload: 'verification', requestId: 'no-contract', prompt: 'Rules', workspace } });
   assert.equal(noContract.structuredContent.error.code, 'REVIEW_CONTRACT_REQUIRED');
   const duplicateIds = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', requestId: 'duplicate-contract', prompt: 'Rules', workspace, reviewContract: { caseIds: ['C1', 'C1'], ruleIds: ['R1'], checkIds: [] } } });

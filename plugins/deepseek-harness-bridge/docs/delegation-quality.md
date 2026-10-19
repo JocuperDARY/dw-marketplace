@@ -5,7 +5,7 @@ A reviewContract implies json-object output. JSON syntax/shape-of-root failures
 may share the one recovery allowance with truncation in new budgeted tasks;
 missing cases, wrong rules and semantic errors still do not auto-retry.
 
-Use `verification` for path classification, exception precedence, interacting rules and test expectations. The default is high effort with a 16384-token request ceiling. This is a conservative starting policy, not evidence that high fixes every error. Literal copying or reformatting can remain mechanical/off. One straightforward rule may justify an explicit low setting with parent checks. Never silently change a user-fixed effort, token cap, request count or deadline; the existing budget contract still applies.
+Use `verification` for path classification, exception precedence, interacting rules and test expectations. The default is high effort; an omitted output ceiling remains unspecified. This is a conservative starting policy, not evidence that high fixes every error. Literal copying or reformatting can remain mechanical/off. One straightforward rule may justify an explicit low setting with parent checks. Never silently change a user-fixed effort, token cap, request count or deadline; the existing budget contract still applies.
 
 There is no prompt-keyword classifier. The parent must choose the workload and provide the contract. Existing tasks without it retain their behavior and request fingerprints. Supplying a contract defaults an omitted workload to verification. Explicit mechanical/low/off combinations are preserved with warnings. Verification without a contract returns `REVIEW_CONTRACT_REQUIRED` before launching a worker.
 

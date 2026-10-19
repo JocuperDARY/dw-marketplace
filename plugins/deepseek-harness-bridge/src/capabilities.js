@@ -4,18 +4,19 @@ import { homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { localConfig } from './local-config.js';
 import { requireValue } from './errors.js';
+import { resolveNativeProfile } from './native-profile.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const ID = /^[a-z][a-z0-9-]{0,63}$/;
 const TOOL = /^[a-zA-Z][a-zA-Z0-9_]{0,79}$/;
 const PACKAGE = /^(?:@[a-z0-9_-]+\/)?[a-z0-9_-]+$/;
 const KNOWN = {
-  '@nanmicoder/dsh-agent-teams': ['delegation', 'Nested teams need a separate shared concurrency/request budget; keep orchestration in Codex until an adapter is verified.'],
+  '@nanmicoder/dsh-agent-teams': ['delegation', 'The native profile selects the in-process provider and shared SDK request meter. Inspect registered tools, child execution evidence and cleanup; installation alone is not verification.'],
   'dsh-mnemon': ['memory', 'Select only a reviewed headless memory source and scoped retrieval tools; do not import all historical memory.'],
   'dsh-ops': ['file-and-shell-tools', 'Prefer its concise file tools after validating path policy; shell/background tools require a separately reviewed write profile.'],
   'dsh-univer-office': ['office', 'Use only for an Office assignment and after verifying the required host services; desktop UI installation is insufficient.'],
   'cc-safety-net': ['guard', 'A supplementary command guard; it does not grant shell access.'],
-  '@michengai/dsh-skills-manager': ['skills', 'Select task-relevant SKILL.md files in a local capability profile; avoid loading the whole catalog.'],
+  '@michengai/dsh-skills-manager': ['skills', 'The native profile mounts its headless provider with the DSH registry. Search native metadata first, then load matching bodies; supplemental Codex sources require an explained fallback.'],
   'dsh-context': ['observability', 'Desktop context inspection; the bridge reports request/usage receipts without loading its UI.'],
   'dsh-cost-meter': ['observability', 'Accounting is not a spend limit; use the bridge request/token/time gates.'],
   'billion-context': ['context-management', 'Extra summarization may issue model calls; use small explicit context unless the adapter is budget-verified.'],
@@ -61,14 +62,15 @@ export async function installedInventory(config) {
   return { profiles, evidence: 'package_metadata_only', credentialsRead: false };
 }
 
-export async function resolveProfile(id = 'files', config) {
+export async function resolveProfile(id = 'files', config, context = {}) {
   config ??= await localConfig();
   requireValue(typeof id === 'string' && ID.test(id), 'INVALID_PROFILE', 'Invalid capability profile ID.');
   const configured = config.capabilityProfiles ?? [];
   requireValue(Array.isArray(configured) && configured.length <= 16, 'INVALID_PROFILE', 'At most 16 capability profiles may be configured.');
   const ids = configured.map(value => value?.id);
-  requireValue(ids.every(value => typeof value === 'string' && ID.test(value) && !['files', 'inference-only'].includes(value)) && new Set(ids).size === ids.length,
+  requireValue(ids.every(value => typeof value === 'string' && ID.test(value) && !['native', 'files', 'inference-only'].includes(value)) && new Set(ids).size === ids.length,
     'INVALID_PROFILE', 'Configured capability IDs must be unique and cannot shadow built-in profiles.');
+  if (id === 'native') return resolveNativeProfile(config, context);
   if (id === 'files' || id === 'inference-only') {
     return { id, digest: digest(`builtin-v1:${id}`), fileTools: id === 'files', modules: [], tools: [], skills: [], access: 'read-only' };
   }
@@ -101,16 +103,16 @@ export async function resolveProfile(id = 'files', config) {
     access: profile.access, modules: resolvedModules, tools: tools.sort(), skills: resolvedSkills };
 }
 
-export async function capabilities(config) {
+export async function capabilities(config, context = {}) {
   config ??= await localConfig();
-  const ids = ['files', 'inference-only', ...(config.capabilityProfiles || []).map(profile => profile.id)];
+  const ids = ['native', 'files', 'inference-only', ...(config.capabilityProfiles || []).map(profile => profile.id)];
   const profiles = [];
   for (const id of ids) {
-    const profile = await resolveProfile(id, config);
+    const profile = await resolveProfile(id, config, context);
     profiles.push({ id, digest: profile.digest, fileTools: profile.fileTools, access: profile.access,
       tools: profile.tools, skills: profile.skills.map(skill => ({ path: skill.path, sha256: skill.sha256 })),
-      moduleCount: profile.modules.length, runtimeVerified: false });
+      moduleCount: profile.modules.length, runtimeVerified: false, ...(profile.native ? { native: profile.native } : {}) });
   }
   return { ...(await installedInventory(config)), capabilityProfiles: profiles,
-    selection: 'Pass capabilityProfile to dsh_submit. Installed plugins are not enabled automatically; exact runtime tools are checked before prompting.' };
+    selection: 'New tasks default to native capabilities permitted by access. Pass nativePlugins to select a subset, or capabilityProfile files/inference-only. Metadata is not runtime proof: task results separately retain tools registered before prompting, invoked tools and native skill load receipts.' };
 }

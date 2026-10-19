@@ -3,11 +3,15 @@ import { createHash } from 'node:crypto';
 
 // Hooks run in the worker before its module graph loads. Keep original URLs so
 // relative and package imports retain their normal resolution base.
-export function registerModulePins(entries) {
+export function registerModulePins(entries, { runtimePeers = false } = {}) {
   const pins = new Map(entries);
   return registerHooks({
     resolve(specifier, context, nextResolve) {
-      const resolved = nextResolve(specifier, context);
+      // Native packages are installed by another host and can otherwise resolve
+      // stale peer SDK copies from an old npm cache. One worker must share its
+      // locked runtime types, scoped services and descriptor protocol.
+      const resolved = nextResolve(specifier, runtimePeers && specifier.startsWith('@deepseek-ai/')
+        ? { ...context, parentURL: import.meta.url } : context);
       if (pins.has(specifier) && resolved.url !== specifier) throw new Error('Pinned module identity changed.');
       return resolved;
     },

@@ -1,16 +1,36 @@
-# Budget reliability contract — 1.2.0
+# Resource limits and persistent progress — 2.0.0-native.1
 
-The original 1.0.0 authorization contract continues to apply. The additive
-[1.2.0 delivery contract](output-recovery.md) defines strict JSON checking,
-bounded drafting, the soft recovery reserve and the shared recovery allowance.
+This candidate changes omitted-limit semantics for new tasks. Existing saved
+tasks retain their original limits, fingerprints and recovery policy. The
+[delivery contract](output-recovery.md) still separates format from acceptance.
 
-New tasks default to `executionMode: "budgeted"` and MUST supply preauthorized
-`budget` totals: `totalModelRequests`, `totalOutputTokens`, `totalToolCalls` and
-`totalDurationMs`. Missing totals produce `BUDGET_REQUIRED` before credential
-preflight or worker launch. Defaults never create authorization. These totals
-cover stages, recovery and continuation; restart and replay cannot refill them
-or extend the deadline. Output includes reasoning. This is not a currency or
-exact input-token cap; `maxRequestBytes` bounds serialized input separately.
+New tasks default to `executionMode: "automatic"` when no budget is supplied.
+Omitted/null maxTokens, maxModelRequests, maxToolCalls, maxRequestBytes and
+timeoutMs stay null: no finite bridge spending cap is invented. A supplied
+budget selects budgeted mode. Its four optional totals are totalModelRequests,
+totalOutputTokens, totalToolCalls and totalDurationMs; omitted totals stay null.
+Explicit totals cover stages, recovery and continuation, and cannot be refilled
+or extended by restart/replay. Output includes reasoning; request bytes are
+neither exact input tokens nor currency. Omitted limits do not expand task scope,
+grant access or instruct the worker to spend more.
+
+Native automatic sessions prefer the SDK's own repeated context compaction.
+Auxiliary compaction requests use the same official Flash route and request
+meter; explicit request/output limits still apply. Their omitted effort is
+recorded as null, rather than falsely reported as the parent's effort. The
+pinned SDK supplies finite defaults (256000 request output, 1000000 context;
+65536 compaction output) even when the bridge omits limits. These are inspected
+SDK settings, not measured provider hard maxima or infinite physical context.
+
+For durable logical task expansion, explicitly select budgeted mode. An omitted
+budget or budget:{} leaves all totals unspecified and permits a sequence of
+checkpoint stages with no fixed stage count or parent-attempt ceiling. Each
+stage publishes progress before its successor starts; older evidence remains
+on disk. There is no fixed total-capacity promise: disk, memory, SDK, provider
+and structural storage boundaries remain. This mode uses stage checkpoints
+instead of native in-session compaction. Cancellation, repeated identical
+progress, unsafe accounting, failed persistence and explicit exhausted totals
+still stop work. Failed stages are not retried indefinitely.
 
 Explicit `single-request` permits one inference-only/read-only request, zero
 tools, no budget object and no continuation. Old records remain readable and
@@ -19,25 +39,26 @@ they are not retroactively granted a total budget.
 
 ## Request planning
 
-| Workload | Default work effort | Per-request ceiling |
-| --- | --- | --- |
-| `mechanical`: extraction and formatting | `off` | 4096 |
-| `drafting`: bounded prose from supplied facts | `off` | 4096 |
-| `standard`: ordinary maintenance and review | `low` | 8192 |
-| `reasoning`: substantive reasoning | `high` | 16384 |
-| `verification`: interacting rules and test expectations | `high` | 16384 |
+| Workload | Default work effort |
+| --- | --- |
+| `mechanical`: extraction and formatting | `off` |
+| `drafting`: prose from supplied facts | `off` |
+| `standard`: ordinary maintenance and review | `low` |
+| `reasoning`: substantive reasoning | `high` |
+| `verification`: interacting rules and test expectations | `high` |
 
-Explicit effort overrides the workload; `max` defaults to 32768 tokens. Explicit
+Effort does not set a token limit. Explicit effort overrides the workload. Explicit
 `maxTokens` is never silently raised. High effort with a small cap returns a
 planning warning: reasoning and visible text share the allowance. These defaults
 are not measured performance guarantees.
 
-Stages receive at most remaining authorization and caller ceilings. The default
-stage request ceiling is 6 (minimum 2). One request and up to 2048 tokens are
+Stages receive at most remaining explicit authorization and caller ceilings.
+There is no default stage request ceiling. When a checkpoint fits, one request and up to 2048 tokens are
 reserved for a checkpoint, reduced for smaller explicit caps/totals. Work uses
 remaining stage output minus this reserve, up to its explicit cap. Known final
 usage releases unused reservations; unknown/unfinished usage stays charged at
-the full cap. Invalid receipts retain the entire stage allocation.
+the full available reservation; an unknown unbounded reservation stays null,
+never zero. Invalid receipts retain the stage allocation and prevent continuation.
 
 The pinned SDK `agent/request` waterfall prepares allowance and effort before
 adapter selection and request freezing. Prompt assembly makes checkpoints
@@ -99,8 +120,8 @@ cleanup retains ownership. No lock is automatically deleted or stolen.
 
 ## Release acceptance
 
-- Reject missing totals before dispatch; verify the single-request exception,
-  workload defaults, explicit caps and legacy fingerprint migration.
+- Preserve unspecified limits through schema, planning, persistence, continuation
+  and accounting; verify explicit caps and legacy fingerprint migration.
 - Test allocations, checkpoint reserves, usage refunds, auxiliary races,
   immutable totals, cancellation and failed publication.
 - Reproduce reasoning-only and partial-JSON truncation using the real pinned
@@ -108,9 +129,11 @@ cleanup retains ownership. No lock is automatically deleted or stolen.
   evidence, one tool-free recovery and total bounds.
 - Verify MCP submission, results, continuation, idempotency, cleanup and
   transient/persistent observation locks without duplicate execution.
-- Review and merge the versioned PR, then synchronize marketplace and local plugin.
+- Review the versioned candidate independently; merging/publication requires the
+  user-approved release step. Candidate installation is not a marketplace release.
 
-No paid test, dependency upgrade, desktop conversation reuse, nested team,
-shell-permission expansion or change to the original workspace's 40 dirty
-entries is part of this release. Offline success covers the fixtures;
-real-provider quality and latency remain untested here.
+No paid test, dependency upgrade, desktop conversation reuse or change to the
+original workspace's 40 dirty entries is part of this candidate. Native tools,
+shell and in-process teams are selected under the declared access and capability
+contract. Offline success covers the fixtures; real-provider quality and latency
+remain untested here.

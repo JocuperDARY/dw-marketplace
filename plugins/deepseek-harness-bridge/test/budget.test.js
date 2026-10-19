@@ -31,6 +31,22 @@ async function gate(t, overrides = {}) {
   return { config, request, arm, receipt, collect };
 }
 
+test('native compaction shares request accounting and explicit limits without opening other routes', async t => {
+  const g = await gate(t, { allowNativeCompaction: true, maxModelRequests: 2 });
+  await g.arm();
+  const adapter = async function* () { yield { type: 'usage', usage: { outputTokens: 10 } }; yield { type: 'finish', reason: 'stop' }; };
+  await g.collect({ ...g.request, purpose: 'compaction', reasoningEffort: undefined }, adapter);
+  await g.collect({ ...g.request }, adapter);
+  assert.deepEqual((await g.receipt()).calls.map(call => [call.purpose, call.effort]), [['compaction', null], ['generation', 'high']]);
+  await assert.rejects(g.collect({ ...g.request, purpose: 'compaction', reasoningEffort: undefined }, adapter), /MODEL_REQUEST_LIMIT/);
+  const single = await gate(t);
+  await single.arm();
+  await assert.rejects(single.collect({ ...single.request, purpose: 'compaction', reasoningEffort: undefined }, adapter), /ROUTE_DENIED/);
+  const wrongRoute = await gate(t, { allowNativeCompaction: true });
+  await wrongRoute.arm();
+  await assert.rejects(wrongRoute.collect({ ...wrongRoute.request, purpose: 'compaction', provider: 'other', reasoningEffort: undefined }, adapter), /ROUTE_DENIED/);
+});
+
 test('worker initialization cannot call a provider; denied attempts do not consume a request', async t => {
   const g = await gate(t);
   let sends = 0;

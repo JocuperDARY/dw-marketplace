@@ -28,7 +28,8 @@ export class WorkspaceFiles {
   run(operation, signal) {
     const pending = this.operations.then(async () => {
       signal?.throwIfAborted();
-      requireValue(++this.calls <= this.maxToolCalls, 'TOOL_LIMIT', 'The file tool call limit has been reached. Return the available evidence.');
+      this.calls++;
+      requireValue(this.maxToolCalls == null || this.calls <= this.maxToolCalls, 'TOOL_LIMIT', 'The explicit file tool call limit has been reached. Return the available evidence.');
       return operation();
     });
     this.operations = pending.catch(() => {});
