@@ -4,8 +4,15 @@
 
 - Add optional parent-declared lifecycle contracts with ordered allowed outcomes, exact slot reuse, recomputed counts and bounded diagnostics; source truth and prose/parent acceptance remain unassessed.
 - Publish uniqueness and nonblank basis constraints in JSON Schema; enforce cross-field membership, unique case IDs and normalized 16384-byte UTF-8 size before admission or credentials. Preserve raw failures and avoid semantic retries.
-- Port onto 2.0.2 while preserving native file boundaries, nullable omitted limits, explicit-v2/v1 replay, report fingerprints and prerequisite-evidence rules.
+- Port onto 2.0.4 while preserving native file boundaries, nullable omitted limits, explicit-v2/v1 replay, report fingerprints and prerequisite-evidence rules.
 - Cover the original S3 wrong-status case, network-blocked SDK/MCP, persistence, replay and explicit continuation. Offline evidence does not establish paid model quality or deployment.
+
+## 2.0.4 — 2026-10-20
+
+- Reserve native budgeted checkpoints for the captain, account concurrent prepared requests, drain exact owned descendants and preserve bounded terminal/late-notice evidence before checkpoint dispatch. Keep unrelated steering and single-request boundaries.
+- Retry only transient Windows EPERM/EBUSY atomic receipt replacement failures within a finite window, using unique owned temporary files and preserving persistent errors.
+- Exercise actual SDK file/skill/Shell/job/resume/Team execution with offline scripted model streams, shared request/output/tool/deadline accounting and owned cancellation. Add deterministic preparation/ownership/publication regressions.
+- Make checkpoint fixtures truthful before work and startup-tolerant without expanding model/tool/output budgets; isolate default offline configuration from the operator profile. No paid provider or semantic quality claim.
 
 ## 2.0.3 — 2026-10-20
 

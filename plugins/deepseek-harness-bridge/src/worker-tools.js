@@ -1,7 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { WorkspaceFiles } from './workspace.js';
 import { safeError } from './errors.js';
-import { writeFile, rename } from 'node:fs/promises';
+import { writeAtomicReceipt } from './atomic-receipt.js';
 
 export const name = 'deepseek-bridge-files';
 export const inject = ['tools', 'llm'];
@@ -23,10 +23,7 @@ export async function apply(ctx, config) {
     const outcomes = Object.fromEntries(Object.entries(toolOutcomes).map(([name, counts]) => [name,
       { ...counts, unobserved: Math.max(0, counts.attempted - counts.returned - counts.error) }]));
     const content = JSON.stringify({ nonce: config.nonce, tools: currentTools(), toolCalls: calls, usedTools: [...usedTools].sort(), toolOutcomes: outcomes, mismatch });
-    publication = publication.then(async () => {
-      await writeFile(`${config.receiptPath}.tmp`, content, { mode: 0o600 });
-      await rename(`${config.receiptPath}.tmp`, config.receiptPath);
-    }).catch(error => { publicationError = error; });
+    publication = publication.then(() => writeAtomicReceipt(config.receiptPath, content)).catch(error => { publicationError = error; });
     return publication;
   };
   ctx.on('tools/change', () => { void publish(); });

@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import { writeFile, rename } from 'node:fs/promises';
+import { writeAtomicReceipt } from './atomic-receipt.js';
 import { createHash } from 'node:crypto';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createPresetSkillProvider, presetSkillRoot } from './native-skill-sources.js';
@@ -16,10 +16,7 @@ export async function apply(ctx, config) {
   let publication = Promise.resolve();
   const persist = () => {
     const content = JSON.stringify(receipt);
-    publication = publication.then(async () => {
-      await writeFile(`${config.receiptPath}.tmp`, content, { mode: 0o600 });
-      await rename(`${config.receiptPath}.tmp`, config.receiptPath);
-    });
+    publication = publication.then(() => writeAtomicReceipt(config.receiptPath, content));
     return publication;
   };
   let preset;

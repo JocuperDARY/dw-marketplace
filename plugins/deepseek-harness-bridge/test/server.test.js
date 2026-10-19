@@ -67,6 +67,7 @@ test('production rejects invalid contracts before touching an existing state loc
   const env = workerEnvironment();
   delete env.DEEPSEEK_API_KEY;
   env.DSH_BRIDGE_DATA_DIR = state;
+  env.DSH_BRIDGE_CONFIG_DIR = join(root, 'empty-config');
   const client = new Client({ name: 'contract-lock-test', version: '1' });
   t.after(async () => { await client.close(); await rm(root, { recursive: true, force: true }); });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' }));
@@ -92,6 +93,7 @@ test('multiple production connections discover tools without reserving task owne
     const env = workerEnvironment();
     delete env.DEEPSEEK_API_KEY;
     env.DSH_BRIDGE_DATA_DIR = state;
+    env.DSH_BRIDGE_CONFIG_DIR = join(root, 'empty-config');
     const client = new Client({ name: 'discovery-test', version: '1' });
     clients.push(client);
     await client.connect(new StdioClientTransport({ command: process.execPath,
@@ -166,6 +168,7 @@ test('production stdio entry starts without a key and doctor makes no model call
   const env = workerEnvironment();
   delete env.DEEPSEEK_API_KEY;
   env.DSH_BRIDGE_DATA_DIR = join(root, 'state');
+  env.DSH_BRIDGE_CONFIG_DIR = join(root, 'empty-config');
   const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' });
   const client = new Client({ name: 'stdio-test', version: '1' });
   t.after(async () => { await client.close(); await rm(root, { recursive: true, force: true }); });
