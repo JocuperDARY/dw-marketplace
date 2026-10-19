@@ -15,6 +15,8 @@ Delegate only when permitted and useful. A bounded task needs an objective, inpu
 
 ## Optional managed resource protocol
 
+For a Windows stdio MCP server or session-owned command, the opt-in [process supervisor](references/process-supervisor.md) supplies actual atomic Job Object ownership, transport/parent exit handling and bounded teardown. Build once and explicitly route the chosen command through its executable. Keep quiet connected sessions alive; never replace ownership with idle-time or process-name heuristics. This narrow launch path does not implement the full manager adapter or adopt pre-existing processes.
+
 The detailed plan, ledger, probe and schema requirements below apply when explicitly using the executable resource manager or implementing its protocol. Choose this mode for work that actually requires persisted process identity, resource recovery, or a verifiable lifecycle. Its API requirements remain mandatory for that mode.
 
 Choose one topology:

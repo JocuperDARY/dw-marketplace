@@ -717,7 +717,7 @@ test('an empty DW_SCHEMA_PYTHON override remains authoritative and returns a sta
 
 test('packages the exact schema validation requirements', () => {
   assert.strictEqual(
-    fs.readFileSync(schemaRequirementsPath, 'utf8'),
+    fs.readFileSync(schemaRequirementsPath, 'utf8').replace(/\r\n/g, '\n'),
     'jsonschema>=4.18,<5\nreferencing>=0.28.4,<1\n',
   );
 });

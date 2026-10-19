@@ -1,5 +1,9 @@
 # Resource lifecycle
 
+For the opt-in Windows stdio execution backend and host configuration recipe, see
+[process-supervisor.md](process-supervisor.md). Its private Job Object enforces
+ownership at launch; it does not change the full manager contracts below.
+
 Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and the task record; they do not require the optional managed protocol.
 
 ## Ordinary task completion
