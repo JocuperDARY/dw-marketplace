@@ -166,6 +166,47 @@ test('DSH-FIT-003: actual registered ops_replace performs literal replacement wi
   assert.equal(await readFile(join(f.backupDir, backups[0]), 'utf8'), 'alpha alpha');
 });
 
+test('ops_replace shares verified backup reuse and rejects corrupt backups before publication', async t => {
+  const f = await replacementFixture(t);
+  await mkdir(f.backupDir);
+  const backup = join(f.backupDir, `${sha('input.txt')}-${sha('alpha alpha')}.txt`);
+  await writeFile(backup, 'partial');
+  const args = { path: 'input.txt', pattern: 'alpha', replacement: 'beta', expectedSha256: sha('alpha alpha') };
+  assert.equal((await f.call(args)).error.code, 'BACKUP_INVALID');
+  assert.equal(await readFile(join(f.workspace, 'input.txt'), 'utf8'), 'alpha alpha');
+  assert.equal(await readFile(backup, 'utf8'), 'partial');
+  assert.deepEqual((await readdir(f.workspace)).sort(), ['.env', 'input.txt']);
+  await writeFile(backup, 'alpha alpha');
+  assert.equal((await f.call(args)).changed, 1);
+  assert.equal(await readFile(join(f.workspace, 'input.txt'), 'utf8'), 'beta beta');
+  assert.equal(await readFile(backup, 'utf8'), 'alpha alpha');
+});
+
+test('registered file tools protect Teams state across depth and case, including ops_replace', async t => {
+  const f = await bridgeFixture(t, 'workspace-write');
+  // Mount the replacement adapter against the same backing workspace as bridge_*.
+  const { apply } = await import('../src/native-files.js');
+  await apply({ tools: { register: tool => f.tools.set(tool.name, tool) } }, { ...f, access: 'workspace-write' });
+  for (const prefix of ['', 'nested/']) {
+    for (const name of ['.agent-teams-bridge', '.AGENT-TEAMS-BRIDGE']) {
+      const path = `${prefix}${name}/team-1/state.json`;
+      await mkdir(join(f.workspace, prefix, name, 'team-1'), { recursive: true });
+      await writeFile(join(f.workspace, path), 'synthetic team state');
+      for (const [tool, args] of [
+        ['bridge_list', { path: `${prefix}${name}` }],
+        ['bridge_read', { path }],
+        ['bridge_write', { path, text: 'tampered', expectedSha256: sha('synthetic team state') }],
+        ['ops_replace', { path, pattern: 'state', replacement: 'tampered', expectedSha256: sha('synthetic team state') }],
+      ]) assert.equal((await f.call(tool, args)).error.code, 'PATH_DENIED', `${tool}: ${path}`);
+      assert.equal((await f.call('bridge_list', { path: prefix || '.' })).entries.some(entry => entry.name.toLowerCase() === name.toLowerCase()), false);
+      assert.equal(await readFile(join(f.workspace, path), 'utf8'), 'synthetic team state');
+    }
+  }
+  const args = { path: 'input.txt', pattern: 'alpha', replacement: 'beta', expectedSha256: sha('alpha alpha') };
+  assert.equal((await f.call('ops_replace', args)).changed, 1);
+  assert.equal((await f.call('bridge_read', { path: 'input.txt' })).text, 'beta beta');
+});
+
 test('DSH-FIT-003: actual registered ops_replace rejects outside/protected paths, stale SHA and unsupported modes', async t => {
   const f = await replacementFixture(t);
   const args = { path: 'input.txt', pattern: 'alpha', replacement: 'beta', expectedSha256: sha('alpha alpha') };
