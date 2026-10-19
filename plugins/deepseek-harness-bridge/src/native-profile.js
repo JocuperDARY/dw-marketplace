@@ -52,12 +52,14 @@ export async function resolveNativeProfile(config, { workspace, requestedWorkspa
     }, { skillReceipt: true });
     components.push({ capability: 'skills', implementation: manager ? `${manager.name}@${manager.version} provider plus official skill registry` : 'official skill filesystem registry', selected: true, runtimeVerified: false });
   }
-  const ops = selected.some(name => ['files', 'shell'].includes(name)) ? await packageRoot(home, 'dsh-ops') : null;
+  const ops = selected.includes('shell') ? await packageRoot(home, 'dsh-ops') : null;
   if (selected.includes('files')) {
-    if (ops && process.platform === 'win32') {
-      await add(join(ops.root, 'lib', 'components', 'file', 'index.js'), ['ops_inspect_local_file', 'ops_grep', 'ops_glob', 'ops_replace'], { required: true });
-      components.push({ capability: 'files', implementation: `${ops.name}@${ops.version}`, selected: true, runtimeVerified: false });
-    } else components.push({ capability: 'files', selected: false, reason: 'Compatible dsh-ops Windows package unavailable; bridge workspace files remain available.' });
+    if (access === 'workspace-write') await add(fileURLToPath(new URL('./native-files.js', import.meta.url)),
+      ['ops_replace'], { workspace, access }, { workspaceFiles: true });
+    components.push({ capability: 'files', implementation: 'bridge workspace list/read' +
+      (access === 'workspace-write' ? '/write and guarded single-file literal ops_replace' : ''),
+      selected: true, runtimeVerified: false,
+      boundary: 'Task workspace with the bridge protected-name/link policy; raw dsh-ops inspect/glob/grep/replace are not mounted.' });
   }
   if (selected.includes('shell')) {
     if (process.platform === 'win32') {
@@ -87,6 +89,6 @@ export async function resolveNativeProfile(config, { workspace, requestedWorkspa
         'Automatic native sessions use the official compaction service; its auxiliary requests share the bridge meter and explicit caps. The native compactor defaults to 65536 summary tokens and limited no-progress/overflow recovery. Budgeted mode uses durable checkpoint stages without a fixed total stage count. Neither mechanism creates infinite physical context or guarantees completion.',
         'SDK initialization is bounded at 30 seconds, teardown at 1/3/2 seconds. Bridge prompt storage is 64 KiB, stage JSON 32 KiB and retained text 1 MiB. File/tool output paging remains. These are implementation boundaries, not task spending authorization.',
         'Native Agent Teams defaults to 8 members; the official subagent service defaults to 8 active children and depth 1. These are native configurable defaults, not removed limits or bridge task totals.',
-        'Native shell foreground waits can promote work to jobs; job_output/job_list/job_kill are provided. Native dsh-ops has its own operation timeouts and file paging. Installation and registration alone do not prove successful execution.',
+        'Native shell foreground waits can promote work to jobs; job_output/job_list/job_kill are provided. Native file selection uses bridge workspace list/read/write; ops_replace is a guarded single-file literal adapter with the existing 256 KiB bound and whole-file hash, not the dsh-ops recursive API. Installation and registration alone do not prove successful execution.',
       ] } };
 }
