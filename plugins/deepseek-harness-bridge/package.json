@@ -7,7 +7,7 @@
   "engines": { "node": ">=24.18.0" },
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --import ./test/fixtures/offline-network.js --test test/*.test.js",
     "test:package": "node --test test/package.test.js && node scripts/test-package.js",
     "doctor": "node index.js --doctor"
   },
