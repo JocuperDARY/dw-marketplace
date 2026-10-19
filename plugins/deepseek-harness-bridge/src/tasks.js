@@ -196,8 +196,13 @@ export class TaskManager {
       const record = this.record(input.taskId);
       const prompt = inputPrompt(input.prompt);
       const id = requestId(input.requestId);
+      const previous = this.requests.get(id);
+      // Replay uses the authorization that existed before that attempt, not a
+      // later continuation's narrower timeout. Its fingerprint stays stable.
+      const predecessor = previous?.taskId === record.taskId && previous.attempt > 1
+        ? record.attempts[previous.attempt - 2] : record.attempts.at(-1);
       const timeoutMs = record.planning?.limitsPolicy === 'explicit-v2'
-        ? minimumLimit(record.attempts.at(-1).timeoutMs, optionalLimit(input.timeoutMs, 'timeoutMs'))
+        ? minimumLimit(predecessor.timeoutMs, optionalLimit(input.timeoutMs, 'timeoutMs'))
         : boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
       const fingerprint = hash({ taskId: record.taskId, prompt, timeoutMs });
       const existing = this.existing(id, fingerprint);

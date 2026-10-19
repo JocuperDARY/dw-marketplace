@@ -81,6 +81,25 @@ test('v1 replay keeps its original finite defaults without relaxing existing aut
   finally { await next.close(); }
 });
 
+test('replaying an earlier continuation remains idempotent after a later timeout is narrowed and restarted', async t => {
+  let calls = 0;
+  const f = await fixture(t, async () => { calls++; return { terminal: 'completed', cleanup: 'confirmed', text: 'fixture' }; });
+  const first = await f.manager.submit({ requestId: 'replay-start', prompt: 'Task', workspace: f.workspace });
+  await f.manager.wait({ taskId: first.taskId });
+  const continuation = { taskId: first.taskId, requestId: 'replay-followup', prompt: 'Follow up.', timeoutMs: 60000 };
+  await f.manager.continue(continuation); await f.manager.wait({ taskId: first.taskId });
+  await f.manager.continue({ taskId: first.taskId, requestId: 'narrowed', prompt: 'Further follow up.', timeoutMs: 30000 });
+  await f.manager.wait({ taskId: first.taskId });
+  assert.equal((await f.manager.continue(continuation)).duplicate, true);
+  await f.manager.close();
+  const next = await new TaskManager(f.options).open();
+  try {
+    const replay = await next.continue(continuation);
+    assert.equal(replay.duplicate, true); assert.equal(replay.timeoutMs, 60000); assert.equal(calls, 3);
+    await assert.rejects(next.continue({ ...continuation, prompt: 'changed' }), { code: 'REQUEST_CONFLICT' });
+  } finally { await next.close(); }
+});
+
 test('partial totals persist without inventing request, tool or time totals', async t => {
   const f = await fixture(t, async ({ task }) => ({ terminal: 'completed', cleanup: 'confirmed', toolCalls: 0,
     text: JSON.stringify({ state: 'completed', summary: 'done', nextSteps: '' }),
