@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 2.0.3
+# DeepSeek Harness Bridge 2.0.4
+
+2.0.4 修复原生 Teams 的共享阶段检查点：父任务保留收尾请求，停止并回收所属子任务，保存真实终态和迟到的结算通知。Windows 回执原子替换仅对短暂共享冲突做有限重试。增加真实 SDK 内的离线文件、技能、Shell/jobs、会话恢复和 Teams 验证；模型流为合成数据，不代表真实 Flash 质量或费用。见[原生执行与检查点验证](docs/native-validation.md)。
 
 2.0.3 修复 OBS-1 备份完整性和 OBS-2 Team 状态文件工具边界：发布目标前验证原内容备份，同名损坏或链接备份明确失败并保留证据；内建文件工具在任意深度及大小写下隐藏并拒绝 `.agent-teams-bridge`。原生 Team 工具继续直接维护状态。保留 2.0.2 的委派依据与父级验收规则。
 

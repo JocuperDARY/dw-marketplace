@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.4 — 2026-10-20
+
+- Reserve native budgeted checkpoints for the captain, account concurrent prepared requests, drain exact owned descendants and preserve bounded terminal/late-notice evidence before checkpoint dispatch. Keep unrelated steering and single-request boundaries.
+- Retry only transient Windows EPERM/EBUSY atomic receipt replacement failures within a finite window, using unique owned temporary files and preserving persistent errors.
+- Exercise actual SDK file/skill/Shell/job/resume/Team execution with offline scripted model streams, shared request/output/tool/deadline accounting and owned cancellation. Add deterministic preparation/ownership/publication regressions.
+- Make checkpoint fixtures truthful before work and startup-tolerant without expanding model/tool/output budgets; isolate default offline configuration from the operator profile. No paid provider or semantic quality claim.
+
 ## 2.0.3 — 2026-10-20
 
 - Address OBS-1: verify same-name original-content backups are ordinary, nonlinked, single-link files with the expected SHA-256 before staging a replacement. Valid backups remain reusable; corrupt or partial backups block writes with BACKUP_INVALID and retain the original target and backup evidence. Preserve workspace writer lock ownership.
