@@ -14,7 +14,9 @@ import { ConnectionTasks } from '../src/connection-tasks.js';
 import { createServer } from '../src/server.js';
 
 for (const single of [false, true]) for (const mode of ['reasoning-only', 'summary-prose', 'report']) {
-  test(`offline SDK: ${mode}, ${single ? 'single-request stops' : 'budgeted recovery'}`, { timeout: 35000 }, async t => {
+  // Include the SDK's 30s initialization allowance in functional test deadlines;
+  // budget.test.js separately covers the exact checkpoint deadline boundaries.
+  test(`offline SDK: ${mode}, ${single ? 'single-request stops' : 'budgeted recovery'}`, { timeout: 150000 }, async t => {
     const root = await mkdtemp(join(tmpdir(), 'bridge-output-sdk-'));
     const workspace = join(root, 'workspace');
     await mkdir(workspace);
@@ -38,14 +40,15 @@ for (const single of [false, true]) for (const mode of ['reasoning-only', 'summa
       assert.notEqual(response.isError, true, JSON.stringify(response));
       return response.structuredContent;
     };
-    const budget = { totalModelRequests: 3, totalOutputTokens: 8192, totalToolCalls: 0, totalDurationMs: 25000 };
+    const budget = { totalModelRequests: 3, totalOutputTokens: 8192, totalToolCalls: 0, totalDurationMs: 120000 };
     const input = { requestId: 'offline-delivery', workspace, executionMode: single ? 'single-request' : 'budgeted',
       ...(single ? {} : { budget }), workload: mode === 'reasoning-only' ? 'standard' : 'drafting',
-      capabilityProfile: 'inference-only', outputFormat: 'json-object', maxTokens: 8192, timeoutMs: 20000,
+      capabilityProfile: 'inference-only', outputFormat: 'json-object', maxTokens: 8192, timeoutMs: 60000,
       prompt: `fixture-${mode}: Return a draft from supplied facts.` };
     if (mode === 'report') input.reportContract = { facts: [{ id: 'seconds', kind: 'limit', value: 180, unit: 's', source: 'plan.json:limits.seconds' }] };
     const task = await call('dsh_submit', input);
-    const done = await call('dsh_wait', { taskId: task.taskId, timeoutMs: 30000 });
+    let done;
+    do { done = await call('dsh_wait', { taskId: task.taskId, timeoutMs: 30000 }); } while (done.status === 'running');
     const result = await call('dsh_result', { taskId: task.taskId });
     assert.equal(done.cleanup, 'confirmed', JSON.stringify(done));
     assert.equal(done.parentAcceptance, 'not_assessed');

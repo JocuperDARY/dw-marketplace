@@ -14,7 +14,13 @@ import { ConnectionTasks } from '../src/connection-tasks.js';
 import { createServer } from '../src/server.js';
 import { TaskManager } from '../src/tasks.js';
 
-test('real SDK and MCP complete checkpoint orchestration using an offline model with network blocked', { timeout: 45000 }, async t => {
+// Functional SDK coverage includes process initialization (which has its own 30s
+// allowance). Exact soft-deadline boundaries are exercised without startup races
+// in budget.test.js and checkpoint-fixture-reliability.test.js.
+const stageTimeoutMs = 60000;
+const chainTimeoutMs = 180000;
+
+test('real SDK and MCP complete checkpoint orchestration using an offline model with network blocked', { timeout: 210000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-orchestration-sdk-'));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
@@ -49,9 +55,14 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
     return response.structuredContent;
   };
   const submitted = await call('dsh_submit', { requestId: 'offline-full-chain', prompt: 'Read input.txt and return a summary.', workspace,
-    capabilityProfile: 'offline', maxTokens: 512, maxModelRequests: 2, maxToolCalls: 2, timeoutMs: 15000,
-    budget: { totalModelRequests: 6, totalOutputTokens: 3072, totalToolCalls: 4, totalDurationMs: 35000 } });
-  const done = await call('dsh_wait', { taskId: submitted.taskId, timeoutMs: 30000 });
+    capabilityProfile: 'offline', maxTokens: 512, maxModelRequests: 2, maxToolCalls: 2, timeoutMs: stageTimeoutMs,
+    budget: { totalModelRequests: 6, totalOutputTokens: 3072, totalToolCalls: 4, totalDurationMs: chainTimeoutMs } });
+  const wait = async taskId => {
+    let done;
+    do { done = await call('dsh_wait', { taskId, timeoutMs: 30000 }); } while (done.status === 'running');
+    return done;
+  };
+  const done = await wait(submitted.taskId);
   assert.equal(done.status, 'completed', JSON.stringify({ done, terminalEvents }));
   assert.equal(done.orchestration.stages, 2);
   assert.equal(done.orchestration.charged.modelRequests, 3);
@@ -59,10 +70,13 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
   assert.equal(done.orchestration.charged.toolCalls, 1);
   assert.match((await call('dsh_result', { taskId: submitted.taskId })).text, /Finished using saved evidence/);
   const saved = JSON.parse(await readFile(join(root, 'state', 'tasks', submitted.taskId, 'task.json'), 'utf8'));
+  const checkpoint = JSON.parse(await readFile(saved.orchestration.stages[0].checkpointPath, 'utf8'));
+  assert.match(checkpoint.summary, /Read input\.txt: offline evidence \(sha256=[a-f0-9]{64}\)/);
+  assert.equal(saved.orchestration.stages[0].charged.toolCalls, 1);
   assert.notEqual(saved.orchestration.stages[0].sessionId, saved.orchestration.stages[1].sessionId);
   const followup = { taskId: submitted.taskId, requestId: 'offline-continue', prompt: 'Confirm the saved summary.' };
   await call('dsh_continue', followup);
-  const continued = await call('dsh_wait', { taskId: submitted.taskId, timeoutMs: 30000 });
+  const continued = await wait(submitted.taskId);
   assert.equal(continued.status, 'completed');
   assert.equal(continued.orchestration.charged.modelRequests, 4);
   assert.equal(continued.orchestration.deadlineAt, done.orchestration.deadlineAt);
@@ -70,7 +84,7 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
   await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
 });
 
-for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers ${mode} with one off request and no network`, { timeout: 30000 }, async t => {
+for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers ${mode} with one off request and no network`, { timeout: 150000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'bridge-truncation-sdk-'));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
@@ -85,9 +99,10 @@ for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers $
   const manager = await new TaskManager({ dataDir: join(root, 'state'), runner, resolveCapabilities: async () => profile }).open();
   t.after(async () => { await manager.close(); await rm(root, { recursive: true, force: true }); });
   const submitted = await manager.submit({ requestId: 'offline-truncation', prompt: `offline-truncate ${mode}: Summarize the supplied text.`, workspace,
-    capabilityProfile: 'offline', workload: mode === 'reasoning-only' ? 'reasoning' : 'mechanical', maxTokens: 4096, maxModelRequests: 2, maxToolCalls: 0, timeoutMs: 10000,
-    budget: { totalModelRequests: 4, totalOutputTokens: 12288, totalToolCalls: 0, totalDurationMs: 25000 } });
-  const done = await manager.wait({ taskId: submitted.taskId, timeoutMs: 25000 });
+    capabilityProfile: 'offline', workload: mode === 'reasoning-only' ? 'reasoning' : 'mechanical', maxTokens: 4096, maxModelRequests: 2, maxToolCalls: 0, timeoutMs: stageTimeoutMs,
+    budget: { totalModelRequests: 4, totalOutputTokens: 12288, totalToolCalls: 0, totalDurationMs: 120000 } });
+  let done;
+  do { done = await manager.wait({ taskId: submitted.taskId, timeoutMs: 30000 }); } while (done.status === 'running');
   assert.equal(done.status, 'completed', JSON.stringify(done));
   assert.equal(done.recovery.status, 'completed');
   assert.equal(done.orchestration.charged.modelRequests, 2);

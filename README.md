@@ -8,7 +8,9 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
-| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.0.3 | Codex MCP：原生 DSH 能力、备份完整性与 Team 状态文件保护 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.0.4 | Codex MCP：原生 DSH 能力、备份完整性与 Team 状态文件保护 |
+
+**deepseek-harness-bridge 2.0.4**：父任务保留原生 Teams 检查点，按运行时所有权回收子任务并保留终态证据；Windows 回执有限重试，新增官方 SDK 的实际工具和子任务离线验证。模型流仍为合成数据，独立验收与实际用量证据保持分开。见[原生验证](./plugins/deepseek-harness-bridge/docs/native-validation.md)。
 
 **deepseek-harness-bridge 2.0.3**：验证原内容备份后再发布替换；同名损坏、部分写入或链接备份明确失败并保留原目标及问题备份。内建文件工具在任意深度及大小写下隐藏并拒绝 `.agent-teams-bridge`，原生 Team 工具仍直接维护状态。这是文件工具策略，不约束显式选择的 Shell 或受信任自定义模块。详见[OBS-1 / OBS-2 加固](./plugins/deepseek-harness-bridge/docs/capabilities.md#obs-1--obs-2-后续加固)。
 

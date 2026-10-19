@@ -58,6 +58,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
     { insert: [{ id: 'bridge-budget', name: new URL('./worker-budget.js', import.meta.url).href,
       config: { budgetPath, armedPath, nonce, effort: task.route.effort, maxTokens: task.maxTokens,
         allowNativeContent: !!profile.native, allowNativeCompaction: nativeCompaction,
+        ...(profile.native && task.stageBudget ? { captainSessionId: task.sessionId } : {}),
         maxModelRequests: Object.hasOwn(task, 'maxModelRequests') ? task.maxModelRequests : 16, maxRequestBytes: Object.hasOwn(task, 'maxRequestBytes') ? task.maxRequestBytes : 262144,
         ...(task.stageBudget ? { maxOutputTokens: task.stageBudget.maxOutputTokens, ...(task.stageBudget.checkpointEnabled === false ? {} : { checkpoint: { softDeadline: task.stageBudget.softDeadline, maxTokens: task.stageBudget.checkpointTokens, forced: !!task.stageBudget.forcedCheckpoint } }), toolReceiptPath: receiptPath, maxToolCalls: task.maxToolCalls } : {}) } }] },
     ...profile.modules.map((module, index) => ({ insert: [{ id: module.runtimeId ?? `bridge-extension-${index}`, name: pathToFileURL(module.path).href,
