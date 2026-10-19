@@ -5,6 +5,10 @@ export function apply(ctx) {
   ctx.on('llm/stream', async function* (options) {
     if (options.reasoningEffort !== 'high' || options.maxTokens !== 4096 || options.tools?.length) throw new Error('Verification request limits changed');
     if (!JSON.stringify(options.messages).includes('Verification delivery contract')) throw new Error('Delivery contract did not reach SDK');
+    // Check the actual SDK request carries the generic evidence instructions.
+    for (const instruction of ['claims under review', 'For every added prerequisite', 'numerical instance', 'compound claim']) {
+      if (!JSON.stringify(options.messages).includes(instruction)) throw new Error(`Missing evidence instruction: ${instruction}`);
+    }
     const answer = {
       cases: [{ id: 'C06', classification: 'audit', ruleIds: ['R1'], basis: 'Not a fixed root reader, therefore audit.', expected: 'STOP', uncertainty: 'none' }],
       checks: [], uncertainty: 'No code executed.', nextAction: 'Parent must verify the classification.',

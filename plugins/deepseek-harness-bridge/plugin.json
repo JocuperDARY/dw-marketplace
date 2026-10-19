@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "deepseek-harness-bridge",
-  "version": "2.0.0",
+  "version": "2.0.2-rc.1",
   "description": "通过官方 SDK 将有界子任务委派给独立 DeepSeek Flash 工作者，提供状态、结果、续接和取消。",
   "author": {
     "name": "JocuperDARY"
