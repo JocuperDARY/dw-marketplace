@@ -1,6 +1,6 @@
-# DeepSeek Harness Bridge 2.0.0
+# DeepSeek Harness Bridge 2.0.1-rc.1
 
-2.0.0 支持原生 DSH 能力、未指定资源额度和持续进度，并修复公开 schema 与运行时校验的一致性。明确预算、单请求禁止重试、旧任务兼容和独立内容验收边界继续保留。
+2.0.1-rc.1 是待独立复核的文件边界修复候选，尚未发布或替换正式安装。保留 2.0.0 的原生技能、未指定资源额度和持续进度；native 文件能力统一采用 bridge 工作区保护。明确预算、单请求禁止重试、旧任务兼容和独立内容验收边界继续保留。
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -148,7 +148,11 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 Windows 原生 Shell 在模型启动前核对工作区所有者和 reparse 祖先。Codex 创建的目录可能属于其沙箱账户，而不是 Bridge 账户；此时用 `dsh_prepare_workspace` 创建新路径，不修改旧目录权限。技能查询的匹配数与来源目录总数分别报告；查询为零不证明技能库为空，可用 `query: "*"` 分页盘点。官方 preset 解析若来自锁定 Bridge SDK，会明确标记来源，不能称为桌面已加载。工具缺少 post-execute 回执时保留 `unobserved`，不补算成功。
 
-native 适配本机 Skills Manager 的 headless provider、Windows dsh-ops、官方 PowerShell 沙箱及 Agent Teams in-process provider。入口固定哈希，原生包的 @deepseek-ai 依赖绑定到 Bridge 锁定的 SDK，避免另一缓存版本破坏成员角色协议。团队状态位于任务专属目录，不复用桌面对话。结果分别保存实际注册工具、调用计数、工具结果状态和技能加载依据；returned 与 loaded 均不代表语义验收通过。其他插件仍需显式适配；见[能力选择](docs/capabilities.md)。
+native 适配本机 Skills Manager 的 headless provider、dsh-ops 的 Shell runtime 选择、官方 PowerShell 沙箱及 Agent Teams in-process provider。入口固定哈希，原生包的 @deepseek-ai 依赖绑定到 Bridge 锁定的 SDK，避免另一缓存版本破坏成员角色协议。团队状态位于任务专属目录，不复用桌面对话。结果分别保存实际注册工具、调用计数、工具结果状态和技能加载依据；returned 与 loaded 均不代表语义验收通过。其他插件仍需显式适配；见[能力选择](docs/capabilities.md)。
+
+native 的 `files` 选择在两种访问模式中都使用 `bridge_list/read`，相对路径基准始终为任务工作区，不取 SDK 的 worker home。绝对路径、父路径、symlink/junction、硬链接文件和已知 protected name 按现有 bridge 文件规则拒绝。原始 dsh-ops inspect/glob/grep/replace 组件不再挂载，显式 `nativePlugins: ["files"]` 也不会重新打开它。
+
+workspace-write 另提供 bridge 维护的 `ops_replace`：仅对一个既有 UTF-8 普通文件进行全部匹配的字面替换，须传入 `bridge_read` 的整文件 `expectedSha256`，并复用 CAS 和原文备份。文件沿用 256 KiB 边界；操作读取完整文件，不能只改第一页。它不支持 regex、glob、目录递归或 dryRun，也不允许写工作区外的临时目录；并非第三方同名工具的完整兼容实现。read-only 不注册此工具。技能来源和显式 Shell/Team 能力有各自的访问契约；文件保护不是任意代码的 OS 沙箱，也不扫描普通文件正文中的秘密。
 
 内建 bridge_* 文件工具限制为单目录最多扫描 1000 个条目、单个 UTF-8 文件/写入最多 256 KiB，拒绝路径穿越、符号链接、junction、硬链接文件和常见配置/凭据目录。过滤路径不是任意秘密内容识别器；任务工作区只应包含允许发送给 DeepSeek 的资料。该边界由工具代码实施，不是操作系统沙箱，也不能抵御其他本地进程恶意并发替换路径。写任务使用独立副本或 worktree，避免两个工作者同时写同一文件。
 

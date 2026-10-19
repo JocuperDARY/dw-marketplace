@@ -7,13 +7,18 @@
 | 能力 | 适配与证据 |
 | --- | --- |
 | Skills Manager / DSH skills | 官方 registry + filesystem provider；安装了 Skills Manager 时挂载其导出 provider，无管理 UI。先搜原生元数据、再按需加载正文；补充 Codex 来源必须先完成原生搜索并说明不适用理由。记录搜索、来源、哈希和加载证据；不等于已正确应用。 |
-| dsh-ops | Windows 原生文件工具及可用的 Shell runtime 选择；实际注册、调用与结果分别记录。第三方文件工具保留 DSH 原生策略，不能声称自动继承 bridge_* 的逐文件哈希/CAS或凭据名称过滤。 |
+| files | 两种 access 都采用 bridge_list/read，workspace-write 另有 bridge_write 与受保护的单文件字面 ops_replace。任务工作区相对路径、已知 protected-name、链接拒绝、整文件哈希/CAS和备份统一复用 WorkspaceFiles；不挂载原始 dsh-ops file 组件。 |
+| dsh-ops | 仅用于可用的 Windows Shell runtime 选择；原始 inspect/glob/grep/replace 不暴露给 native 任务。注册与成功执行仍分别记录。 |
 | Shell | 官方 PowerShell 沙箱与 job_list/output/kill；仅 workspace-write。移除凭据环境后执行。注册不等于命令成功，命令可能失败或转后台 job，交付前必须确认状态。 |
 | Agent Teams | 安装的团队插件使用官方 in-process 子智能体，@deepseek-ai peer 统一到锁定 SDK。父子调用经过共享计数器；状态目录为 .agent-teams-bridge/<taskId>，不复用桌面对话。独立调用 ctx.llm 之外客户端的任意第三方代码不在保证内。 |
 | 原生压缩 | automatic 原生会话使用官方 compaction-basic；辅助模型请求共享计数和明确上限。budgeted 模式以持久检查点阶段替代；single-request 禁止压缩。 |
 | Mnemon、Office、UI、自动化、归档 | 未自动适配，仍需按具体服务契约审查；不因已安装而自动宣称可用。 |
 
 提交固定 profile 摘要，启动核对入口哈希和实际工具。回执分别提供 registeredTools、usedTools、toolOutcomes、skills 和 contextStrategy。工具 returned 不等于业务成功，加载技能不等于正确执行；parentAcceptance 始终独立。原生工具的访问策略与结构限制、SDK 有限默认值见 remainingImplementationConstraints；父任务应使用隔离工作区并核验全部副作用。
+
+文件选择不是 host-scope opt-in：`nativePlugins: ["files"]` 仍只给受保护的 bridge 文件能力。read-only 不含 `ops_replace`；workspace-write 的同名工具是 bridge 适配器，必填 `path/pattern/replacement/expectedSha256`，仅单个既有 UTF-8 文件的大小写敏感字面替换。256 KiB 为已有文件上限，哈希覆盖完整文件；拒绝目录、外部绝对/父路径、已知保护名称、链接文件，拒绝 regex/glob/recursive/dryRun 参数。工作区外 tmpdir 也不作为写入根。SDK 进程 cwd 保持私有 worker home，现有 HarnessClient 初始化则明确传入 task.workspace 作为会话 cwd；这些文件工具仍独立按 task.workspace 解析。此修复不改变上述 cwd 设置或 Shell/Team 状态配置。
+
+安装齐全的本机组合中，read-only 为 4 个工具（两个 bridge 文件工具、两个技能工具）；workspace-write 为 24 个（另含 bridge_write、受保护 ops_replace、四个 Shell/job 与十四个 Team 工具）。缺少可选组件时以解析回执为准，启动必须与 expectedTools 精确一致。离线 native 初始化和组件级文件探针分别验证注册与边界，不冒充真实模型工具循环或团队执行。
 
 ## 原生工作区与来源诊断
 

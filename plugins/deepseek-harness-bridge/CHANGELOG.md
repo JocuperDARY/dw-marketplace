@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1-rc.1 — candidate, 2026-10-20
+
+- DSH-FIT-001: stop mounting raw dsh-ops file tools in both access modes. Native file selection uses the existing workspace path, protected-name and link policy instead of host absolute paths/session cwd.
+- DSH-FIT-002: read-only no longer advertises ops_replace. Workspace-write retains a bridge-owned, single-file literal adapter with whole-file SHA-256, UTF-8 size checks, CAS and backup; recursive/regex/glob/dryRun behavior is not supported.
+- DSH-FIT-003: add actual offline sdk-minimal native read-only/workspace-write startup, asynchronous capability confirmation and component file-boundary regressions. No provider request or real task state; startup evidence is separate from model tool-loop quality.
+- Candidate only. Preserve raw failure evidence, existing installation/configuration, budget contracts and single-request no-retry; no paid test or release promotion.
+
 ## 2.0.0 — 2026-10-20
 
 - Promote the independently verified 2.0.0-native.1 candidate from PR #23. Release promotion changes version metadata and documentation only; implementation and test behavior remain the verified ec15bd2 candidate.

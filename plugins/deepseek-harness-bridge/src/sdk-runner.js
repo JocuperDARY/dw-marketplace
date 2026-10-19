@@ -63,6 +63,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
     ...profile.modules.map((module, index) => ({ insert: [{ id: module.runtimeId ?? `bridge-extension-${index}`, name: pathToFileURL(module.path).href,
       config: { ...module.config, ...(module.native ? {} : { workspace: task.workspace, access: task.access }),
         ...(module.teamState ? { stateDir: `.agent-teams-bridge/${task.taskId}` } : {}),
+        ...(module.workspaceFiles ? { backupDir: join(home, 'backups') } : {}),
         ...(module.skillReceipt ? { receiptPath: skillReceiptPath, nonce } : {}) } }] })),
     { insert: [{ id: 'bridge-files', name: new URL('./worker-tools.js', import.meta.url).href,
       config: { workspace: task.workspace, access: task.access, maxToolCalls: task.maxToolCalls,
