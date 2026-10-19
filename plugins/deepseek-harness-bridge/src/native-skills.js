@@ -10,6 +10,7 @@ export const inject = ['skills', 'tools'];
 export async function apply(ctx, config) {
   const receipt = { nonce: config.nonce, searches: [], loaded: [], managerCalls: { list: 0, get: 0 }, sources: {}, modelApplication: 'not_assessed' };
   const searchedNames = new Set();
+  let nativeSearchReturned = false;
   const nativeSources = new Set(['project-dsh', 'user-dsh', 'project-agents', 'user-agents', 'agent-agents', 'custom', 'bundled']);
   const supplemental = skill => !nativeSources.has(skill.source);
   let publication = Promise.resolve();
@@ -79,13 +80,13 @@ export async function apply(ctx, config) {
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute(args, exec) { return JSON.stringify(await run(args, exec)); },
   }));
-  register('bridge_skill_search', 'Search DSH-native and Skills Manager enabled skill metadata first. No skill bodies are injected by listing. Load a relevant result before applying it; supplement from Codex only if no suitable native skill exists.', {
+  register('bridge_skill_search', 'Search DSH-native and Skills Manager enabled skill metadata first. No skill bodies are injected by listing. Load a relevant result before applying it; supplement from Codex only when observed native results are unsuitable, reporting any incomplete catalog coverage.', {
     query: { type: 'string', required: true }, offset: { type: 'number', description: 'Optional page offset, default 0; 20 results per page with total/nextOffset.' },
     source: { type: 'string', enum: ['native', 'supplemental'], description: 'Default native. Search supplemental Codex/other imported sources only after native search finds no suitable skill.' },
-    reason: { type: 'string', description: 'Required explanation of why native results are unsuitable before supplemental search.' },
+    reason: { type: 'string', description: 'Required explanation of why observed native results are unsuitable, including incomplete source coverage when present, before supplemental search.' },
   }, async ({ query, offset = 0, source = 'native', reason }, exec) => {
     if (typeof query !== 'string' || !query.trim() || !Number.isSafeInteger(offset) || offset < 0) throw new Error('Supply a nonempty skill query and nonnegative page offset.');
-    if (source === 'supplemental' && (!receipt.searches.some(search => search.source === 'native' && search.complete) || !reason?.trim())) throw new Error('Complete a native search first and explain why no suitable native skill was found.');
+    if (source === 'supplemental' && (!nativeSearchReturned || !reason?.trim())) throw new Error('Run a native search first and explain why observed native results are unsuitable, including any incomplete source coverage.');
     const snapshot = await ctx.skills.snapshot(options(exec));
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const enabled = snapshot.skills.filter(skill => skill.invocation?.modelInvocable !== false);
@@ -102,10 +103,11 @@ export async function apply(ctx, config) {
     const matchState = matches.length ? 'available' : catalog.length ? 'no_matches' : 'empty';
     const state = complete ? matchState : 'incomplete';
     receipt.searches.push({ query, source, ...(reason ? { reason } : {}), catalogTotal: catalog.length,
-      sourceCounts, total: matches.length, complete, state, matchState });
+      sourceCounts, total: matches.length, searchCompleted: true, complete, state, matchState });
     await persist();
+    if (source === 'native') nativeSearchReturned = true;
     return { source: 'DSH skill registry', category: source, scope: 'configured bridge registry source category; not the entire desktop library',
-      complete, state, matchState, catalogTotal: catalog.length, sourceCounts,
+      searchCompleted: true, complete, state, matchState, catalogTotal: catalog.length, sourceCounts,
       ...(matchState === 'no_matches' ? { guidance: 'Broaden the query or use * to inspect the selected source catalog before declaring it empty.' } : {}),
       sources: receipt.sources, total: matches.length, offset,
       skills: page, nextOffset: offset + 20 < matches.length ? offset + 20 : null };

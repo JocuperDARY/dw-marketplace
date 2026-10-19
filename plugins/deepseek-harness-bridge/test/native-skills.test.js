@@ -72,14 +72,35 @@ test('a zero-match query distinguishes a populated catalog from an empty source 
   assert.equal(receipt.searches.at(-1).catalogTotal, 1);
 });
 
-test('empty and incomplete observations are distinct and incomplete discovery cannot authorize fallback', async t => {
+test('empty and incomplete catalogs are distinct; a returned native search permits an explained fallback', async t => {
   const empty = await toolFixture(t, { skills: [], complete: true });
   assert.equal((await empty.call({ query: '*' })).state, 'empty');
   const partial = await toolFixture(t, { skills: [], complete: false });
   const result = await partial.call({ query: '*' });
   assert.equal(result.state, 'incomplete');
   assert.equal(result.complete, false);
-  await assert.rejects(partial.call({ query: '*', source: 'supplemental', reason: 'Source unavailable.' }), /native search first/);
+  assert.equal(result.searchCompleted, true);
+  await assert.rejects(partial.call({ query: '*', source: 'supplemental' }), /explain/);
+  const fallback = await partial.call({ query: '*', source: 'supplemental', reason: 'Native coverage is incomplete and observed results do not fit.' });
+  assert.equal(fallback.state, 'incomplete');
+  assert.equal(fallback.searchCompleted, true);
+  const receipt = JSON.parse(await readFile(join(partial.root, 'receipt.json'), 'utf8'));
+  assert.equal(receipt.searches[0].searchCompleted, true);
+  assert.equal(receipt.searches[0].complete, false);
+});
+
+test('a failed native search that never returned does not authorize supplemental fallback', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-search-failed-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const tools = new Map();
+  const disposers = [];
+  t.after(async () => { for (const dispose of disposers.reverse()) await dispose?.(); });
+  await apply({ effect: fn => disposers.push(fn()), tools: { register: tool => tools.set(tool.name, tool) }, skills: {
+    registerProvider: () => () => {}, snapshot: async () => { throw new Error('catalog read failed'); },
+  } }, { workspace: root, nonce: 'failed-search', receiptPath: join(root, 'receipt.json') });
+  const call = args => tools.get('bridge_skill_search').execute(args, {});
+  await assert.rejects(call({ query: '*' }), /catalog read failed/);
+  await assert.rejects(call({ query: '*', source: 'supplemental', reason: 'Native search failed.' }), /native search first/);
 });
 
 async function presetFixture(t) {
@@ -173,4 +194,60 @@ for (const nativeRoot of [true, false]) test(`manager diagnostics keep unavailab
   assert.equal(result.sources.manager.state, 'incomplete');
   assert.equal(result.sources.manager.count, 0);
   assert.equal(result.sources.manager.roots[0].state, 'unavailable');
+  assert.equal(result.sources.manager.rootAvailability[nativeRoot ? 'native' : 'supplemental'], false);
+  assert.equal(result.sources.manager.catalogCoverage[nativeRoot ? 'native' : 'supplemental'], 'unavailable');
 });
+
+for (const swallowed of ['nested-read-error', 'malformed-header', 'depth-truncated']) {
+  test(`a readable manager root with ${swallowed} cannot prove an empty complete catalog`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'native-manager-nested-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const skillRoot = join(root, 'skills');
+    const doc = join(skillRoot, ...Array(swallowed === 'depth-truncated' ? 8 : 1).fill('nested'), 'SKILL.md');
+    await mkdir(join(doc, '..'), { recursive: true });
+    await writeFile(doc, swallowed === 'malformed-header' ? 'invalid frontmatter'
+      : '---\nname: animation\ndescription: SVG animation\n---\nfixture body');
+    const core = join(root, 'manager.mjs');
+    // Match the public contract of a manager that swallows nested failures or
+    // stops traversal at depth six without exposing diagnostics to its provider.
+    await writeFile(core, `import { readFile, readdir } from 'node:fs/promises';
+      export async function listProviderCandidates(){
+        try {
+          ${swallowed === 'nested-read-error' ? "throw Object.assign(new Error('nested read denied'), {code:'EACCES'});"
+    : swallowed === 'malformed-header' ? `if (!(await readFile(${JSON.stringify(doc)}, 'utf8')).startsWith('---')) throw new SyntaxError('invalid metadata');`
+      : `let path=${JSON.stringify(skillRoot)}; for(let depth=0;depth<6;depth++){ const names=await readdir(path); path += '/'+names[0]; }`}
+        } catch {}
+        return [];
+      }
+      export async function getProviderSkill(){return undefined;}
+      export async function readManagerState(){return {writable:true};}
+      export function userRoots(){return [{key:'dsh',path:${JSON.stringify(skillRoot)},native:true}];}
+      export async function projectRoots(){return [];}`);
+    const providers = [];
+    const tools = new Map();
+    const disposers = [];
+    t.after(async () => { for (const dispose of disposers.reverse()) await dispose?.(); });
+    await apply({ effect: fn => disposers.push(fn()), tools: { register: tool => tools.set(tool.name, tool) }, skills: {
+      registerProvider: create => { providers.push(create()); return () => {}; },
+      snapshot: async () => {
+        const observations = await Promise.all(providers.map(provider => provider.list({ cwd: root })));
+        return { skills: observations.flatMap(item => Array.isArray(item) ? item : item.candidates),
+          complete: observations.every(item => Array.isArray(item) || item.complete) };
+      },
+    } }, { workspace: root, inventoryHome: root, managerCore: core,
+      managerCoreSha256: createHash('sha256').update(await readFile(core)).digest('hex'), nonce: swallowed, receiptPath: join(root, 'receipt.json') });
+    const call = async args => JSON.parse(await tools.get('bridge_skill_search').execute(args, {}));
+    const result = await call({ query: 'animation' });
+    assert.equal(result.searchCompleted, true);
+    assert.equal(result.complete, false);
+    assert.equal(result.state, 'incomplete');
+    assert.equal(result.total, 0);
+    assert.equal(result.sources.manager.count, 0);
+    assert.equal(result.sources.manager.rootAvailability.native, true);
+    assert.equal(result.sources.manager.scanCompleteness.native, 'unverified');
+    assert.equal(result.sources.manager.completeBySource.native, false);
+    assert.equal(result.sources.manager.roots[0].state, 'present');
+    const fallback = await call({ query: '*', source: 'supplemental', reason: 'Native manager scan coverage is unverified; observed native results do not cover animation.' });
+    assert.equal(fallback.searchCompleted, true);
+  });
+}
