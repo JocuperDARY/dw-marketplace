@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { WorkspaceFiles } from '../src/workspace.js';
+
+const sha = value => createHash('sha256').update(value).digest('hex');
+const backupName = (path, text) => `${sha(path)}-${sha(text)}.txt`;
 
 async function fixture(t, access = 'workspace-write', maxToolCalls = 32) {
   const root = await mkdtemp(join(tmpdir(), 'bridge-files-'));
@@ -26,6 +30,111 @@ test('read, guarded replacement and original-content backup', async t => {
   await assert.rejects(files.write('sample.txt', 'stale', original.sha256), { code: 'FILE_CHANGED' });
   await assert.rejects(files.write('sample.txt', 'overwrite', 'new'), { code: 'EEXIST' });
   await files.write('new.txt', 'created', 'new');
+});
+
+test('verified same-name backups can be reused without replacing their contents', async t => {
+  const { files, workspace, backupDir } = await fixture(t);
+  await writeFile(join(workspace, 'sample.txt'), 'original');
+  await mkdir(backupDir);
+  const backup = join(backupDir, backupName('sample.txt', 'original'));
+  await writeFile(backup, 'original');
+  await files.write('sample.txt', 'replacement', sha('original'));
+  assert.equal(await readFile(join(workspace, 'sample.txt'), 'utf8'), 'replacement');
+  assert.equal(await readFile(backup, 'utf8'), 'original');
+  assert.deepEqual(await readdir(backupDir), [backupName('sample.txt', 'original')]);
+});
+
+for (const content of ['', 'orig', 'different']) {
+  test(`corrupt same-name backup (${JSON.stringify(content)}) blocks publication and preserves evidence`, async t => {
+    const { files, workspace, backupDir } = await fixture(t);
+    await writeFile(join(workspace, 'sample.txt'), 'original');
+    await mkdir(backupDir);
+    const backup = join(backupDir, backupName('sample.txt', 'original'));
+    await writeFile(backup, content);
+    await assert.rejects(files.write('sample.txt', 'replacement', sha('original')), { code: 'BACKUP_INVALID' });
+    assert.equal(await readFile(join(workspace, 'sample.txt'), 'utf8'), 'original');
+    assert.equal(await readFile(backup, 'utf8'), content);
+    assert.deepEqual(await readdir(workspace), ['sample.txt']);
+  });
+}
+
+for (const kind of ['symlink', 'hardlink', 'directory']) {
+  test(`same-name backup must be an ordinary file with one link: ${kind}`, async t => {
+    const { files, root, workspace, backupDir } = await fixture(t);
+    await writeFile(join(workspace, 'sample.txt'), 'original');
+    await mkdir(backupDir);
+    const backup = join(backupDir, backupName('sample.txt', 'original'));
+    const source = join(root, 'backup-source');
+    await writeFile(source, 'original');
+    try {
+      if (kind === 'symlink') await symlink(source, backup, 'file');
+      else if (kind === 'hardlink') await link(source, backup);
+      else await mkdir(backup);
+    } catch (error) {
+      if (['EPERM', 'ENOTSUP', 'EACCES'].includes(error.code)) return t.skip(`${kind} unavailable: ${error.code}`);
+      throw error;
+    }
+    await assert.rejects(files.write('sample.txt', 'replacement', sha('original')), { code: 'BACKUP_INVALID' });
+    assert.equal(await readFile(join(workspace, 'sample.txt'), 'utf8'), 'original');
+    assert.equal(await readFile(source, 'utf8'), 'original');
+    assert.deepEqual(await readdir(workspace), ['sample.txt']);
+  });
+}
+
+test('backup failure never takes over an existing workspace writer lock', async t => {
+  const { files, workspace, backupDir } = await fixture(t);
+  await writeFile(join(workspace, 'sample.txt'), 'original');
+  await mkdir(backupDir);
+  const backup = join(backupDir, backupName('sample.txt', 'original'));
+  await writeFile(backup, 'corrupt');
+  await writeFile(join(workspace, '.dsh-bridge-write.lock'), 'existing-owner');
+  await assert.rejects(files.write('sample.txt', 'replacement', sha('original')), { code: 'WORKSPACE_LOCKED' });
+  assert.equal(await readFile(join(workspace, '.dsh-bridge-write.lock'), 'utf8'), 'existing-owner');
+  assert.equal(await readFile(join(workspace, 'sample.txt'), 'utf8'), 'original');
+  assert.equal(await readFile(backup, 'utf8'), 'corrupt');
+});
+
+test('unreadable same-name backup fails clearly without changing target or backup', async t => {
+  const { files, workspace, backupDir } = await fixture(t);
+  await writeFile(join(workspace, 'sample.txt'), 'original');
+  await mkdir(backupDir);
+  const backup = join(backupDir, backupName('sample.txt', 'original'));
+  await writeFile(backup, 'original');
+  const read = files.readBytes.bind(files);
+  files.readBytes = async target => {
+    if (target === backup) throw Object.assign(new Error('synthetic backup access denied'), { code: 'EACCES' });
+    return read(target);
+  };
+  await assert.rejects(files.write('sample.txt', 'replacement', sha('original')), error => {
+    assert.equal(error.code, 'BACKUP_INVALID');
+    assert.match(error.message, /unreadable/);
+    assert.ok(!error.message.includes('synthetic backup access denied'));
+    return true;
+  });
+  assert.equal(await readFile(join(workspace, 'sample.txt'), 'utf8'), 'original');
+  assert.equal(await readFile(backup, 'utf8'), 'original');
+  assert.deepEqual(await readdir(workspace), ['sample.txt']);
+});
+
+test('Teams state is protected at every depth and case for list/read/write while project files work', async t => {
+  const { files, workspace } = await fixture(t, 'workspace-write', 128);
+  for (const prefix of ['', 'nested/']) {
+    for (const name of ['.agent-teams-bridge', '.AGENT-TEAMS-BRIDGE']) {
+      const directory = prefix + name;
+      const path = `${directory}/team-1/state.json`;
+      await mkdir(dirname(join(workspace, path)), { recursive: true });
+      await writeFile(join(workspace, path), 'synthetic state');
+      await assert.rejects(files.list(directory), { code: 'PATH_DENIED' });
+      await assert.rejects(files.read(path), { code: 'PATH_DENIED' });
+      await assert.rejects(files.write(path, 'tampered', sha('synthetic state')), { code: 'PATH_DENIED' });
+      await assert.rejects(files.write(`${directory}/new.json`, 'tampered', 'new'), { code: 'PATH_DENIED' });
+      assert.equal((await files.list(prefix || '.')).entries.some(entry => entry.name.toLowerCase() === name.toLowerCase()), false);
+      assert.equal(await readFile(join(workspace, path), 'utf8'), 'synthetic state');
+    }
+  }
+  await files.write('project.json', 'ordinary', 'new');
+  assert.equal((await files.read('project.json')).text, 'ordinary');
+  assert.equal((await files.list()).entries.some(entry => entry.name === 'project.json'), true);
 });
 
 test('relative paths reject traversal, protected metadata and alternate streams', async t => {

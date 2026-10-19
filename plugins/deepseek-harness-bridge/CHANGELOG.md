@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.3 — 2026-10-20
+
+- Address OBS-1: verify same-name original-content backups are ordinary, nonlinked, single-link files with the expected SHA-256 before staging a replacement. Valid backups remain reusable; corrupt or partial backups block writes with BACKUP_INVALID and retain the original target and backup evidence. Preserve workspace writer lock ownership.
+- Address OBS-2: hide and deny `.agent-teams-bridge` in built-in list/read/write and guarded ops_replace at every depth and case. Keep native Teams state paths and tools compatible; this file-tool policy does not constrain explicitly selected Shell or trusted third-party code.
+- Add offline red/green coverage for backup integrity, links, lock ownership, shared ops_replace behavior, protected synthetic Teams state and ordinary project file controls. No paid provider call or real-model quality claim.
+
+## 2.0.2 — 2026-10-20
+
+- Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require every asserted or newly added prerequisite to cite an explicit rule or a checkable derivation with its operation scope. A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.
+- Distinguish explaining a general rule from executing a numerical instance, identity metadata from decision variables, and arbitrary optimal choices from requested unique/deterministic selectors. Review compound claims clause by clause.
+- Parent acceptance must independently check source roles, entailment and requested operation; valid rule IDs and complete JSON never certify content. Keep the existing strict schema and no-retry/budget behavior.
+- Synthetic offline counterexamples and controls verify delivery, preservation and non-acceptance boundaries only; no paid model test or accuracy claim. Integrate the released 2.0.1 native file-boundary changes without altering their behavior. Document all six counterexamples and four controls, and explicitly assert preserved terminal and usage receipts across restart/replay.
+
+
 ## 2.0.1 — 2026-10-20
 
 - Promote PR #24 candidate 233ea09 after DSH independently verified native file boundaries, capability consistency and SDK startup. The promotion changes release metadata and disclosure documentation only; functionality and tests retain the verified candidate implementation.

@@ -6,7 +6,7 @@ import { requireValue } from './errors.js';
 
 const MAX_FILE_BYTES = 262144;
 // Known path names only: arbitrary secrets in ordinary project files are not detected.
-const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.npmrc|\.config|\.kube|\.docker|\.dsh-bridge-.*|\.env(?:rc)?(?:\..*)?|\.netrc|_netrc|\.pgpass|pgpass\.conf|\.git-credentials|\.pypirc|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|\.credentials(?:\..*)?|credentials(?:\..*)?|api-key\.dpapi|DeepSeekHarnessBridge|node_modules)$/i;
+const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.npmrc|\.config|\.kube|\.docker|\.agent-teams-bridge|\.dsh-bridge-.*|\.env(?:rc)?(?:\..*)?|\.netrc|_netrc|\.pgpass|pgpass\.conf|\.git-credentials|\.pypirc|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|\.credentials(?:\..*)?|credentials(?:\..*)?|api-key\.dpapi|DeepSeekHarnessBridge|node_modules)$/i;
 const PAGE_CHARACTERS = 16384;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const contained = (root, target) => {
@@ -130,8 +130,18 @@ export class WorkspaceFiles {
           requireValue(digest(previous) === expectedSha256, 'FILE_CHANGED', 'File changed since it was read. Read it again before writing.');
           await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
           const backupName = `${digest(Buffer.from(path))}-${expectedSha256}.txt`;
-          try { await writeFile(join(this.backupDir, backupName), previous, { flag: 'wx', mode: 0o600 }); }
+          const backupPath = join(this.backupDir, backupName);
+          try { await writeFile(backupPath, previous, { flag: 'wx', mode: 0o600 }); }
           catch (error) { if (error.code !== 'EEXIST') throw error; }
+          // A same-name file may be an interrupted backup, not verified recovery evidence.
+          // Preserve invalid backups for reconciliation and fail before staging the target.
+          let validBackup = false;
+          try {
+            const info = await lstat(backupPath);
+            validBackup = info.isFile() && !info.isSymbolicLink() && info.nlink === 1 &&
+              digest(await this.readBytes(backupPath)) === expectedSha256;
+          } catch { /* Missing, unreadable or replaced backups are not recovery evidence. */ }
+          requireValue(validBackup, 'BACKUP_INVALID', 'Original-content backup is missing, unreadable, linked or has different content. Reconcile the backup before writing; it was not overwritten.');
         }
         const mode = previous ? (await lstat(target)).mode & 0o777 : 0o600;
         const staged = await open(temporary, 'wx', mode);
