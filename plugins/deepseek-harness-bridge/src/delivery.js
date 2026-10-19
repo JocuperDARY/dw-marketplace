@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { requireValue } from './errors.js';
+import { BridgeError, requireValue } from './errors.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
-const ids = (min, max) => z.array(id).min(min).max(max).refine(values => new Set(values).size === values.length);
+const ids = (min, max) => z.array(id).min(min).max(max).refine(values => new Set(values).size === values.length).meta({ uniqueItems: true });
 export const reviewContractSchema = z.object({
   caseIds: ids(1, 64), ruleIds: ids(1, 64), checkIds: ids(0, 32),
 }).strict();
@@ -46,7 +46,11 @@ export function assessOutput(value, format, { status, orchestrated = false }) {
 export function normalizeReviewContract(value) {
   if (value === undefined) return null;
   const parsed = reviewContractSchema.safeParse(value);
-  requireValue(parsed.success, 'INVALID_ARGUMENT', 'reviewContract requires unique bounded caseIds, ruleIds and checkIds; IDs use 1–64 letters, digits, dots, underscores or hyphens.');
+  if (!parsed.success) throw new BridgeError('INVALID_ARGUMENT', 'reviewContract requires unique bounded caseIds, ruleIds and checkIds; IDs use 1–64 letters, digits, dots, underscores or hyphens.', {
+    validation: { phase: 'contract', issues: parsed.error.issues.map(issue => ({
+      path: ['reviewContract', ...issue.path], code: issue.code, message: 'Review contract field is invalid.',
+    })) },
+  });
   return parsed.data;
 }
 

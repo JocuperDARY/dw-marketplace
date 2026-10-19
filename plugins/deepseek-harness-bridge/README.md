@@ -136,6 +136,10 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 报告类任务可提供 `reportContract`，逐项标明 limit、observation 或 execution-status、原值、单位和来源；它默认 drafting/off 并要求返回 `{facts, prose}` JSON。不能与另一种输出形状的 reviewContract 同用。预算上限不代表实际耗时或 RSS，NOT_RUN 不代表已执行，给工作者的写作指令也不是实验事实。`reportValidation` 只检查事实表的覆盖、角色和字面值；`facts_preserved` 仍须逐句核验正文，`proseAcceptance` 与 `parentAcceptance` 保持 not_assessed。事实或语义错误不自动重试。示例与边界见[事实与用量契约](docs/evidence-usage.md)。
 
+公开 schema 按 kind 区分事实：`execution-status.value` 必须是含非空白字符的字符串；数字 `0` 不能充当执行状态。`limit` 和 `observation` 保留字符串、数字、布尔值或 null；插件不自动改 kind、转换值或修补来源。所有事实的 source 必须含非空白字符。reviewContract 的 ID 数组通过 `uniqueItems` 公布唯一性。reportContract 的 `facts[].id` 唯一性以及 JSON 序列化后最多 16384 UTF-8 字节，是 schema 描述中明示的额外契约检查；标准 JSON Schema 无法完整表达这两项检查。
+
+参数拒绝仍返回 `INVALID_ARGUMENT`，并在文本 JSON 和 `structuredContent` 中返回相同的 `error.validation`：`phase` 区分 `schema` 与额外 `contract` 检查，`issues` 包含字段路径数组、代码和固定安全提示。例如执行状态填入数字时，路径是 `["reportContract","facts",3,"value"]`、代码是 `invalid_type`、提示是 `Expected string.`。最多返回 16 项，超出时标记 `issuesTruncated`；不回显字段值、未知字段名、prompt、工作区路径或底层异常。无效报告/审查契约在取得任务状态锁、检查凭据或启动模型之前拒绝。通过这些参数检查仍不证明工作区、执行策略或内容语义可被接受。
+
 查看消费应调用 `dsh_usage`，并同时报告 `tokens.*.reported`、`missingCalls` 和 `unknownReceiptGroups`。新阶段分别持久化请求回执，失败和恢复也计入；汇总不会把最终 attempt 重复计作最后一个阶段。历史缺失阶段保持未知，`orchestrationCharged` 是保守预算扣账，不能充当实测用量。reasoning/cache 是 SDK 上报的组成项，不能再次加到 totalTokens。工具只覆盖本地保留记录，不查询账户账单或推断金额。
 
 `dsh_doctor.validation.modelCalls: 0` 仅指本次诊断没有模型调用。独立工作者的消费不会自动计入桌面对话账本或挂件；本版本提供桥接器侧汇总，不在未确认账户身份、缓存口径和去重方式时自动改写桌面 cost-meter 数据。

@@ -1,10 +1,10 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { safeError } from './errors.js';
+import { BridgeError, safeError } from './errors.js';
 import { capabilities } from './capabilities.js';
-import { reviewContractSchema } from './delivery.js';
-import { reportContractSchema } from './report.js';
+import { normalizeReviewContract, reviewContractSchema } from './delivery.js';
+import { normalizeReportContract, reportContractSchema } from './report.js';
 import { prepareNativeWorkspace } from './native-workspace.js';
 
 export const VERSION = '2.0.0-native.1';
@@ -33,7 +33,7 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
         workload: z.enum(['mechanical', 'drafting', 'standard', 'reasoning', 'verification']).optional().describe('Selects reasoning effort only: mechanical/drafting off; standard low; reasoning/verification high. Verification requires reviewContract. Does not create token limits. Explicit effort and caps are preserved; reasoning shares the provider output allowance.'),
         outputFormat: z.enum(['text', 'json-object']).optional().describe('Set json-object for JSON-only deliverables, including mechanical extraction. The entire final response (or completed stage summary) must parse as one JSON object: no prose/fences or string/array roots. Reports outputValidation separately from runtime and semantic acceptance. Budgeted tasks permit at most one shared tool-free/off format or truncation recovery within original totals; single-request never retries. Default text; reviewContract implies json-object.'),
         reviewContract: reviewContractSchema.optional().describe('Required for verification: exact caseIds, known ruleIds and required checkIds (empty if none). Supply labeled rule meanings in prompt. Adds per-item evidence and structural coverage checks only; never semantic acceptance or automatic retries. In budgeted mode the final summary contains the deliverable JSON string.'),
-        reportContract: reportContractSchema.optional().describe('Typed source facts for a factual report: limits are not measurements, execution statuses are not completed work. Requires JSON {facts,prose}, defaults omitted workload to drafting/off, incompatible with reviewContract. Checks literal roles/values/units/source coverage only; prose and source truth still need parent review. Maximum 16 KiB. No semantic retry; continuation retains the same facts.'),
+        reportContract: reportContractSchema.optional().describe('Typed source facts for a factual report: limits are not measurements, execution statuses are not completed work. Requires JSON {facts,prose}, defaults omitted workload to drafting/off, incompatible with reviewContract. Checks literal roles/values/units/source coverage only; prose and source truth still need parent review. Additional admission checks require unique facts[].id values and at most 16384 UTF-8 bytes in the JSON-serialized contract; JSON Schema cannot express these checks. Rejections identify validation.phase=contract and safe field paths. No semantic retry; continuation retains the same facts.'),
         effort: z.enum(['off', 'low', 'high', 'max']).optional().describe('Work request effort. Checkpoint and delivery recovery requests always use off. Reasoning shares the output token allowance.'), timeoutMs, budget,
         maxTokens: resourceLimit().describe('Optional user-specified per-request output ceiling including reasoning. Omitted/null adds no bridge ceiling; the official adapter still has model/provider defaults and constraints, reported separately. Never call a large finite value unlimited.'),
         maxToolCalls: resourceLimit(0).describe('Optional user-specified per-stage tool-call ceiling. Omitted/null is unspecified, except single-request/inference-only permits no tools.'),
@@ -41,7 +41,12 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
         maxRequestBytes: resourceLimit().describe('Optional user-specified serialized model-input byte ceiling. Omitted/null adds no bridge request-byte cap; protocol, file and storage constraints are separate.'),
         nativePlugins: z.array(z.enum(['skills', 'files', 'shell', 'teams'])).optional().describe('Optional native capability selection; omit to inspect/use compatible capabilities for the access mode. Explicit [] disables native extensions. Skills are searched in DSH first; supplemental skill text is used only when no suitable native skill exists.'),
         capabilityProfile: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional().describe('native (default), files, inference-only, or a configured profile. single-request defaults to inference-only. Installed, registered, called and model-applied are separate evidence.') }).strict(),
-      run: input => manager.submit(input, preflight), write: true, network: true },
+      run: input => {
+        // Pure contract checks precede connection ownership, credentials and task admission.
+        normalizeReviewContract(input.reviewContract);
+        normalizeReportContract(input.reportContract);
+        return manager.submit(input, preflight);
+      }, write: true, network: true },
     { name: 'dsh_status', description: 'Read one task attempt and its process-cleanup status. completed means worker completion; parent acceptance is separate.',
       schema: z.object({ taskId, attempt }).strict(), run: input => manager.status(input) },
     { name: 'dsh_list', description: 'List up to 50 recent task IDs for recovery in this bridge data directory.',
@@ -70,9 +75,11 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
   server.setRequestHandler(CallToolRequestSchema, async request => {
     const definition = definitions.find(item => item.name === request.params.name);
     if (!definition) return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'UNKNOWN_TOOL', message: 'Unknown bridge tool.' } }) }] };
-    const parsed = definition.schema.safeParse(request.params.arguments ?? {});
-    if (!parsed.success) return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code: 'INVALID_ARGUMENT', message: 'Arguments do not match the advertised tool schema.' } }) }] };
     try {
+      const parsed = definition.schema.safeParse(request.params.arguments ?? {});
+      if (!parsed.success) throw new BridgeError('INVALID_ARGUMENT', 'Arguments do not match the advertised tool schema.', {
+        validation: { phase: 'schema', issues: parsed.error.issues },
+      });
       const result = await definition.run(parsed.data);
       return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result };
     } catch (error) {

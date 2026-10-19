@@ -1,23 +1,41 @@
 import { z } from 'zod';
-import { requireValue } from './errors.js';
+import { BridgeError } from './errors.js';
 
-const fact = z.object({
+const factFields = {
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
-  kind: z.enum(['limit', 'observation', 'execution-status']),
-  value: z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]),
   unit: z.string().max(128),
-  source: z.string().min(1).max(512).refine(value => !!value.trim()),
-}).strict().refine(value => value.kind !== 'execution-status' || (typeof value.value === 'string' && !!value.value.trim()));
+  source: z.string().min(1).max(512).regex(/\S/),
+};
+const scalar = z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]);
+// Parsed field order participates in persisted request fingerprints. Preserve it.
+const factShape = (kind, value) => z.object({ id: factFields.id, kind: z.literal(kind), value, unit: factFields.unit, source: factFields.source }).strict();
+const fact = z.discriminatedUnion('kind', [
+  factShape('limit', scalar),
+  factShape('observation', scalar),
+  factShape('execution-status', z.string().max(2048).regex(/\S/)),
+]);
 const facts = z.array(fact).min(1).max(64);
 export const reportContractSchema = z.object({ facts }).strict()
-  .refine(value => new Set(value.facts.map(fact => fact.id)).size === value.facts.length)
-  .refine(value => Buffer.byteLength(JSON.stringify(value)) <= 16384);
+  .describe('Report facts. Additional contract checks require unique facts[].id values and at most 16384 UTF-8 bytes in the JSON-serialized contract; these checks are enforced by normalizeReportContract, not expressible in this JSON Schema.');
 const reportSchema = z.object({ facts, prose: z.string().min(1).refine(value => !!value.trim()) }).strict();
 
 export function normalizeReportContract(value) {
   if (value === undefined) return null;
   const parsed = reportContractSchema.safeParse(value);
-  requireValue(parsed.success, 'INVALID_ARGUMENT', 'reportContract requires 1–64 unique typed facts with scalar values, units and source locators, at most 16 KiB.');
+  const issues = parsed.success ? [] : parsed.error.issues.map(issue => ({
+    path: ['reportContract', ...issue.path], code: issue.code, message: 'Report contract field is invalid.',
+  }));
+  if (parsed.success) {
+    const seen = new Set();
+    for (const [index, fact] of parsed.data.facts.entries()) {
+      if (seen.has(fact.id)) issues.push({ path: ['reportContract', 'facts', index, 'id'], code: 'duplicate_id', message: 'Fact IDs must be unique.' });
+      seen.add(fact.id);
+    }
+    if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 16384) {
+      issues.push({ path: ['reportContract'], code: 'utf8_size_limit', message: 'Report contract must not exceed 16384 UTF-8 bytes.' });
+    }
+  }
+  if (issues.length) throw new BridgeError('INVALID_ARGUMENT', 'reportContract requires 1–64 unique typed facts with scalar values, units and source locators, at most 16 KiB.', { validation: { phase: 'contract', issues } });
   return parsed.data;
 }
 

@@ -2,6 +2,7 @@
 
 ## 2.0.0-native.1 — candidate, 2026-10-19
 
+- Interface follow-up, 2026-10-20: publish execution-status string/nonblank constraints and review ID uniqueness in JSON Schema. Disclose report ID uniqueness and serialized UTF-8 size as separate admission checks. Return bounded, safe field-level diagnostics in both MCP result channels, before task ownership for invalid report/review contracts. No coercion, lock takeover, retry or paid test.
 - Candidate follow-up, 2026-10-20: discover omitted official preset skills, distinguish catalog/source availability from zero query matches, and support explicit paged inventory. Preserve native-first and explained supplemental fallback.
 - Add zero-model `dsh_prepare_workspace` for a new worker-owned directory and native Shell preflight. Preserve existing owner/ACLs and upstream confinement; reject foreign ownership, reparse ancestry and state overlap before paid work.
 - Account for attempted tool calls without post-execute receipts as unobserved. Keep runtime completion, tool outcomes and content acceptance separate. Follow-up validation uses offline fixtures and preserved evidence, with no new paid model calls.
