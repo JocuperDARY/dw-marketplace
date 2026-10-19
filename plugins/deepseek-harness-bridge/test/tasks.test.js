@@ -187,6 +187,48 @@ test('startup removes only an empty unpublished task directory', async t => {
   assert.equal(await readFile(join(orphan, 'unknown'), 'utf8'), 'preserve');
 });
 
+test('startup rejects malformed saved attempts before registration and retains the original state', async t => {
+  const { manager, workspace, root } = await fixture(t, completed);
+  const task = await manager.submit({ executionMode: 'single-request', requestId: 'valid', prompt: 'fixture', workspace });
+  await manager.wait({ taskId: task.taskId });
+  const valid = structuredClone(manager.record(task.taskId));
+  await manager.close();
+  const invalid = [
+    ['empty', []], ['non-array', {}], ['null-element', [null]], ['missing-fields', [{}]],
+    ...['number', 'requestId', 'fingerprint', 'startedAt', 'status', 'cleanup'].map(key => {
+      const attempt = { ...valid.attempts[0] };
+      delete attempt[key];
+      return [`missing-${key}`, [attempt]];
+    }),
+    ['wrong-number', [{ ...valid.attempts[0], number: 2 }]],
+    ['invalid-request', [{ ...valid.attempts[0], requestId: 'with spaces' }]],
+    ['invalid-fingerprint', [{ ...valid.attempts[0], fingerprint: 'bad' }]],
+    ['invalid-date', [{ ...valid.attempts[0], startedAt: 'not-a-date' }]],
+    ['unknown-status', [{ ...valid.attempts[0], status: 'accepted' }]],
+    ['unknown-cleanup', [{ ...valid.attempts[0], cleanup: 'unknown' }]],
+    ['too-many', Array.from({ length: 17 }, (_, index) => ({ ...valid.attempts[0], number: index + 1, requestId: `request-${index}` }))],
+    ['duplicate-request', [valid.attempts[0], { ...valid.attempts[0], number: 2 }]],
+  ];
+  for (const [name, attempts] of invalid) await t.test(name, async () => {
+    const dataDir = join(root, name);
+    const path = join(dataDir, 'tasks', task.taskId, 'task.json');
+    await mkdir(join(dataDir, 'tasks', task.taskId), { recursive: true });
+    const saved = JSON.stringify({ ...valid, attempts });
+    await writeFile(path, saved);
+    let launches = 0;
+    const next = new TaskManager({ dataDir, runner: () => { launches++; throw new Error('must not launch'); } });
+    try {
+      await assert.rejects(next.open(), { code: 'INVALID_STATE' });
+      assert.equal(next.blocked, true);
+      assert.equal(next.records.has(task.taskId), false);
+      await next.close();
+      await access(join(dataDir, 'owner.lock'));
+      assert.equal(await readFile(path, 'utf8'), saved);
+      assert.equal(launches, 0);
+    } finally { await next.close(); }
+  });
+});
+
 test('idempotent retries do not require credentials or start a new attempt', async t => {
   let launches = 0;
   const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
@@ -257,6 +299,12 @@ test('legacy records retain idempotent replay and same-session continuation afte
   assert.equal((await next.result({ taskId: first.taskId, attempt: 2, offset: 1, limit: 3 })).text, 'ont');
   assert.equal(next.list().tasks.length, 1);
   await next.close();
+  const reopened = await new TaskManager({ dataDir: join(root, 'state'), runner: () => { throw new Error('must not launch'); } }).open();
+  try {
+    assert.equal(reopened.status({ taskId: first.taskId }).number, 2);
+    assert.equal((await reopened.result({ taskId: first.taskId, attempt: 1 })).text, 'result');
+    assert.equal((await reopened.result({ taskId: first.taskId, attempt: 2 })).text, 'continued');
+  } finally { await reopened.close(); }
 });
 
 test('state/workspace overlap and input limits reject before launching', async t => {
@@ -326,7 +374,7 @@ test('recent-task recovery sorts execution timestamps rather than directory orde
     const startedAt = new Date(Date.UTC(2026, 0, 1, 0, 0, 51 - index)).toISOString();
     const record = { schemaVersion: 1, taskId, sessionId: `session-${index}`, workspace,
       route: { provider: 'deepseek-official', model: 'deepseek-flash', effort: 'high' }, access: 'read-only', maxTokens: 256, maxToolCalls: 1, createdAt: startedAt,
-      attempts: [{ number: 1, requestId: `request-${index}`, fingerprint: `hash-${index}`, status: 'completed', cleanup: 'confirmed', startedAt }] };
+      attempts: [{ number: 1, requestId: `request-${index}`, fingerprint: createHash('sha256').update(`request-${index}`).digest('hex'), status: 'completed', cleanup: 'confirmed', startedAt }] };
     await mkdir(join(root, 'state', 'tasks', taskId));
     await manager.persist(record);
   }

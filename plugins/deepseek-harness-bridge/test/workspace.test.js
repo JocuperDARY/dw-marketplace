@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { WorkspaceFiles } from '../src/workspace.js';
 
 async function fixture(t, access = 'workspace-write', maxToolCalls = 32) {
@@ -41,6 +41,39 @@ test('protected entries and Windows short aliases cannot be listed or read', asy
   await mkdir(join(workspace, '.config'));
   assert.deepEqual((await files.list()).entries, []);
   if (process.platform === 'win32') await assert.rejects(files.read('CONFIG~1/secret'), { code: 'PATH_DENIED' });
+});
+
+test('credential names are denied at every depth without hiding ordinary project files', async t => {
+  const { files, workspace } = await fixture(t, 'workspace-write', 512);
+  const protectedPaths = ['.env', '.envrc', '.envrc.local', '.netrc', '_netrc', '.pgpass', 'pgpass.conf',
+    '.git-credentials', '.pypirc', '.kube/config', '.docker/config.json',
+    'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', 'id_ecdsa_sk', 'id_ed25519_sk', 'ID_RSA'];
+  const ordinaryPaths = ['package.json', 'README.md', 'config.json', 'id_rsa.pub', 'id_ed25519.pub', 'identity.js'];
+  for (const prefix of ['', 'nested/']) {
+    for (const path of [...protectedPaths, ...ordinaryPaths]) {
+      await mkdir(dirname(join(workspace, prefix + path)), { recursive: true });
+      await writeFile(join(workspace, prefix + path), 'synthetic fixture');
+    }
+    const exposed = [];
+    for (const path of protectedPaths) {
+      for (const [operation, run] of [
+        ['resolve', () => files.resolve(prefix + path)],
+        ['read', () => files.read(prefix + path)],
+        ['write', () => files.write(prefix + path, 'replacement', 'new')],
+        ['list', () => files.list(prefix + path)],
+      ]) {
+        try { await run(); exposed.push({ path: prefix + path, operation, code: 'ALLOWED' }); }
+        catch (error) { if (error.code !== 'PATH_DENIED') exposed.push({ path: prefix + path, operation, code: error.code }); }
+      }
+    }
+    assert.deepEqual(exposed, [], 'Known credential paths must fail before any file operation');
+    const entries = (await files.list(prefix || '.')).entries.map(entry => entry.name);
+    for (const path of protectedPaths) assert.ok(!entries.includes(path.split('/')[0]), path);
+    for (const path of ordinaryPaths) {
+      assert.ok(entries.includes(path), path);
+      assert.equal((await files.read(prefix + path)).text, 'synthetic fixture');
+    }
+  }
 });
 
 test('large files are paginated below the default request envelope', async t => {

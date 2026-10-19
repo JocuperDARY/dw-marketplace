@@ -36,7 +36,7 @@ export async function apply(ctx, config) {
     if (publicationError) return { kind: 'deny', reason: 'The bridge tool receipt could not be saved.' };
     return next();
   }, { prepend: true });
-  const path = { type: 'string', required: true, description: 'Relative workspace path; no parent traversal, links or credential/config directories.' };
+  const path = { type: 'string', required: true, description: 'Relative workspace path; no parent traversal, links or known protected metadata/credential names. Ordinary file contents are not scanned for secrets.' };
   const register = (name, description, parameters, run) => ctx.tools.register(defineTool({
     name, description, parameters,
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },

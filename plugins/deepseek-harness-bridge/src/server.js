@@ -6,7 +6,7 @@ import { capabilities } from './capabilities.js';
 import { reviewContractSchema } from './delivery.js';
 import { reportContractSchema } from './report.js';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.3.1';
 const taskId = z.string().uuid();
 const requestId = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const prompt = z.string().min(1).max(65536).describe('Bounded assignment with context, file ownership, acceptance criteria and required evidence.');

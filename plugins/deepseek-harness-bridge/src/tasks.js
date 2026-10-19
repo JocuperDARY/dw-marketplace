@@ -34,6 +34,22 @@ function requestId(value) {
   return value;
 }
 
+function validateSavedAttempts(attempts) {
+  requireValue(Array.isArray(attempts) && attempts.length >= 1 && attempts.length <= 16,
+    'INVALID_STATE', 'Saved tasks must contain 1 to 16 attempts.');
+  const requests = new Set();
+  for (const [index, attempt] of attempts.entries()) {
+    requireValue(attempt && typeof attempt === 'object' && !Array.isArray(attempt) &&
+      attempt.number === index + 1 && typeof attempt.requestId === 'string' && ID.test(attempt.requestId) &&
+      !requests.has(attempt.requestId) && typeof attempt.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(attempt.fingerprint) &&
+      typeof attempt.startedAt === 'string' && Number.isFinite(Date.parse(attempt.startedAt)) &&
+      ['running', 'cancelling', 'completed', 'paused', 'failed', 'cancelled', 'timed_out', 'cleanup_failed', 'interrupted', 'state_write_failed'].includes(attempt.status) &&
+      ['pending', 'confirmed', 'unverified'].includes(attempt.cleanup),
+    'INVALID_STATE', 'The saved attempt identity or lifecycle fields are invalid.');
+    requests.add(attempt.requestId);
+  }
+}
+
 export class TaskManager {
   constructor({ dataDir, runner, resolveCapabilities = resolveProfile }) {
     this.dataDir = dataDir;
@@ -70,7 +86,8 @@ export class TaskManager {
           await rmdir(join(this.tasksDir, entry.name));
           continue;
         }
-        requireValue(record.schemaVersion === 1 && record.taskId === entry.name && Array.isArray(record.attempts), 'INVALID_STATE', 'The saved task record is invalid.');
+        requireValue(record && record.schemaVersion === 1 && record.taskId === entry.name, 'INVALID_STATE', 'The saved task record is invalid.');
+        validateSavedAttempts(record.attempts);
         validateSavedBudget(record);
         if (record.reviewContract) normalizeReviewContract(record.reviewContract);
         if (record.reportContract) normalizeReportContract(record.reportContract);
