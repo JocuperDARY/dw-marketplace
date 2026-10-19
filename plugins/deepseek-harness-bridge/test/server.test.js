@@ -27,7 +27,7 @@ test('multiple production connections discover tools without reserving task owne
     clients.push(client);
     await client.connect(new StdioClientTransport({ command: process.execPath,
       args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' }));
-    assert.equal((await client.listTools()).tools.length, 9);
+    assert.equal((await client.listTools()).tools.length, 10);
     const result = await client.callTool({ name: 'dsh_doctor', arguments: {} });
     assert.equal(JSON.parse(result.content[0].text).validation.modelCalls, 0);
   }
@@ -46,12 +46,17 @@ test('MCP enforces total authorization and the explicit one-request exception', 
   await server.connect(serverSide);
   await client.connect(clientSide);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 9);
+  assert.equal(tools.length, 10);
   const submitSchema = tools.find(tool => tool.name === 'dsh_submit').inputSchema;
   assert.ok(submitSchema.properties.workload.enum.includes('verification'));
   assert.ok(submitSchema.properties.workload.enum.includes('drafting'));
   assert.deepEqual(submitSchema.properties.outputFormat.enum, ['text', 'json-object']);
   assert.ok(submitSchema.properties.reviewContract.required.includes('checkIds'));
+  assert.ok(submitSchema.properties.reportContract.required.includes('facts'));
+  const usageTool = tools.find(tool => tool.name === 'dsh_usage');
+  assert.equal(usageTool.annotations.readOnlyHint, true);
+  assert.equal(usageTool.annotations.openWorldHint, false);
+  assert.match(tools.find(tool => tool.name === 'dsh_result').description, /proseAcceptance/);
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args });
     assert.notEqual(response.isError, true);
@@ -72,6 +77,10 @@ test('MCP enforces total authorization and the explicit one-request exception', 
   assert.equal(continuation.structuredContent.error.code, 'NOT_RESUMABLE');
   assert.equal((await call('dsh_status', { taskId: task.taskId })).number, 1);
   assert.equal((await call('dsh_list')).total, 1);
+  const usage = await call('dsh_usage');
+  assert.equal(usage.tasks, 1);
+  assert.equal(usage.unknownReceiptGroups, 1);
+  assert.equal(usage.modelCallsPerformed, 0);
   assert.equal((await call('dsh_doctor')).modelCalls, 0);
   assert.equal((await call('dsh_cancel', { taskId: task.taskId })).status, 'completed');
   assert.equal((await client.callTool({ name: 'dsh_submit', arguments: { requestId: 'mcp-3', prompt: 'Task', workspace, arbitraryModel: 'other' } })).isError, true);

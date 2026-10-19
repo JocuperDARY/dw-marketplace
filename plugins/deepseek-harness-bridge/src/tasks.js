@@ -6,6 +6,8 @@ import { resolveProfile } from './capabilities.js';
 import { allocateStage, budgetSummary, runOrchestrated, validateSavedBudget } from './orchestration.js';
 import { planExecution } from './planning.js';
 import { assessDelivery, assessOutput, deliveryPrompt, formatPrompt, normalizeOutputFormat, normalizeReviewContract } from './delivery.js';
+import { assessReport, normalizeReportContract, reportPrompt } from './report.js';
+import { summarizeUsage } from './usage.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -71,7 +73,9 @@ export class TaskManager {
         requireValue(record.schemaVersion === 1 && record.taskId === entry.name && Array.isArray(record.attempts), 'INVALID_STATE', 'The saved task record is invalid.');
         validateSavedBudget(record);
         if (record.reviewContract) normalizeReviewContract(record.reviewContract);
-        normalizeOutputFormat(record.outputFormat, record.reviewContract);
+        if (record.reportContract) normalizeReportContract(record.reportContract);
+        requireValue(!(record.reportContract && record.reviewContract), 'INVALID_STATE', 'Conflicting saved delivery contracts.');
+        normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract);
         this.records.set(record.taskId, record);
         for (const attempt of record.attempts) {
           requireValue(!this.requests.has(attempt.requestId), 'INVALID_STATE', 'Duplicate request ID in saved state.');
@@ -129,7 +133,7 @@ export class TaskManager {
       const workspace = await this.workspace(input.workspace);
       const access = input.access ?? 'read-only';
       const previous = this.requests.get(id);
-      const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined && input.outputFormat === undefined;
+      const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined && input.reportContract === undefined && input.outputFormat === undefined;
       const planned = planExecution(input, { legacy: !!legacy });
       const { effort, maxTokens, maxToolCalls, maxModelRequests, budget } = planned;
       requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
@@ -140,7 +144,7 @@ export class TaskManager {
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
       const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings };
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(planned.reportContract ? { reportContract: planned.reportContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
@@ -151,6 +155,7 @@ export class TaskManager {
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), planning, attempts: [] };
       if (planned.reviewContract) record.reviewContract = planned.reviewContract;
+      if (planned.reportContract) record.reportContract = planned.reportContract;
       if (input.outputFormat !== undefined) record.outputFormat = planned.outputFormat;
       if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [], recoveryPolicy: 'bounded-v1' };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
@@ -206,7 +211,11 @@ export class TaskManager {
       let output;
       try {
         const home = join(this.tasksDir, record.taskId, 'harness');
-        const runner = args => this.runner({ ...args, prompt: formatPrompt(deliveryPrompt(args.prompt, record.reviewContract, !!record.orchestration), normalizeOutputFormat(record.outputFormat, record.reviewContract), !!record.orchestration) });
+        const runner = args => {
+          const orchestrated = !!record.orchestration;
+          const deliverable = deliveryPrompt(reportPrompt(args.prompt, record.reportContract, orchestrated), record.reviewContract, orchestrated);
+          return this.runner({ ...args, prompt: formatPrompt(deliverable, normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract), orchestrated) });
+        };
         output = record.orchestration ? await runOrchestrated({ record, attempt, prompt, signal: active.controller.signal, home, runner,
           persist: () => this.persist(record), saveCheckpoint: async (number, text) => {
             const path = join(this.tasksDir, record.taskId, `checkpoint-${number}.json`);
@@ -238,8 +247,9 @@ export class TaskManager {
       if (finished.outputTruncated && finished.status === 'completed') finished.status = 'failed';
       if (finished.outputTruncated && finished.output.kind === 'complete_text') finished.output.kind = 'partial_text';
       if (finished.cleanup !== 'confirmed') { finished.status = 'cleanup_failed'; this.blocked = true; }
-      finished.outputValidation = assessOutput(text, normalizeOutputFormat(record.outputFormat, record.reviewContract), { status: finished.status, orchestrated: !!record.orchestration });
+      finished.outputValidation = assessOutput(text, normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract), { status: finished.status, orchestrated: !!record.orchestration });
       finished.deliveryValidation = assessDelivery(text, record.reviewContract, { status: finished.status, orchestrated: !!record.orchestration });
+      finished.reportValidation = assessReport(text, record.reportContract, { status: finished.status, orchestrated: !!record.orchestration });
       await this.saveResult(record, finished, text);
       finished.outputBytes = Buffer.byteLength(text);
       finished.finishedAt = new Date().toISOString();
@@ -273,6 +283,7 @@ export class TaskManager {
       planning: record.planning ?? { executionMode: 'legacy' },
       ...(record.outputFormat !== undefined ? { outputFormat: record.outputFormat } : {}),
       ...(record.reviewContract ? { reviewContract: record.reviewContract } : {}),
+      ...(record.reportContract ? { reportContract: record.reportContract } : {}),
       ...(record.orchestration ? { orchestration: budgetSummary(record.orchestration) } : {}),
       ...publicAttempt, parentAcceptance: 'not_assessed' });
   }
@@ -288,6 +299,11 @@ export class TaskManager {
       b.attempts.at(-1).startedAt.localeCompare(a.attempts.at(-1).startedAt) || b.taskId.localeCompare(a.taskId));
     return { tasks: recent.slice(0, 50).map(record => this.summary(record, record.attempts.at(-1))),
       total: this.records.size, blocked: this.blocked, activeTaskId: this.active?.taskId ?? null };
+  }
+
+  usage({ taskId } = {}) {
+    const records = taskId ? [this.record(taskId)] : [...this.records.values()];
+    return { ...summarizeUsage(records), activeTaskId: this.active?.taskId ?? null, blocked: this.blocked };
   }
 
   async wait({ taskId, timeoutMs = 10000 }) {

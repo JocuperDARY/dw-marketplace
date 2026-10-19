@@ -81,6 +81,69 @@ test('a submitted task finishes with durable status and retrievable output', asy
 });
 
 const completed = async () => ({ terminal: 'completed', text: 'result', cleanup: 'confirmed' });
+
+test('report contract persists through replay and rejects changed roles without retrying', async t => {
+  const reportContract = { facts: [{ id: 'seconds', kind: 'limit', value: 180, unit: 's', source: 'plan.json:limits.seconds' }] };
+  let launches = 0;
+  const { manager, workspace, root } = await fixture(t, async ({ task, prompt }) => {
+    launches++;
+    assert.match(prompt, /never measured/);
+    assert.equal(task.route.effort, 'off');
+    return { terminal: 'completed', cleanup: 'confirmed', text: JSON.stringify({ facts: [{ ...reportContract.facts[0], kind: 'observation' }], prose: 'Measured 180 seconds.' }),
+      budget: { modelRequests: 1, calls: [{ number: 1, finished: true, usage: { inputTokens: 542, outputTokens: 414, totalTokens: 956 } }] } };
+  });
+  const input = { executionMode: 'single-request', requestId: 'report', workspace, prompt: 'Report the limit without claiming measured time.', reportContract };
+  const task = await manager.submit(input);
+  const done = await manager.wait({ taskId: task.taskId });
+  assert.equal(done.status, 'completed');
+  assert.equal(done.outputValidation.status, 'valid');
+  assert.equal(done.reportValidation.status, 'mismatch');
+  assert.equal(done.parentAcceptance, 'not_assessed');
+  assert.equal(manager.usage({ taskId: task.taskId }).tokens.totalTokens.reported, 956);
+  await manager.close();
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: () => { throw new Error('must not launch'); }, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
+  t.after(() => next.close());
+  const replay = await next.submit(input);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.reportValidation.status, 'mismatch');
+  assert.deepEqual(replay.reportContract, reportContract);
+  await assert.rejects(next.submit({ ...input, reportContract: { facts: [{ ...reportContract.facts[0], value: 200 }] } }), { code: 'REQUEST_CONFLICT' });
+  await assert.rejects(next.continue({ taskId: task.taskId, requestId: 'repair-report', prompt: 'repair' }), { code: 'NOT_RESUMABLE' });
+  assert.equal(next.usage().tokens.totalTokens.reported, 956);
+  assert.equal(launches, 1);
+  await next.close();
+});
+
+test('report facts and each stage receipt survive continuation and restart without tail double counting', async t => {
+  const reportContract = { facts: [{ id: 'tests', kind: 'execution-status', value: 'NOT_RUN', unit: '', source: 'stage.json:tests' }] };
+  let launches = 0;
+  const { manager, workspace, root } = await fixture(t, async ({ task, prompt }) => {
+    launches++;
+    assert.match(prompt, /NOT_RUN/);
+    const state = launches === 1 ? 'checkpoint' : 'completed';
+    const report = { ...reportContract, prose: 'Tests have not run.' };
+    return { terminal: 'completed', cleanup: 'confirmed', toolCalls: 0,
+      text: JSON.stringify({ state, summary: state === 'checkpoint' ? 'Need final report.' : JSON.stringify(report), nextSteps: state === 'checkpoint' ? 'write report' : '' }),
+      budget: { nonce: task.stageBudget.nonce, modelRequests: 1, calls: [{ number: 1, reservedOutputTokens: task.maxTokens, finished: true, usage: { inputTokens: 20, outputTokens: 30, totalTokens: 50 } }] } };
+  });
+  const task = await manager.submit({ requestId: 'report-stages', workspace, prompt: 'Report supplied execution status.', reportContract,
+    capabilityProfile: 'inference-only', maxModelRequests: 2, budget: { totalModelRequests: 6, totalOutputTokens: 16384, totalToolCalls: 0, totalDurationMs: 60000 } });
+  await manager.wait({ taskId: task.taskId });
+  await manager.continue({ taskId: task.taskId, requestId: 'report-followup', prompt: 'Recheck against unchanged facts.' });
+  const done = await manager.wait({ taskId: task.taskId });
+  assert.equal(done.reportValidation.status, 'facts_preserved');
+  assert.equal(done.reportValidation.proseAcceptance, 'not_assessed');
+  assert.equal(manager.usage().recordedModelRequests, 3);
+  assert.equal(manager.usage().tokens.totalTokens.reported, 150);
+  await manager.close();
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
+  t.after(() => next.close());
+  assert.equal(next.usage().recordedModelRequests, 3);
+  assert.equal(next.usage().unknownReceiptGroups, 0);
+  assert.equal(next.record(task.taskId).orchestration.stages.length, 3);
+  assert.ok(next.record(task.taskId).orchestration.stages.every(stage => stage.budget.calls.length === 1));
+  await next.close();
+});
 const untilAborted = ({ signal }) => new Promise(resolve => {
   const done = () => resolve({ terminal: 'aborted', text: 'partial', cleanup: 'confirmed' });
   if (signal.aborted) done(); else signal.addEventListener('abort', done, { once: true });

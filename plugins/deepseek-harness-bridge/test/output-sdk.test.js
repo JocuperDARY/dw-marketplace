@@ -13,7 +13,7 @@ import { createSdkRunner, workerEnvironment } from '../src/sdk-runner.js';
 import { ConnectionTasks } from '../src/connection-tasks.js';
 import { createServer } from '../src/server.js';
 
-for (const single of [false, true]) for (const mode of ['reasoning-only', 'summary-prose']) {
+for (const single of [false, true]) for (const mode of ['reasoning-only', 'summary-prose', 'report']) {
   test(`offline SDK: ${mode}, ${single ? 'single-request stops' : 'budgeted recovery'}`, { timeout: 35000 }, async t => {
     const root = await mkdtemp(join(tmpdir(), 'bridge-output-sdk-'));
     const workspace = join(root, 'workspace');
@@ -43,12 +43,25 @@ for (const single of [false, true]) for (const mode of ['reasoning-only', 'summa
       ...(single ? {} : { budget }), workload: mode === 'reasoning-only' ? 'standard' : 'drafting',
       capabilityProfile: 'inference-only', outputFormat: 'json-object', maxTokens: 8192, timeoutMs: 20000,
       prompt: `fixture-${mode}: Return a draft from supplied facts.` };
+    if (mode === 'report') input.reportContract = { facts: [{ id: 'seconds', kind: 'limit', value: 180, unit: 's', source: 'plan.json:limits.seconds' }] };
     const task = await call('dsh_submit', input);
     const done = await call('dsh_wait', { taskId: task.taskId, timeoutMs: 30000 });
     const result = await call('dsh_result', { taskId: task.taskId });
     assert.equal(done.cleanup, 'confirmed', JSON.stringify(done));
     assert.equal(done.parentAcceptance, 'not_assessed');
-    if (single) {
+    if (mode === 'report') {
+      assert.equal(done.status, 'completed');
+      assert.equal(done.reportValidation.status, 'mismatch');
+      assert.equal(done.reportValidation.proseAcceptance, 'not_assessed');
+      assert.equal(done.outputValidation.status, 'valid');
+      assert.equal(done.budget.modelRequests, 1);
+      assert.equal(done.orchestration?.recoveries ?? 0, 0);
+      assert.match(result.text, /Measured 180 seconds/);
+      if (single) {
+        const continued = await client.callTool({ name: 'dsh_continue', arguments: { taskId: task.taskId, requestId: 'forbidden', prompt: 'retry' } });
+        assert.equal(continued.structuredContent.error.code, 'NOT_RESUMABLE');
+      }
+    } else if (single) {
       assert.equal(done.budget.modelRequests, 1);
       assert.equal(done.status, mode === 'reasoning-only' ? 'failed' : 'completed');
       assert.equal(done.outputValidation.status, mode === 'reasoning-only' ? 'not_evaluated' : 'invalid');
@@ -71,6 +84,14 @@ for (const single of [false, true]) for (const mode of ['reasoning-only', 'summa
       assert.equal(JSON.parse(JSON.parse(result.text).summary).path, 'C:\\fixture\\file.json');
     }
     assert.equal((await call('dsh_submit', input)).duplicate, true);
+    const usage = await call('dsh_usage', { taskId: task.taskId });
+    const requests = single || mode === 'report' ? 1 : 2;
+    assert.equal(usage.recordedModelRequests, requests);
+    assert.equal(usage.finishedModelRequests, requests);
+    assert.equal(usage.unknownReceiptGroups, 0);
+    assert.equal(usage.tokens.inputTokens.reported, requests * 100);
+    assert.equal(usage.tokens.outputTokens.missingCalls, 0);
+    assert.equal(usage.modelCallsPerformed, 0);
     await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
   });
 }
