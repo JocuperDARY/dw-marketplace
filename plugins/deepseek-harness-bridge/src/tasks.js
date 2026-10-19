@@ -161,7 +161,7 @@ export class TaskManager {
       requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
       const timeoutMs = compatibilityV1 ? boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs') : optionalLimit(input.timeoutMs, 'timeoutMs');
       const maxRequestBytes = compatibilityV1 ? boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes') : optionalLimit(input.maxRequestBytes, 'maxRequestBytes');
-      const profile = await this.resolveCapabilities(planned.capabilityProfile, undefined, { workspace, access, nativePlugins: input.nativePlugins });
+      const profile = await this.resolveCapabilities(planned.capabilityProfile, undefined, { workspace, requestedWorkspace: input.workspace, access, nativePlugins: input.nativePlugins });
       requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;

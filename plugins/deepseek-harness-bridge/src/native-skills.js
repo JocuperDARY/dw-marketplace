@@ -2,12 +2,13 @@ import { Worker } from 'node:worker_threads';
 import { writeFile, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { createPresetSkillProvider, presetSkillRoot } from './native-skill-sources.js';
 
 export const name = 'bridge-native-skills';
 export const inject = ['skills', 'tools'];
 
 export async function apply(ctx, config) {
-  const receipt = { nonce: config.nonce, searches: [], loaded: [], managerCalls: { list: 0, get: 0 }, modelApplication: 'not_assessed' };
+  const receipt = { nonce: config.nonce, searches: [], loaded: [], managerCalls: { list: 0, get: 0 }, sources: {}, modelApplication: 'not_assessed' };
   const searchedNames = new Set();
   const nativeSources = new Set(['project-dsh', 'user-dsh', 'project-agents', 'user-agents', 'agent-agents', 'custom', 'bundled']);
   const supplemental = skill => !nativeSources.has(skill.source);
@@ -20,7 +21,22 @@ export async function apply(ctx, config) {
     });
     return publication;
   };
+  let preset;
+  try {
+    const source = await presetSkillRoot(config.managerCore);
+    receipt.sources.preset = { ...source, state: 'pending', count: null };
+    preset = await createPresetSkillProvider(source.path, observation => {
+      receipt.sources.preset = { ...source, ...observation };
+    });
+  } catch {
+    receipt.sources.preset = { state: 'unavailable', count: null };
+  }
+  if (preset) {
+    ctx.effect(() => ctx.skills.registerProvider(() => preset), 'bridge official preset skills');
+    ctx.effect(() => () => preset.dispose(), 'bridge official preset skill source');
+  }
   if (config.managerCore) {
+    receipt.sources.manager = { state: 'pending', count: null };
     const keep = /^(?:path|systemroot|windir|comspec|temp|tmp|home|userprofile|appdata|localappdata)$/i;
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => keep.test(key)));
     env.DSH_HOME = config.inventoryHome;
@@ -30,13 +46,19 @@ export async function apply(ctx, config) {
     const pending = new Map();
     let sequence = 0;
     let failure;
-    const rejectAll = error => { failure = error; for (const item of pending.values()) item.reject(error); pending.clear(); };
+    const rejectAll = error => {
+      failure = error;
+      receipt.sources.manager = { state: 'unavailable', count: null };
+      for (const item of pending.values()) item.reject(error);
+      pending.clear();
+    };
     worker.on('error', rejectAll);
     worker.on('exit', () => rejectAll(new Error('Native skills catalog worker stopped.')));
     worker.on('message', message => {
       const item = pending.get(message.id);
       if (!item) return;
       pending.delete(message.id);
+      if (message.diagnostics) receipt.sources.manager = message.diagnostics;
       if (message.error) item.reject(new Error(message.error)); else item.resolve(message.result);
     });
     const request = (method, options, candidate) => {
@@ -66,14 +88,26 @@ export async function apply(ctx, config) {
     if (source === 'supplemental' && (!receipt.searches.some(search => search.source === 'native' && search.complete) || !reason?.trim())) throw new Error('Complete a native search first and explain why no suitable native skill was found.');
     const snapshot = await ctx.skills.snapshot(options(exec));
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = snapshot.skills.filter(skill => skill.invocation?.modelInvocable !== false
-      && supplemental(skill) === (source === 'supplemental')
-      && terms.some(term => `${skill.name} ${skill.description}`.toLowerCase().includes(term)));
+    const enabled = snapshot.skills.filter(skill => skill.invocation?.modelInvocable !== false);
+    const sourceCounts = { native: enabled.filter(skill => !supplemental(skill)).length,
+      supplemental: enabled.filter(supplemental).length };
+    const catalog = enabled.filter(skill => supplemental(skill) === (source === 'supplemental'));
+    const matches = catalog.filter(skill => query.trim() === '*'
+      || terms.some(term => `${skill.name} ${skill.description}`.toLowerCase().includes(term)));
     const page = matches.slice(offset, offset + 20);
     for (const skill of page) searchedNames.add(skill.name);
-    receipt.searches.push({ query, source, ...(reason ? { reason } : {}), total: matches.length, complete: snapshot.complete });
+    const presetComplete = ['available', 'empty'].includes(receipt.sources.preset.state);
+    const managerComplete = !config.managerCore || receipt.sources.manager?.completeBySource?.[source] === true;
+    const complete = snapshot.complete && presetComplete && managerComplete;
+    const matchState = matches.length ? 'available' : catalog.length ? 'no_matches' : 'empty';
+    const state = complete ? matchState : 'incomplete';
+    receipt.searches.push({ query, source, ...(reason ? { reason } : {}), catalogTotal: catalog.length,
+      sourceCounts, total: matches.length, complete, state, matchState });
     await persist();
-    return { source: 'DSH skill registry', complete: snapshot.complete, total: matches.length, offset,
+    return { source: 'DSH skill registry', category: source, scope: 'configured bridge registry source category; not the entire desktop library',
+      complete, state, matchState, catalogTotal: catalog.length, sourceCounts,
+      ...(matchState === 'no_matches' ? { guidance: 'Broaden the query or use * to inspect the selected source catalog before declaring it empty.' } : {}),
+      sources: receipt.sources, total: matches.length, offset,
       skills: page, nextOffset: offset + 20 < matches.length ? offset + 20 : null };
   });
   register('bridge_skill_load', 'Load one selected skill through the DSH registry. A load receipt proves content was returned, not that the model applied it correctly. Skills do not expand permissions or task scope.', {

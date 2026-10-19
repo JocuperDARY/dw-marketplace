@@ -27,7 +27,7 @@ test('multiple production connections discover tools without reserving task owne
     clients.push(client);
     await client.connect(new StdioClientTransport({ command: process.execPath,
       args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' }));
-    assert.equal((await client.listTools()).tools.length, 10);
+    assert.equal((await client.listTools()).tools.length, 11);
     const result = await client.callTool({ name: 'dsh_doctor', arguments: {} });
     assert.equal(JSON.parse(result.content[0].text).validation.modelCalls, 0);
   }
@@ -46,7 +46,12 @@ test('MCP preserves omitted limits and enforces an explicit one-request contract
   await server.connect(serverSide);
   await client.connect(clientSide);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 10);
+  assert.equal(tools.length, 11);
+  const prepareTool = tools.find(tool => tool.name === 'dsh_prepare_workspace');
+  assert.equal(prepareTool.annotations.readOnlyHint, false);
+  assert.equal(prepareTool.annotations.openWorldHint, false);
+  assert.equal(prepareTool.annotations.idempotentHint, false);
+  assert.equal(prepareTool.annotations.destructiveHint, false);
   const submitSchema = tools.find(tool => tool.name === 'dsh_submit').inputSchema;
   assert.ok(submitSchema.properties.workload.enum.includes('verification'));
   assert.ok(submitSchema.properties.workload.enum.includes('drafting'));
@@ -101,6 +106,17 @@ test('production stdio entry starts without a key and doctor makes no model call
   assert.equal(status.credentialConfigured, false);
   assert.equal(status.validation.modelCalls, 0);
   assert.equal(status.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.1-rc.2');
+  if (process.platform === 'win32') {
+    const preparedPath = join(root, 'worker-owned');
+    const prepared = await client.callTool({ name: 'dsh_prepare_workspace', arguments: { workspace: preparedPath } });
+    assert.notEqual(prepared.isError, true, JSON.stringify(prepared));
+    assert.equal(prepared.structuredContent.workspace, preparedPath);
+    assert.equal(prepared.structuredContent.modelRequests, 0);
+    assert.equal(prepared.structuredContent.evidence.currentSid, prepared.structuredContent.evidence.ownerSid);
+    await assert.rejects(access(env.DSH_BRIDGE_DATA_DIR), { code: 'ENOENT' });
+    const duplicate = await client.callTool({ name: 'dsh_prepare_workspace', arguments: { workspace: preparedPath } });
+    assert.equal(duplicate.structuredContent.error.code, 'NATIVE_WORKSPACE_EXISTS');
+  }
   const missingKey = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', requestId: 'no-key', workspace, prompt: 'Task' } });
   assert.equal(JSON.parse(missingKey.content[0].text).error.code, 'MISSING_CREDENTIAL');
   await client.close();

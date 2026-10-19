@@ -15,6 +15,14 @@
 
 提交固定 profile 摘要，启动核对入口哈希和实际工具。回执分别提供 registeredTools、usedTools、toolOutcomes、skills 和 contextStrategy。工具 returned 不等于业务成功，加载技能不等于正确执行；parentAcceptance 始终独立。原生工具的访问策略与结构限制、SDK 有限默认值见 remainingImplementationConstraints；父任务应使用隔离工作区并核验全部副作用。
 
+## 原生工作区与来源诊断
+
+Windows 原生 Shell 会检查目录所有者是否为 MCP 工作者账户。Codex 沙箱创建的目录可能属于另一个 Windows SID；能读写文件不代表有权替它准备 Shell 沙箱。`dsh_prepare_workspace({workspace: "<现有父目录下的新目录绝对路径>"})` 是零模型调用：只创建一个新目录，不接管已有目录、不修改其所有权/ACL、不创建状态锁，并拒绝 junction/symlink 祖先及 Bridge 状态目录重叠。该工具不接受已存在的目标；收到不确定结果时先核对工件，不盲目换路径重试。将返回路径用于新任务。真正执行 Shell 时，官方沙箱仍可能为这个新工作区添加自身的隔离访问授权；prepare 的成功不等于 Shell 已执行。
+
+技能搜索保留官方 preset、filesystem 和 Skills Manager 来源。`total` 是查询匹配数，目录总数及来源状态单独返回；`no_matches`、目录 `empty` 和来源 `incomplete/unavailable` 不得混为一谈。支持 `query: "*"` 分页盘点元数据；只有加载选定技能时才读取正文。来源诊断不读取桌面密钥或执行 Cordis 配置。
+
+`toolOutcomes` 分别记录 attempted、returned、error、unobserved。SDK 在准备/调度失败时可能没有 post-execute 回调，因此 unobserved 不能由 Bridge 自动解释为成功或失败；必须结合实际工具错误和任务证据判断。
+
 ## 显式本机配置
 
 默认配置文件在 Windows `%LOCALAPPDATA%\DeepSeekHarnessBridge\config.json`，其他系统在 `~/DeepSeekHarnessBridge/config.json`。可用 `DSH_BRIDGE_CONFIG_DIR` 指定绝对目录。此文件是操作者维护的受信任配置，不从任务工作区加载，不放 API Key。

@@ -58,6 +58,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 | MCP 工具 | 作用 |
 | --- | --- |
+| `dsh_prepare_workspace` | 零模型调用创建一个新的独立目录，由 Bridge 工作者账户持有；拒绝接管现有目录或改写其 ACL。Windows 原生 Shell 任务先准备工作区。 |
 | `dsh_submit` | 提交新任务，立即返回 taskId；同 requestId 和同输入不会重复启动。 |
 | `dsh_status` | 查询某次执行状态、终止原因和清理结果。 |
 | `dsh_list` | 按最近一次执行的开始时间列出最多 50 项任务，便于恢复 taskId。 |
@@ -140,6 +141,8 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 `dsh_doctor.validation.modelCalls: 0` 仅指本次诊断没有模型调用。独立工作者的消费不会自动计入桌面对话账本或挂件；本版本提供桥接器侧汇总，不在未确认账户身份、缓存口径和去重方式时自动改写桌面 cost-meter 数据。
 
 新任务默认 native profile：read-only 选择 skills/files，workspace-write 可选择 skills/files/shell/teams；nativePlugins 可明确选择子集。只读不会加载 Shell 或 Agent Teams。native 优先搜索 DSH 技能元数据，再按需加载正文；补充 Codex 来源前必须记录原生搜索与不适用理由。files profile 继续提供 bridge_list/read 和可选 bridge_write，inference-only 不加载工具。bridge_write 仍要求哈希检查并备份原内容。
+
+Windows 原生 Shell 在模型启动前核对工作区所有者和 reparse 祖先。Codex 创建的目录可能属于其沙箱账户，而不是 Bridge 账户；此时用 `dsh_prepare_workspace` 创建新路径，不修改旧目录权限。技能查询的匹配数与来源目录总数分别报告；查询为零不证明技能库为空，可用 `query: "*"` 分页盘点。官方 preset 解析若来自锁定 Bridge SDK，会明确标记来源，不能称为桌面已加载。工具缺少 post-execute 回执时保留 `unobserved`，不补算成功。
 
 native 适配本机 Skills Manager 的 headless provider、Windows dsh-ops、官方 PowerShell 沙箱及 Agent Teams in-process provider。入口固定哈希，原生包的 @deepseek-ai 依赖绑定到 Bridge 锁定的 SDK，避免另一缓存版本破坏成员角色协议。团队状态位于任务专属目录，不复用桌面对话。结果分别保存实际注册工具、调用计数、工具结果状态和技能加载依据；returned 与 loaded 均不代表语义验收通过。其他插件仍需显式适配；见[能力选择](docs/capabilities.md)。
 

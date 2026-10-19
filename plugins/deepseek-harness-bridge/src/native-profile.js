@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireValue } from './errors.js';
+import { validateNativeShellWorkspace } from './native-workspace.js';
 
 const require = createRequire(import.meta.url);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -23,11 +24,12 @@ async function packageRoot(home, name) {
 }
 
 /** Resolve installed components, not the desktop profile or saved conversations. */
-export async function resolveNativeProfile(config, { workspace, access = 'read-only', nativePlugins } = {}) {
+export async function resolveNativeProfile(config, { workspace, requestedWorkspace, access = 'read-only', nativePlugins } = {}) {
   const selected = nativePlugins ?? (access === 'workspace-write' ? choices : ['skills', 'files']);
   requireValue(Array.isArray(selected) && selected.every(name => choices.includes(name)) && new Set(selected).size === selected.length,
     'INVALID_PROFILE', 'nativePlugins must contain unique skills/files/shell/teams names.');
   requireValue(access === 'workspace-write' || !selected.some(name => ['shell', 'teams'].includes(name)), 'PROFILE_ACCESS', 'Native shell and team state require workspace-write access; read-only access is retained.');
+  if (selected.includes('shell') && process.platform === 'win32') await validateNativeShellWorkspace(requestedWorkspace ?? workspace);
   const home = config.inventoryHome || join(homedir(), '.dsh');
   requireValue(isAbsolute(home), 'INVALID_CONFIG', 'inventoryHome must be absolute.');
   const modules = [];

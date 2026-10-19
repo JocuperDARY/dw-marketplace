@@ -2,6 +2,10 @@
 
 ## 2.0.0-native.1 — candidate, 2026-10-19
 
+- Candidate follow-up, 2026-10-20: discover omitted official preset skills, distinguish catalog/source availability from zero query matches, and support explicit paged inventory. Preserve native-first and explained supplemental fallback.
+- Add zero-model `dsh_prepare_workspace` for a new worker-owned directory and native Shell preflight. Preserve existing owner/ACLs and upstream confinement; reject foreign ownership, reparse ancestry and state overlap before paid work.
+- Account for attempted tool calls without post-execute receipts as unobserved. Keep runtime completion, tool outcomes and content acceptance separate. Follow-up validation uses offline fixtures and preserved evidence, with no new paid model calls.
+
 - Preserve omitted resource limits as unspecified for new tasks; keep explicit caps, historical budgets, single-request no-retry and unknown usage semantics.
 - Prefer DSH-native skill discovery/loading and adapt installed Skills Manager, dsh-ops, sandboxed PowerShell and in-process Agent Teams with task-owned state and actual registration/use evidence. Bind native SDK peers to the locked runtime graph.
 - Prefer native repeated context compaction and meter auxiliary calls. Support durable checkpoint chains without a fixed stage/attempt ceiling; preserve cancellation, no-progress and failure boundaries.

@@ -5,6 +5,7 @@ import { safeError } from './errors.js';
 import { capabilities } from './capabilities.js';
 import { reviewContractSchema } from './delivery.js';
 import { reportContractSchema } from './report.js';
+import { prepareNativeWorkspace } from './native-workspace.js';
 
 export const VERSION = '2.0.0-native.1';
 const taskId = z.string().uuid();
@@ -22,8 +23,11 @@ const budget = z.object({
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
+    { name: 'dsh_prepare_workspace', description: 'Create one NEW independent workspace directory under an existing parent, with the bridge host account as owner. Zero model calls; does not adopt existing directories or change existing ownership/ACLs. Use before native Shell tasks when a Codex-created directory belongs to a different sandbox account. Existing delivered files remain untouched.',
+      schema: z.object({ workspace: z.string().min(1).describe('Absolute path of a new, absent directory under an existing parent; must be disjoint from bridge state.') }).strict(),
+      run: input => prepareNativeWorkspace({ ...input, dataDir: manager.options?.dataDir ?? manager.dataDir }), write: true, destructive: false, idempotent: false },
     { name: 'dsh_submit', description: 'Start an independent official DeepSeek Flash worker for the assigned scope. Omitted resource limits stay unspecified; preserve user-specified limits and ask before adding discretionary caps. Prefer relevant DSH-native skills and compatible plugins, loading skill bodies only when selected. Rule verification uses verification/reviewContract; factual reports use reportContract. completed never means parent acceptance. Explicit single-request permits one inference call without tools or continuation. Returns immediately; never reuses a desktop conversation.',
-      schema: z.object({ requestId, prompt, workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state.'),
+      schema: z.object({ requestId, prompt, workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state. Native Windows Shell requires worker-account ownership and no junction ancestry; use dsh_prepare_workspace for a new independent directory.'),
         access: z.enum(['read-only', 'workspace-write']).optional(),
         executionMode: z.enum(['automatic', 'budgeted', 'single-request']).optional().describe('Default automatic with no invented resource caps; supplying budget enables persistent total accounting. Explicit single-request always means one inference-only request, zero tools, no retry or continuation.'),
         workload: z.enum(['mechanical', 'drafting', 'standard', 'reasoning', 'verification']).optional().describe('Selects reasoning effort only: mechanical/drafting off; standard low; reasoning/verification high. Verification requires reviewContract. Does not create token limits. Explicit effort and caps are preserved; reasoning shares the provider output allowance.'),
@@ -59,9 +63,9 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
       schema: z.object({ workspace: z.string().optional(), access: z.enum(['read-only', 'workspace-write']).optional(), nativePlugins: z.array(z.enum(['skills', 'files', 'shell', 'teams'])).optional() }).strict(), run: input => capabilities(undefined, input) },
   ];
   const server = new Server({ name: 'deepseek-harness-bridge', version: VERSION }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: definitions.map(({ name, description, schema, write, network }) => ({
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: definitions.map(({ name, description, schema, write, network, idempotent = true, destructive = !!write }) => ({
     name, description, inputSchema: z.toJSONSchema(schema, { target: 'draft-7' }),
-    annotations: { readOnlyHint: !write, destructiveHint: !!write, idempotentHint: true, openWorldHint: !!network },
+    annotations: { readOnlyHint: !write, destructiveHint: destructive, idempotentHint: idempotent, openWorldHint: !!network },
   })) }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
     const definition = definitions.find(item => item.name === request.params.name);
