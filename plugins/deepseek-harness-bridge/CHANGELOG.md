@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1 — 2026-10-19
+
+- Address DSH-001: deny common credential filenames and directories in built-in resolve/read/write/list at every depth, including Windows names and SSH private-key variants. Preserve ordinary project and public-key files. Describe this as a known-name policy, not arbitrary secret detection or a boundary for trusted custom modules.
+- Address DSH-002: validate nonempty bounded attempt arrays and their identity/lifecycle fields before registering saved tasks. Malformed state returns INVALID_STATE, retains the original task file and ownership lock, and launches no worker; later connections remain STATE_LOCKED pending reconciliation. Preserve legacy replay and continuation records.
+- Add synthetic regressions and connection-layer coverage without changing budgets, reasoning defaults, single-request no-retry rules, dependencies, or third-party profiles. No paid model test.
+
 ## 1.3.0 — 2026-10-19
 
 - Prefer independently reviewable work packages and account for handoff/review cost without minimum-spend rules or expanded authorization.

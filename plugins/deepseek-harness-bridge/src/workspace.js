@@ -5,7 +5,8 @@ import { dirname, isAbsolute, join, relative, sep, win32 } from 'node:path';
 import { requireValue } from './errors.js';
 
 const MAX_FILE_BYTES = 262144;
-const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.npmrc|\.config|\.dsh-bridge-.*|\.env(?:\..*)?|\.credentials(?:\..*)?|credentials(?:\..*)?|api-key\.dpapi|DeepSeekHarnessBridge|node_modules)$/i;
+// Known path names only: arbitrary secrets in ordinary project files are not detected.
+const PROTECTED = /^(?:\.git|\.codex|\.agents|\.claude|\.dsh|\.aws|\.ssh|\.npmrc|\.config|\.kube|\.docker|\.dsh-bridge-.*|\.env(?:rc)?(?:\..*)?|\.netrc|_netrc|\.pgpass|pgpass\.conf|\.git-credentials|\.pypirc|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|\.credentials(?:\..*)?|credentials(?:\..*)?|api-key\.dpapi|DeepSeekHarnessBridge|node_modules)$/i;
 const PAGE_CHARACTERS = 16384;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const contained = (root, target) => {

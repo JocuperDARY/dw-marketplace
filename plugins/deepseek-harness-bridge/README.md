@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 1.3.0
+# DeepSeek Harness Bridge 1.3.1
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 

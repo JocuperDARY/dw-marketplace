@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ConnectionTasks } from '../src/connection-tasks.js';
 
@@ -41,6 +41,25 @@ test('completed task releases ownership and another connection reads an idempote
   assert.equal(launches, 1);
   await assert.rejects(access(lock), { code: 'ENOENT' });
 });
+
+for (const method of ['list', 'status']) {
+  test(`${method} rejects corrupt saved attempts and leaves the lock for reconciliation`, async t => {
+    let launches = 0;
+    const { first, second, lock } = await fixture(t, () => { launches++; throw new Error('must not launch'); });
+    const taskId = '00000000-0000-4000-8000-000000000000';
+    const path = join(dirname(lock), 'tasks', taskId, 'task.json');
+    await mkdir(dirname(path), { recursive: true });
+    const saved = JSON.stringify({ schemaVersion: 1, taskId, attempts: [] });
+    await writeFile(path, saved);
+    await assert.rejects(first[method]({ taskId }), { code: 'INVALID_STATE' });
+    const owner = await readFile(lock, 'utf8');
+    await first.close();
+    await assert.rejects(second[method]({ taskId }), { code: 'STATE_LOCKED' });
+    assert.equal(await readFile(lock, 'utf8'), owner);
+    assert.equal(await readFile(path, 'utf8'), saved);
+    assert.equal(launches, 0);
+  });
+}
 
 test('result observation waits through a short ownership conflict without relaunching work', async t => {
   let finish;
