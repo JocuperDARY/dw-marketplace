@@ -1,11 +1,51 @@
 # Changelog
 
-## 1.4.0 — 2026-10-19
+## 2.1.0 — 2026-10-20
 
-- Add opt-in lifecycleContract: parent-declared status vocabulary, ordered cases, allowed statuses, exact slot-reuse booleans and factual/rule basis. Require explicit handling of uncovered branches rather than silently inventing a lifecycle policy.
-- Return lifecycleValidation for exact row coverage/order, declared status/reuse outcomes and all status counts. Preserve raw output, runtime/cleanup status and unassessed prose/parent acceptance; consistent is not semantic approval or proof of source truth.
-- Default this contract to the existing verification/high workload; preserve explicit off/low and request/output/tool/time caps with warnings. Keep one-request no-continuation and no semantic retries in budgeted mode. Persist the contract across replay and continuation; no SDK dependency or capability change.
-- Replay the original synthetic contradiction offline, plus unit/state/network-blocked SDK/MCP and package regressions. The explicitly supplied S3 unknown fallback is new parent policy, not a rewritten historical requirement. No paid model test or real-model quality claim.
+- Add optional parent-declared lifecycle contracts with ordered allowed outcomes, exact slot reuse, recomputed counts and bounded diagnostics; source truth and prose/parent acceptance remain unassessed.
+- Publish uniqueness and nonblank basis constraints in JSON Schema; enforce cross-field membership, unique case IDs and normalized 16384-byte UTF-8 size before admission or credentials. Preserve raw failures and avoid semantic retries.
+- Port onto 2.0.2 while preserving native file boundaries, nullable omitted limits, explicit-v2/v1 replay, report fingerprints and prerequisite-evidence rules.
+- Cover the original S3 wrong-status case, network-blocked SDK/MCP, persistence, replay and explicit continuation. Offline evidence does not establish paid model quality or deployment.
+
+## 2.0.2 — 2026-10-20
+
+- Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require every asserted or newly added prerequisite to cite an explicit rule or a checkable derivation with its operation scope. A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.
+- Distinguish explaining a general rule from executing a numerical instance, identity metadata from decision variables, and arbitrary optimal choices from requested unique/deterministic selectors. Review compound claims clause by clause.
+- Parent acceptance must independently check source roles, entailment and requested operation; valid rule IDs and complete JSON never certify content. Keep the existing strict schema and no-retry/budget behavior.
+- Synthetic offline counterexamples and controls verify delivery, preservation and non-acceptance boundaries only; no paid model test or accuracy claim. Integrate the released 2.0.1 native file-boundary changes without altering their behavior. Document all six counterexamples and four controls, and explicitly assert preserved terminal and usage receipts across restart/replay.
+
+
+## 2.0.1 — 2026-10-20
+
+- Promote PR #24 candidate 233ea09 after DSH independently verified native file boundaries, capability consistency and SDK startup. The promotion changes release metadata and disclosure documentation only; functionality and tests retain the verified candidate implementation.
+- Reuse the verified candidate's 204/204 offline suite, 16/16 native regressions and 3/3 package checks as implementation evidence; rerun release packaging and zero-model installed MCP checks. No paid model test.
+- Disclose OBS-1 (an existing corrupt same-name backup can be reused) and OBS-2 (Teams state resides inside the workspace and is not protected by WorkspaceFiles names). Both remain non-blocking follow-up work, with impact and acceptance conditions in docs/capabilities.md. No claim that these behaviors were fixed or that real Teams execution was validated.
+
+
+## 2.0.1-rc.1 — candidate, 2026-10-20
+
+- DSH-FIT-001: stop mounting raw dsh-ops file tools in both access modes. Native file selection uses the existing workspace path, protected-name and link policy instead of host absolute paths/session cwd.
+- DSH-FIT-002: read-only no longer advertises ops_replace. Workspace-write retains a bridge-owned, single-file literal adapter with whole-file SHA-256, UTF-8 size checks, CAS and backup; recursive/regex/glob/dryRun behavior is not supported.
+- DSH-FIT-003: add actual offline sdk-minimal native read-only/workspace-write startup, asynchronous capability confirmation and component file-boundary regressions. No provider request or real task state; startup evidence is separate from model tool-loop quality.
+- Candidate only. Preserve raw failure evidence, existing installation/configuration, budget contracts and single-request no-retry; no paid test or release promotion.
+
+## 2.0.0 — 2026-10-20
+
+- Promote the independently verified 2.0.0-native.1 candidate from PR #23. Release promotion changes version metadata and documentation only; implementation and test behavior remain the verified ec15bd2 candidate.
+- DSH independently passed 188/188 offline tests, 3/3 package checks and interface/lock/fingerprint probes. Preserve omitted limits, native capabilities, safe field diagnostics and historical request replay.
+- No additional paid model test. Browser/approval integration, team reassignment and live Flash content quality remain outside the interface acceptance evidence.
+
+## 2.0.0-native.1 — candidate, 2026-10-19
+
+- Interface follow-up, 2026-10-20: publish execution-status string/nonblank constraints and review ID uniqueness in JSON Schema. Disclose report ID uniqueness and serialized UTF-8 size as separate admission checks. Return bounded, safe field-level diagnostics in both MCP result channels, before task ownership for invalid report/review contracts. No coercion, lock takeover, retry or paid test.
+- Candidate follow-up, 2026-10-20: discover omitted official preset skills, distinguish catalog/source availability from zero query matches, and support explicit paged inventory. Preserve native-first and explained supplemental fallback.
+- Add zero-model `dsh_prepare_workspace` for a new worker-owned directory and native Shell preflight. Preserve existing owner/ACLs and upstream confinement; reject foreign ownership, reparse ancestry and state overlap before paid work.
+- Account for attempted tool calls without post-execute receipts as unobserved. Keep runtime completion, tool outcomes and content acceptance separate. Follow-up validation uses offline fixtures and preserved evidence, with no new paid model calls.
+
+- Preserve omitted resource limits as unspecified for new tasks; keep explicit caps, historical budgets, single-request no-retry and unknown usage semantics.
+- Prefer DSH-native skill discovery/loading and adapt installed Skills Manager, dsh-ops, sandboxed PowerShell and in-process Agent Teams with task-owned state and actual registration/use evidence. Bind native SDK peers to the locked runtime graph.
+- Prefer native repeated context compaction and meter auxiliary calls. Support durable checkpoint chains without a fixed stage/attempt ceiling; preserve cancellation, no-progress and failure boundaries.
+- Offline SDK fixtures cover repeated compaction, native tools/child execution and shared limits. No paid model test; candidate only, not a public marketplace release.
 
 ## 1.3.1 — 2026-10-19
 

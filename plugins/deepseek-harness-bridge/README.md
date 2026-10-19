@@ -1,4 +1,8 @@
-# DeepSeek Harness Bridge 1.4.0
+# DeepSeek Harness Bridge 2.1.0
+
+2.0.2 完善通用审核委派中的规则来源、前置条件依据、通用规则与数值实例区分，以及父级逐条验收；包含 2.0.1 的 native 文件边界修复。离线合成案例不证明真实模型质量提高。见[委派模板与验收规则](docs/delegation-quality.md)。
+
+2.0.1 发布已通过独立离线复核的 native 文件边界修复：文件读写使用任务工作区保护，只读不注册 ops_replace。保留 2.0.0 的原生技能、未指定资源额度和持续进度；native 文件能力统一采用 bridge 工作区保护。明确预算、单请求禁止重试、旧任务兼容和独立内容验收边界继续保留。
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -7,11 +11,13 @@ flowchart LR
   C[Codex 主智能体] <-->|MCP stdio| B[本地桥接器]
   B <-->|官方 Harness SDK / JSON-RPC| W[独立 Harness 工作者]
   W <-->|官方 DeepSeek API| F[DeepSeek Flash]
-  W --> T[有界文件工具]
+  W --> T[原生技能、文件、沙箱 Shell、Agent Teams]
   B --> S[任务状态与结果]
 ```
 
 这里的“调用 Harness”是通过官方 SDK 启动其独立运行时。插件不控制桌面窗口，不接管已有桌面会话，也不读取桌面保存的登录凭据。需要为 MCP 进程单独配置 API Key。桌面应用无需保持打开。
+
+已披露的非阻断后续项：同名损坏备份可能被复用（OBS-1）；Agent Teams 状态目录位于任务工作区内、尚未受文件名称策略保护（OBS-2）。具体影响、证据边界和加固验收条件见[能力说明](docs/capabilities.md#非阻断观察与后续加固)。真实模型工具循环、Shell/Teams 行为和性能不在此次离线验收范围。
 
 ## 安装与配置
 
@@ -56,6 +62,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 | MCP 工具 | 作用 |
 | --- | --- |
+| `dsh_prepare_workspace` | 零模型调用创建一个新的独立目录，由 Bridge 工作者账户持有；拒绝接管现有目录或改写其 ACL。Windows 原生 Shell 任务先准备工作区。 |
 | `dsh_submit` | 提交新任务，立即返回 taskId；同 requestId 和同输入不会重复启动。 |
 | `dsh_status` | 查询某次执行状态、终止原因和清理结果。 |
 | `dsh_list` | 按最近一次执行的开始时间列出最多 50 项任务，便于恢复 taskId。 |
@@ -98,7 +105,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 ### 在总预算内自动分阶段推进
 
-新任务默认使用 `executionMode: budgeted`，必须提供 `budget` 的四项预授权总额度。遗漏时返回 `BUDGET_REQUIRED`，不启动工作者。上例的总额度覆盖整个逻辑任务：最多 32 次模型请求、65,536 输出 token、64 次工具调用和 20 分钟。这些只是参数示例，不会自动执行；必须根据已有授权填写，不能把示例当成授权。只有一次自包含文本推理才使用显式 `single-request`：inference-only、read-only、零工具且不能续接。
+新任务未提供 budget 时默认 `executionMode: automatic`。省略 maxTokens、maxModelRequests、maxToolCalls、maxRequestBytes、timeoutMs 时保持未指定，不再自动填入有限额度；null 同义。提供 budget 自动选择 budgeted，其中只约束明确给出的总额度。上例只是有限预算示例，不能当成授权。`single-request` 始终固定一次 inference-only、read-only、零工具，禁止恢复和续接。
 
 ```json
 {
@@ -117,11 +124,11 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。新 budgeted 任务在工作和检查点仍能容纳时，另行软预留一次请求和最多 2048 输出 token；最后普通阶段可释放软预留，硬总额始终不变。确认的 `max-tokens` 和显式检查发现的最终 JSON 格式失败，共享整个任务最多一次 `off`、零工具恢复。先保存原始失败到 `partial-N.json`，确认清理和记账后，从同一总预算重新生成；不拼接残缺文本或重复文件操作。单请求、语义错误、传输/清理/记账/持久化失败不触发此恢复。小预算、耗尽时间和再次失败仍可能无法交付。详见[预算可靠性契约](docs/budget-reliability.md)与[严格交付恢复契约](docs/output-recovery.md)。
 
-插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 的目录将别名标为 DeepSeek-V4.1-Flash；实际服务版本以提供方为准。工作类型 `mechanical`（字面提取/格式转换）默认 off/4096，`standard`（一般维护）默认 low/8192，`reasoning` 默认 high/16384；路径分类、例外优先级和测试预期使用 `verification`，默认 high/16384，必须提供 `reviewContract`。可显式指定 off/low/high/max，max 默认 32768；低档位和小额度覆盖会保留并给出相关提示，不扩大已授权预算。检查点和恢复请求使用 off。模型能力、200 tok/s 和整体加速效果需要真实测量，这些默认值不代表性能保证，也不修改宿主模型白名单。
+插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 将别名标为 DeepSeek-V4.1-Flash；实际服务版本以提供方为准。mechanical/drafting 默认 off，standard 默认 low，reasoning/verification 默认 high；verification 必须提供 reviewContract。推理档位不再暗中设置输出上限；显式档位和额度优先。检查点与交付恢复使用 off。原生压缩请求的 effort 未指定时如实记录 null。模型能力、200 tok/s 和加速效果仍须真实测量。
 
 ### 验证类委派与内容验收
 
-简短的已知事实文案可选择新增 `drafting`，默认 off/4096，避免无必要的推理开销；规则推理仍使用 verification。显式档位和上限优先，包括 low 在内的推理都可能耗尽输出而没有正文。单请求的此类风险会显示为提示，不会自动增加第二次调用。
+简短的已知事实文案可选择 `drafting`，默认 off 且不额外设置输出上限；规则推理仍使用 verification。显式档位和上限优先，包括 low 在内的推理都可能耗尽输出而没有正文。单请求的此类风险会显示为提示，不会自动增加第二次调用。
 
 所有 JSON-only 委派（包括 mechanical 字面提取）应显式设置 `outputFormat: "json-object"`。`reviewContract` 自动要求该格式。完成阶段的整个 summary 字符串只能包含目标 JSON 对象，不能添加说明或围栏；检查点 summary 可保存普通进度。`outputValidation` 独立返回 valid、invalid、not_requested 或 not_evaluated；只验证完整 JSON 及对象根类型，不自动提取子串、修改转义或证明字段值正确。失败恢复后的结果仍须通过同样检查；原始失败不会被覆盖。
 
@@ -135,19 +142,31 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 报告类任务可提供 `reportContract`，逐项标明 limit、observation 或 execution-status、原值、单位和来源；它默认 drafting/off 并要求返回 `{facts, prose}` JSON。不能与另一种输出形状的 reviewContract 同用。预算上限不代表实际耗时或 RSS，NOT_RUN 不代表已执行，给工作者的写作指令也不是实验事实。`reportValidation` 只检查事实表的覆盖、角色和字面值；`facts_preserved` 仍须逐句核验正文，`proseAcceptance` 与 `parentAcceptance` 保持 not_assessed。事实或语义错误不自动重试。示例与边界见[事实与用量契约](docs/evidence-usage.md)。
 
+公开 schema 按 kind 区分事实：`execution-status.value` 必须是含非空白字符的字符串；数字 `0` 不能充当执行状态。`limit` 和 `observation` 保留字符串、数字、布尔值或 null；插件不自动改 kind、转换值或修补来源。所有事实的 source 必须含非空白字符。reviewContract 的 ID 数组通过 `uniqueItems` 公布唯一性。reportContract 的 `facts[].id` 唯一性以及 JSON 序列化后最多 16384 UTF-8 字节，是 schema 描述中明示的额外契约检查；标准 JSON Schema 无法完整表达这两项检查。
+
+参数拒绝仍返回 `INVALID_ARGUMENT`，并在文本 JSON 和 `structuredContent` 中返回相同的 `error.validation`：`phase` 区分 `schema` 与额外 `contract` 检查，`issues` 包含字段路径数组、代码和固定安全提示。例如执行状态填入数字时，路径是 `["reportContract","facts",3,"value"]`、代码是 `invalid_type`、提示是 `Expected string.`。最多返回 16 项，超出时标记 `issuesTruncated`；不回显字段值、未知字段名、prompt、工作区路径或底层异常。无效报告/审查契约在取得任务状态锁、检查凭据或启动模型之前拒绝。通过这些参数检查仍不证明工作区、执行策略或内容语义可被接受。
+
 查看消费应调用 `dsh_usage`，并同时报告 `tokens.*.reported`、`missingCalls` 和 `unknownReceiptGroups`。新阶段分别持久化请求回执，失败和恢复也计入；汇总不会把最终 attempt 重复计作最后一个阶段。历史缺失阶段保持未知，`orchestrationCharged` 是保守预算扣账，不能充当实测用量。reasoning/cache 是 SDK 上报的组成项，不能再次加到 totalTokens。工具只覆盖本地保留记录，不查询账户账单或推断金额。
 
 `dsh_doctor.validation.modelCalls: 0` 仅指本次诊断没有模型调用。独立工作者的消费不会自动计入桌面对话账本或挂件；本版本提供桥接器侧汇总，不在未确认账户身份、缓存口径和去重方式时自动改写桌面 cost-meter 数据。
 
-默认 `files` profile 的 read-only 提供 `bridge_list`、`bridge_read`。workspace-write 增加 `bridge_write`，覆盖需提交刚读到的 sha256，并备份原内容；创建使用 `expectedSha256: "new"`。`inference-only` 不加载文件工具。默认不提供删除、创建目录、终端、联网工具、测试执行或子智能体；由主智能体完成这些操作。
+新任务默认 native profile：read-only 选择 skills/files，workspace-write 可选择 skills/files/shell/teams；nativePlugins 可明确选择子集。只读不会加载 Shell 或 Agent Teams。native 优先搜索 DSH 技能元数据，再按需加载正文；补充 Codex 来源前必须记录原生搜索与不适用理由。files profile 继续提供 bridge_list/read 和可选 bridge_write，inference-only 不加载工具。bridge_write 仍要求哈希检查并备份原内容。
 
-已有 dsh 插件可通过显式本机 capability profile 选择经过审查的 headless 模块和少量技能。按安装版本盘点、提交时固定配置摘要、每次启动验证文件哈希及实际工具集合。不会因桌面“已安装”就自动挂载整套插件。适配方式和第三方代码边界见 [能力选择](docs/capabilities.md)。
+Windows 原生 Shell 在模型启动前核对工作区所有者和 reparse 祖先。Codex 创建的目录可能属于其沙箱账户，而不是 Bridge 账户；此时用 `dsh_prepare_workspace` 创建新路径，不修改旧目录权限。技能查询的匹配数与来源目录总数分别报告；查询为零不证明技能库为空，可用 `query: "*"` 分页盘点。官方 preset 解析若来自锁定 Bridge SDK，会明确标记来源，不能称为桌面已加载。工具缺少 post-execute 回执时保留 `unobserved`，不补算成功。
 
-文件工具限制为单目录最多扫描 1000 个条目、单个 UTF-8 文件/写入最多 256 KiB，拒绝路径穿越、符号链接、junction、硬链接文件和常见配置/凭据目录。过滤路径不是任意秘密内容识别器；任务工作区只应包含允许发送给 DeepSeek 的资料。该边界由工具代码实施，不是操作系统沙箱，也不能抵御其他本地进程恶意并发替换路径。写任务使用独立副本或 worktree，避免两个工作者同时写同一文件。
+native 适配本机 Skills Manager 的 headless provider、dsh-ops 的 Shell runtime 选择、官方 PowerShell 沙箱及 Agent Teams in-process provider。入口固定哈希，原生包的 @deepseek-ai 依赖绑定到 Bridge 锁定的 SDK，避免另一缓存版本破坏成员角色协议。团队状态位于任务专属目录，不复用桌面对话。结果分别保存实际注册工具、调用计数、工具结果状态和技能加载依据；returned 与 loaded 均不代表语义验收通过。其他插件仍需显式适配；见[能力选择](docs/capabilities.md)。
+
+native 的 `files` 选择在两种访问模式中都使用 `bridge_list/read`，相对路径基准始终为任务工作区，不取 SDK 的 worker home。绝对路径、父路径、symlink/junction、硬链接文件和已知 protected name 按现有 bridge 文件规则拒绝。原始 dsh-ops inspect/glob/grep/replace 组件不再挂载，显式 `nativePlugins: ["files"]` 也不会重新打开它。
+
+workspace-write 另提供 bridge 维护的 `ops_replace`：仅对一个既有 UTF-8 普通文件进行全部匹配的字面替换，须传入 `bridge_read` 的整文件 `expectedSha256`，并复用 CAS 和原文备份。文件沿用 256 KiB 边界；操作读取完整文件，不能只改第一页。它不支持 regex、glob、目录递归或 dryRun，也不允许写工作区外的临时目录；并非第三方同名工具的完整兼容实现。read-only 不注册此工具。技能来源和显式 Shell/Team 能力有各自的访问契约；文件保护不是任意代码的 OS 沙箱，也不扫描普通文件正文中的秘密。
+
+内建 bridge_* 文件工具限制为单目录最多扫描 1000 个条目、单个 UTF-8 文件/写入最多 256 KiB，拒绝路径穿越、符号链接、junction、硬链接文件和常见配置/凭据目录。过滤路径不是任意秘密内容识别器；任务工作区只应包含允许发送给 DeepSeek 的资料。该边界由工具代码实施，不是操作系统沙箱，也不能抵御其他本地进程恶意并发替换路径。写任务使用独立副本或 worktree，避免两个工作者同时写同一文件。
 
 读取按最多 16384 个 UTF-16 字符分页，`sha256` 覆盖完整文件，`nextOffset` 指示下一页；任务累计历史仍受请求字节预算约束。写入先完成同目录临时文件，再原子发布；同一工作区的桥接写入方共享 `.dsh-bridge-write.lock`。锁不会自动抢占，异常退出后须核实现场再处理。该锁不约束外部编辑器或第三方工具，哈希检查与发布也不是针对所有进程的通用 CAS；文件归属和独立副本仍必需。
 
-默认阶段时限 5 分钟（1 秒至 30 分钟）；maxToolCalls 默认 32，inference-only 默认 0；maxTokens 范围 256–32768；maxModelRequests 默认 6（编排阶段 2–128），单请求模式固定为 1；maxRequestBytes 默认 262144（1024–1048576）。请求在 adapter 前受次数、路由、字节数和输出配置约束，初始化禁止消费。标题请求、自动压缩和供应商通用失败重试关闭。每项任务最多 16 次父级 attempt，新多阶段任务始终使用同一总预算；旧记录保留原规则用于兼容。状态最多 1000 项任务；prompt 最多 64 KiB，结果最多 1 MiB，单页最多 32000 个 UTF-16 code units；取消后的清理可能多用数秒。
+原生 automatic 会话优先使用官方上下文压缩，辅助请求和团队成员共享请求计数。SDK 本身仍填入单次 256000 输出 token、1000000 上下文和压缩 65536 token 默认值，这些不是已验证的服务端硬上限。需要持久阶段链时选择 budgeted；预算可省略或为 {}，无固定阶段总数和新任务 attempt 总数。每个阶段先保存进度、确认清理再开始下一阶段；重复进度、取消、明确额度耗尽或无法安全记账仍停止。逻辑扩展不等于无限物理内存，也不保证完成。
+
+明确额度仍在 adapter 前执行，旧任务保留旧额度，单请求仍严格禁止辅助请求和重试。无凭据初始化不消费，标题及通用失败重试保持关闭。SDK 初始化 30 秒、清理 1/3/2 秒；状态最多 1000 项任务，prompt 64 KiB、阶段 JSON 32 KiB、结果 1 MiB、结果分页 32000 字符仍是实现边界。原生 Team 默认 8 成员/8 活跃子智能体/深度 1，Shell 和文件工具仍有原生分页、等待或超时设置；详见能力回执和预算契约。
 
 只有当前 prompt 回执、`session/wait`、`turn/end: completed`、非空结果和确认的进程退出都成立时才报告 completed；编排还验证阶段 JSON。parentAcceptance 由主智能体判断。`output.kind` 区分完整正文、部分正文、仅推理、空输出；`output.modelTruncated` 表示供应商截断，`outputTruncated` 仅表示存储裁剪。`resultAvailable`、`nextOffset: null` 都不能证明完成。若截断恢复成功，仍保留原失败证据和恢复回执；其他错误如实报告。取消不回滚已写文件。
 

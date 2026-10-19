@@ -1,18 +1,15 @@
 import { z } from 'zod';
-import { requireValue } from './errors.js';
+import { BridgeError } from './errors.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
-const uniqueIds = max => z.array(id).min(1).max(max).refine(values => new Set(values).size === values.length);
-const basis = z.string().min(1).max(2048).refine(value => !!value.trim());
+const uniqueIds = max => z.array(id).min(1).max(max).refine(values => new Set(values).size === values.length).meta({ uniqueItems: true });
+const basis = z.string().min(1).max(2048).regex(/\S/);
 
 // These are parent-declared expectations, not built-in lifecycle or authorization rules.
 export const lifecycleContractSchema = z.object({
   statuses: uniqueIds(16),
   cases: z.array(z.object({ id, allowedStatuses: uniqueIds(16), slotReusable: z.boolean(), basis }).strict()).min(1).max(64),
-}).strict()
-  .refine(value => new Set(value.cases.map(entry => entry.id)).size === value.cases.length)
-  .refine(value => value.cases.every(entry => entry.allowedStatuses.every(status => value.statuses.includes(status))))
-  .refine(value => Buffer.byteLength(JSON.stringify(value)) <= 16384);
+}).strict().describe('Parent-declared lifecycle outcomes. Additional admission checks require unique cases[].id values, allowedStatuses membership in statuses, and at most 16384 UTF-8 bytes in normalized JSON.');
 
 const outputSchema = z.object({
   rows: z.array(z.object({ id, status: id, slot_reusable: z.boolean() }).strict()).max(128),
@@ -23,7 +20,21 @@ const outputSchema = z.object({
 export function normalizeLifecycleContract(value) {
   if (value === undefined) return null;
   const parsed = lifecycleContractSchema.safeParse(value);
-  requireValue(parsed.success, 'INVALID_ARGUMENT', 'lifecycleContract requires 1–16 unique statuses and 1–64 unique cases with nonempty allowedStatuses from that vocabulary, explicit slotReusable and basis; at most 16 KiB. Resolve undefined branches explicitly before delegating.');
+  const issues = parsed.success ? [] : parsed.error.issues.map(issue => ({ path: ['lifecycleContract', ...issue.path], code: issue.code }));
+  if (parsed.success) {
+    const seen = new Set();
+    for (const [index, entry] of parsed.data.cases.entries()) {
+      if (seen.has(entry.id)) issues.push({ path: ['lifecycleContract', 'cases', index, 'id'], code: 'duplicate_case_id' });
+      seen.add(entry.id);
+      for (const [statusIndex, status] of entry.allowedStatuses.entries()) {
+        if (!parsed.data.statuses.includes(status)) issues.push({ path: ['lifecycleContract', 'cases', index, 'allowedStatuses', statusIndex], code: 'status_not_declared' });
+      }
+    }
+    if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 16384) {
+      issues.push({ path: ['lifecycleContract'], code: 'lifecycle_utf8_size_limit' });
+    }
+  }
+  if (issues.length) throw new BridgeError('INVALID_ARGUMENT', 'lifecycleContract requires 1–16 unique statuses and 1–64 unique cases with nonempty allowedStatuses from that vocabulary, explicit slotReusable and basis; at most 16 KiB. Resolve undefined branches explicitly before delegating.', { validation: { phase: 'contract', issues } });
   return parsed.data;
 }
 

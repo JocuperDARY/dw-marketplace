@@ -49,15 +49,15 @@ test('authorized task saves a checkpoint before autonomously allocating its next
 
 test('exhausted total pauses with durable progress and continuation cannot replenish it', async t => {
   let launches = 0;
-  const f = await fixture(t, async ({ task }) => { launches++; return reply(task, 'checkpoint', 'saved partial', 'more', null); });
+  const f = await fixture(t, async ({ task }) => { launches++; return reply(task, 'checkpoint', `saved partial ${launches}`, 'more', null); });
   const first = await f.manager.submit({ ...f.input, budget: { ...authorization, totalModelRequests: 2, totalOutputTokens: 512 } });
   const done = await f.manager.wait({ taskId: first.taskId });
   assert.equal(done.status, 'paused');
-  assert.equal(done.orchestration.charged.outputTokens, 256);
+  assert.equal(done.orchestration.charged.outputTokens, 512);
   assert.equal(done.pauseReason, 'TOTAL_BUDGET_EXHAUSTED');
   assert.match((await f.manager.result({ taskId: first.taskId })).text, /saved partial/);
   await assert.rejects(f.manager.continue({ taskId: first.taskId, requestId: 'no-refill', prompt: 'continue' }), { code: 'TOTAL_BUDGET_EXHAUSTED' });
-  assert.equal(launches, 1);
+  assert.equal(launches, 2);
 });
 
 test('malformed checkpoint, cleanup failure and repeated progress never loop automatically', async t => {
@@ -166,7 +166,7 @@ test('invalid usage receipts keep the full reservation and never auto-retry', as
 test('invalid total authorization is rejected without launching a worker', async t => {
   let launches = 0;
   const f = await fixture(t, async () => { launches++; });
-  for (const overrides of [{ budget: {} }, { budget: { ...authorization, totalModelRequests: 1 } }, { budget: { ...authorization, totalOutputTokens: 511 } }, { budget: { ...authorization, extra: true } }, { maxModelRequests: 1 }]) {
+  for (const overrides of [{ budget: [] }, { budget: { totalModelRequests: 0 } }, { budget: { totalOutputTokens: -1 } }, { budget: { ...authorization, extra: true } }, { maxModelRequests: 0 }]) {
     await assert.rejects(f.manager.submit({ ...f.input, ...overrides }), { code: 'INVALID_ARGUMENT' });
   }
   assert.equal(launches, 0);

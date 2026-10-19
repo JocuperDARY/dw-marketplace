@@ -82,6 +82,36 @@ test('a submitted task finishes with durable status and retrievable output', asy
 
 const completed = async () => ({ terminal: 'completed', text: 'result', cleanup: 'confirmed' });
 
+test('report request replay accepts the pre-discriminated-schema durable fingerprint', async t => {
+  // Baseline field insertion order is part of the persisted JSON fingerprint.
+  const reportContract = { facts: [
+    { id: 'limit', kind: 'limit', value: 0, unit: 'calls', source: 'plan' },
+    { id: 'observed', kind: 'observation', value: false, unit: '', source: 'record' },
+    { id: 'state', kind: 'execution-status', value: 'NOT_RUN', unit: '', source: 'status' },
+  ] };
+  const { manager, workspace, root } = await fixture(t, completed);
+  const input = { requestId: 'prior-report', executionMode: 'single-request', prompt: 'Report.', workspace, reportContract };
+  const task = await manager.submit(input);
+  await manager.wait({ taskId: task.taskId });
+  await manager.close();
+  const path = join(root, 'state', 'tasks', task.taskId, 'task.json');
+  const record = JSON.parse(await readFile(path, 'utf8'));
+  record.reportContract = reportContract;
+  record.attempts[0].fingerprint = createHash('sha256').update(JSON.stringify({
+    prompt: input.prompt, workspace: record.workspace, access: 'read-only', effort: 'off', timeoutMs: null,
+    maxTokens: null, maxToolCalls: 0, maxModelRequests: 1, maxRequestBytes: null,
+    capabilityProfile: 'inference-only', capabilityDigest: 'offline', executionMode: 'single-request', workload: 'drafting', reportContract,
+  })).digest('hex');
+  await writeFile(path, JSON.stringify(record));
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: () => assert.fail('Replay must not launch'),
+    resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
+  t.after(() => next.close());
+  const replay = await next.submit(input);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.taskId, task.taskId);
+  await next.close();
+});
+
 test('report contract persists through replay and rejects changed roles without retrying', async t => {
   const reportContract = { facts: [{ id: 'seconds', kind: 'limit', value: 180, unit: 's', source: 'plan.json:limits.seconds' }] };
   let launches = 0;
@@ -311,7 +341,7 @@ test('state/workspace overlap and input limits reject before launching', async t
   let launches = 0;
   const { manager, workspace, root } = await fixture(t, async () => { launches++; return completed(); });
   const input = { executionMode: 'single-request', requestId: 'invalid', prompt: 'Task', workspace };
-  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 32769 }, { maxToolCalls: -1 }, { maxModelRequests: 0 }, { maxRequestBytes: 1023 }, { effort: 'invalid' }, { timeoutMs: 1 }]) {
+  for (const overrides of [{ workspace: root }, { workspace: join(root, 'state') }, { prompt: '' }, { maxTokens: 0 }, { maxToolCalls: -1 }, { maxModelRequests: 0 }, { maxRequestBytes: 0 }, { effort: 'invalid' }, { timeoutMs: -1 }]) {
     await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, ...overrides }), { code: 'INVALID_ARGUMENT' });
   }
   assert.equal(launches, 0);

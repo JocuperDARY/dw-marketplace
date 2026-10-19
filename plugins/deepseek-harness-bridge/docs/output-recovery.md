@@ -1,4 +1,7 @@
-# Strict output and bounded recovery — 1.2.0
+# Strict output and bounded recovery
+
+Current resource semantics are defined in [budget reliability](budget-reliability.md):
+new omitted limits stay unspecified; original failed artifacts and saved budgets stay unchanged.
 
 Two separate failures motivated this change: a low-effort short draft exhausted
 its reasoning-inclusive output allowance without visible text; a completed
@@ -9,15 +12,17 @@ from the failure cases. No path normalization or unescaping repair is added.
 
 ## Choose work, format and authorization separately
 
-- `drafting` starts at off/4096 for short prose from supplied facts. It is not a
+- `drafting` starts at off without inventing an output cap for prose from supplied facts. It is not a
   shortcut for rule reasoning, research or ambiguous synthesis. Literal extraction
   stays mechanical/off; ordinary work stays standard/low; rule verification stays
   verification/high with reviewContract. Explicit effort and caps remain binding.
 - Even low effort can spend the whole output allowance on reasoning. A
   single-request reasoning task receives a warning, never an automatic effort
   change, larger allowance, second request or continuation.
-- A budgeted task needs four preauthorized totals. Use it when recovery is allowed
-  and useful; this does not authorize replaying a historical failed single request.
+- Budgeted mode preserves any explicit totals and leaves omitted totals unspecified.
+  Use it when durable stage continuation is useful; this does not authorize replaying
+  a historical failed single request. Automatic native context compaction is a
+  separate mechanism, and is disabled in single-request and staged execution.
 - For any JSON-only deliverable set `outputFormat: "json-object"`, including
   mechanical extraction. A reviewContract implies this format and cannot combine
   with explicit text. Ordinary tasks default to text; no keyword classifier infers

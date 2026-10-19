@@ -67,10 +67,36 @@ test('lifecycle contract and mismatch survive reopen and affect idempotent reque
   assert.equal(result.lifecycleValidation.status, 'mismatch');
   assert.equal(result.text, source.text);
   assert.equal((await reopened.submit(f.input)).duplicate, true);
+  const reordered = { cases: lifecycleContract.cases.map(({ basis, slotReusable, allowedStatuses, id }) => ({ basis, slotReusable, allowedStatuses, id })), statuses: lifecycleContract.statuses };
+  assert.equal((await reopened.submit({ ...f.input, lifecycleContract: reordered })).duplicate, true);
   const changed = structuredClone(lifecycleContract);
   changed.cases[2].allowedStatuses = ['closed'];
   await assert.rejects(reopened.submit({ ...f.input, lifecycleContract: changed }), { code: 'REQUEST_CONFLICT' });
   assert.equal(calls, 1);
+});
+
+test('automatic lifecycle submission adds no omitted resource caps or capability restrictions', async t => {
+  let actual;
+  const f = await fixture(t, async ({ task }) => {
+    actual = task;
+    return { terminal: 'completed', cleanup: 'confirmed', text: source.text };
+  });
+  const { executionMode, effort, maxTokens, ...input } = f.input;
+  const submitted = await f.manager.submit(input);
+  const done = await f.manager.wait({ taskId: submitted.taskId });
+  assert.equal(done.status, 'completed');
+  assert.equal(done.lifecycleValidation.status, 'mismatch');
+  assert.equal(done.planning.executionMode, 'automatic');
+  assert.equal(done.planning.limitsPolicy, 'explicit-v2');
+  assert.equal(done.route.effort, 'high');
+  assert.equal(actual.capabilityProfile, 'native');
+  assert.equal(actual.maxTokens, null);
+  assert.equal(actual.maxToolCalls, null);
+  assert.equal(actual.maxModelRequests, null);
+  assert.equal(actual.maxRequestBytes, null);
+  assert.equal(actual.orchestration, undefined);
+  const saved = JSON.parse(await readFile(join(f.dataDir, 'tasks', submitted.taskId, 'task.json'), 'utf8'));
+  assert.equal(saved.attempts[0].timeoutMs, null);
 });
 
 test('invalid persisted lifecycle contract retains original record and ownership lock', async t => {

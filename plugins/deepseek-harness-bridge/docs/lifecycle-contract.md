@@ -19,7 +19,7 @@
 
 ## lifecycleContract
 
-该可选字段接受 1–16 个唯一 status 标签、1–64 个唯一 case，序列化后最多 16 KiB。所有 ID/标签为 1–64 个字母、数字、点、下划线或短横线，首字符须为字母或数字。
+该可选字段接受 1–16 个唯一 status 标签、1–64 个唯一 case，按 schema 字段顺序归一化后 JSON 序列化的 UTF-8 总字节数最多 16384（16 KiB），不是 JavaScript 字符数。所有 ID/标签为 1–64 个字母、数字、点、下划线或短横线，首字符须为字母或数字。
 
 ```json
 {
@@ -36,11 +36,12 @@
 ```
 
 - 每个 case 必须显式提供非空 allowedStatuses、布尔 slotReusable，以及非空 basis（最多 2048 字符），允许状态必须来自 statuses。
+- 公开 JSON Schema 用 uniqueItems 声明 statuses 和 allowedStatuses 的唯一性，用 \S 正则声明 basis 必须有非空白字符；不 trim 或改写 basis。跨字段 cases[].id 唯一性、allowedStatuses 属于 statuses 及归一化 UTF-8 总字节数由额外入场检查保证，不能仅依赖 JSON Schema。错误只返回有界安全字段路径，拒绝发生在 owner.lock、凭据和任务入场之前。
 - basis 由父级提供，用于说明事实、规则来源或新增 fallback；插件不解析自然语言规则，也不核验来源真实性。
 - 多个 allowedStatuses 表示父级明确允许的不确定分支；并不表示它们在业务意义上相同。
 - 插件不内置 closed、unknown 等标签的全局含义，也不把这里的虚构规则变为真实 DW 运行时政策。父级声明错了，字面一致性检查仍可能通过。
 - 自动采用 JSON-object 输出，省略 workload/effort 时使用现有 verification/high 默认值。显式 mechanical/off/low 及额度原样保留，并提示父级逐项核验；不会因内容失败自动升级推理或额度。
-- 输入契约与 prompt 同享既有请求字节、输出 token 和总预算限制；契约不会扩大权限、能力或预算。
+- 省略额度仍保持未指定；显式额度保留。输入契约与 prompt 同享用户指定的请求字节、输出 token 和总预算限制；契约不会扩大权限、能力或预算。
 
 ## 输出与结果字段
 

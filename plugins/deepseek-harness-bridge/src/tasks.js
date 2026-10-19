@@ -9,6 +9,7 @@ import { assessDelivery, assessOutput, deliveryPrompt, formatPrompt, normalizeOu
 import { assessReport, normalizeReportContract, reportPrompt } from './report.js';
 import { assessLifecycle, lifecyclePrompt, normalizeLifecycleContract } from './lifecycle.js';
 import { summarizeUsage } from './usage.js';
+import { optionalLimit, minimumLimit, deadlineAfter, deadlineTimer } from './limits.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -36,8 +37,8 @@ function requestId(value) {
 }
 
 function validateSavedAttempts(attempts) {
-  requireValue(Array.isArray(attempts) && attempts.length >= 1 && attempts.length <= 16,
-    'INVALID_STATE', 'Saved tasks must contain 1 to 16 attempts.');
+  requireValue(Array.isArray(attempts) && attempts.length >= 1,
+    'INVALID_STATE', 'Saved tasks must contain at least one attempt.');
   const requests = new Set();
   for (const [index, attempt] of attempts.entries()) {
     requireValue(attempt && typeof attempt === 'object' && !Array.isArray(attempt) &&
@@ -89,6 +90,9 @@ export class TaskManager {
         }
         requireValue(record && record.schemaVersion === 1 && record.taskId === entry.name, 'INVALID_STATE', 'The saved task record is invalid.');
         validateSavedAttempts(record.attempts);
+        requireValue(record.planning?.executionMode === 'single-request' ? record.attempts.length === 1
+          : record.planning?.limitsPolicy === 'explicit-v2' || record.attempts.length <= 16,
+        'INVALID_STATE', 'Saved attempts exceed the task creation contract.');
         validateSavedBudget(record);
         if (record.reviewContract) normalizeReviewContract(record.reviewContract);
         if (record.reportContract) normalizeReportContract(record.reportContract);
@@ -153,16 +157,17 @@ export class TaskManager {
       const access = input.access ?? 'read-only';
       const previous = this.requests.get(id);
       const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined && input.reportContract === undefined && input.lifecycleContract === undefined && input.outputFormat === undefined;
-      const planned = planExecution(input, { legacy: !!legacy });
+      const compatibilityV1 = !!previous && this.records.get(previous.taskId).planning?.limitsPolicy !== 'explicit-v2';
+      const planned = planExecution(input, { legacy: !!legacy, compatibilityV1 });
       const { effort, maxTokens, maxToolCalls, maxModelRequests, budget } = planned;
       requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
-      const timeoutMs = boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
-      const maxRequestBytes = boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes');
-      const profile = await this.resolveCapabilities(planned.capabilityProfile);
+      const timeoutMs = compatibilityV1 ? boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs') : optionalLimit(input.timeoutMs, 'timeoutMs');
+      const maxRequestBytes = compatibilityV1 ? boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes') : optionalLimit(input.maxRequestBytes, 'maxRequestBytes');
+      const profile = await this.resolveCapabilities(planned.capabilityProfile, undefined, { workspace, requestedWorkspace: input.workspace, access, nativePlugins: input.nativePlugins });
       requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
-      const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings };
+      const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings, limitsPolicy: 'explicit-v2' };
       const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(planned.reportContract ? { reportContract: planned.reportContract } : {}), ...(planned.lifecycleContract ? { lifecycleContract: planned.lifecycleContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
@@ -173,11 +178,12 @@ export class TaskManager {
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), planning, attempts: [] };
+      if (input.nativePlugins !== undefined) record.nativePlugins = input.nativePlugins;
       if (planned.reviewContract) record.reviewContract = planned.reviewContract;
       if (planned.reportContract) record.reportContract = planned.reportContract;
       if (planned.lifecycleContract) record.lifecycleContract = planned.lifecycleContract;
       if (input.outputFormat !== undefined) record.outputFormat = planned.outputFormat;
-      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [], recoveryPolicy: 'bounded-v1' };
+      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: deadlineAfter(budget.totalDurationMs, Date.parse(record.createdAt)), stages: [], recoveryPolicy: 'bounded-v1' };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
       try { return await this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false }); }
       catch (error) {
@@ -193,13 +199,20 @@ export class TaskManager {
       const record = this.record(input.taskId);
       const prompt = inputPrompt(input.prompt);
       const id = requestId(input.requestId);
-      const timeoutMs = boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
+      const previous = this.requests.get(id);
+      // Replay uses the authorization that existed before that attempt, not a
+      // later continuation's narrower timeout. Its fingerprint stays stable.
+      const predecessor = previous?.taskId === record.taskId && previous.attempt > 1
+        ? record.attempts[previous.attempt - 2] : record.attempts.at(-1);
+      const timeoutMs = record.planning?.limitsPolicy === 'explicit-v2'
+        ? minimumLimit(predecessor.timeoutMs, optionalLimit(input.timeoutMs, 'timeoutMs'))
+        : boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs');
       const fingerprint = hash({ taskId: record.taskId, prompt, timeoutMs });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
       requireValue(record.planning?.executionMode !== 'single-request', 'NOT_RESUMABLE', 'A single-request authorization is spent; continuing requires a new explicitly authorized task.');
-      requireValue(record.attempts.length < 16, 'ATTEMPT_LIMIT', 'A task supports at most 16 attempts.');
+      if (record.planning?.limitsPolicy !== 'explicit-v2') requireValue(record.attempts.length < 16, 'ATTEMPT_LIMIT', 'This legacy task was created with a 16-attempt limit.');
       requireValue(record.attempts.at(-1).status === 'completed' || (record.orchestration && record.attempts.at(-1).status === 'paused'), 'NOT_RESUMABLE', 'Only a completed or safely paused orchestrated task can continue; failed execution needs explicit recovery.');
       if (record.orchestration) allocateStage(record, timeoutMs);
       requireValue(await this.workspace(record.workspace) === record.workspace, 'WORKSPACE_CHANGED', 'The task workspace identity changed.');
@@ -225,7 +238,8 @@ export class TaskManager {
   }
 
   async execute(record, attempt, prompt, resume, active) {
-    const timer = setTimeout(() => { active.reason ??= 'timed_out'; active.controller.abort(); }, record.orchestration ? Math.max(1, record.orchestration.deadlineAt - Date.now()) : attempt.timeoutMs);
+    const duration = record.orchestration ? record.orchestration.deadlineAt == null ? null : Math.max(1, record.orchestration.deadlineAt - Date.now()) : attempt.timeoutMs;
+    const cancelTimer = deadlineTimer(() => { active.reason ??= 'timed_out'; active.controller.abort(); }, duration);
     const finished = clone(attempt);
     try {
       let output;
@@ -252,11 +266,12 @@ export class TaskManager {
         if (record.orchestration) throw error;
         output = { terminal: 'error', text: '', cleanup: 'unverified', error: { code: 'RUNNER_FAILED', message: 'Worker execution failed without a confirmed cleanup receipt.' } };
       }
-      clearTimeout(timer);
+      cancelTimer();
       finished.cleanup = output.cleanup === 'confirmed' ? 'confirmed' : 'unverified';
       finished.terminal = output.terminal ?? 'unknown';
       finished.toolCalls = output.toolCalls ?? null;
       finished.budget = output.budget ?? null;
+      if (output.capabilities) finished.capabilities = output.capabilities;
       finished.error = output.error ?? null;
       finished.output = output.output ?? { kind: output.text?.trim() ? (output.terminal === 'completed' ? 'complete_text' : 'partial_text') : 'empty', modelTruncated: output.terminal === 'max-tokens', reasoningObserved: false };
       if (output.recovery) finished.recovery = output.recovery;
@@ -285,7 +300,7 @@ export class TaskManager {
       attempt.status = 'state_write_failed';
       attempt.error = { code: 'STATE_WRITE_FAILED', message: 'The result could not be saved. Ownership is retained for reconciliation.' };
     } finally {
-      clearTimeout(timer);
+      cancelTimer();
       if (this.active === active) this.active = null;
     }
     return this.summary(record, attempt);
@@ -301,8 +316,9 @@ export class TaskManager {
     const { fingerprint, ...publicAttempt } = attempt;
     return clone({ taskId: record.taskId, sessionId: record.sessionId, route: record.route, workspace: record.workspace,
       access: record.access, maxTokensPerRequest: record.maxTokens, maxToolCalls: record.maxToolCalls,
-      maxModelRequests: record.maxModelRequests ?? 16, maxRequestBytes: record.maxRequestBytes ?? 262144,
+      maxModelRequests: Object.hasOwn(record, 'maxModelRequests') ? record.maxModelRequests : 16, maxRequestBytes: Object.hasOwn(record, 'maxRequestBytes') ? record.maxRequestBytes : 262144,
       capabilityProfile: record.capabilityProfile || 'files', capabilityDigest: record.capabilityDigest ?? null,
+      ...(record.nativePlugins ? { nativePlugins: record.nativePlugins } : {}),
       planning: record.planning ?? { executionMode: 'legacy' },
       ...(record.outputFormat !== undefined ? { outputFormat: record.outputFormat } : {}),
       ...(record.reviewContract ? { reviewContract: record.reviewContract } : {}),
