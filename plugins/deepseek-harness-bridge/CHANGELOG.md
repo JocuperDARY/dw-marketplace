@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-10-19
+
+- Prefer independently reviewable work packages and account for handoff/review cost without minimum-spend rules or expanded authorization.
+- Add typed reportContract facts, strict literal role/value/unit/source coverage checks, and separate unassessed prose acceptance. Limits never imply measurements; writing instructions are not experiment facts. No semantic retry.
+- Add read-only dsh_usage across all retained tasks or one task. Persist each stage receipt, avoid double counting attempt tails, and preserve legacy gaps/unfinished usage separately from conservative budget charges.
+- Keep fixed caps, single-request no-retry, legacy fingerprints, source evidence and desktop conversation isolation. Doctor's zero calls describe diagnostics only; no automatic desktop accounting export or currency estimate.
+- Validate with offline unit, persistence, MCP, network-blocked SDK and package tests. No paid inference or real-model quality claim.
+
 ## 1.2.0 — 2026-10-19
 
 - Add drafting/off for bounded prose from supplied facts; preserve explicit effort/caps and warn that single-request reasoning, including low, may exhaust output without a visible answer.

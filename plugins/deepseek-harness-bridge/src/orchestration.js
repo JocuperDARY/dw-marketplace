@@ -113,7 +113,7 @@ export async function runOrchestrated({ record, attempt, prompt, signal, home, r
   let failedOutput;
   let recoveryPath;
   let recoveredCheckpoint;
-  const outputFormat = normalizeOutputFormat(record.outputFormat, record.reviewContract);
+  const outputFormat = normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract);
   const recoveryResult = (output, status) => ({ ...output, recovery: { status, reason: recovering, partialPath: recoveryPath } });
   const retainFailure = async (stage, output, reason) => {
     const partial = { stage: stage.number, terminal: output.terminal, reason, text: output.text ?? '', output: output.output ?? { modelTruncated: output.terminal === 'max-tokens' } };
@@ -156,6 +156,9 @@ export async function runOrchestrated({ record, attempt, prompt, signal, home, r
     catch { output = { terminal: 'error', cleanup: 'unverified', text: '', error: { code: 'RUNNER_FAILED', message: 'Stage failed without a cleanup receipt.' } }; }
     finally { clearTimeout(timer); }
     stage.finishedAt = new Date().toISOString();
+    // Attempt receipts only contain the last stage. Retain every stage's own
+    // usage, including failure/recovery, independently of conservative charges.
+    stage.budget = output.budget ?? null;
     stage.terminal = output.terminal;
     stage.status = 'failed';
     let accountingError;

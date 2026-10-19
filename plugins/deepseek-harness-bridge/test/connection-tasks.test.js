@@ -36,6 +36,8 @@ test('completed task releases ownership and another connection reads an idempote
   await assert.rejects(second.continue({ taskId: task.taskId, requestId: 'second', prompt: 'two' }), { code: 'NOT_RESUMABLE' });
   assert.equal((await first.result({ taskId: task.taskId, attempt: 1 })).text, 'one');
   assert.equal((await first.result({ taskId: task.taskId })).text, 'one');
+  assert.equal((await second.usage()).tasks, 1);
+  assert.equal((await second.usage({ taskId: task.taskId })).unknownReceiptGroups, 1);
   assert.equal(launches, 1);
   await assert.rejects(access(lock), { code: 'ENOENT' });
 });
@@ -60,6 +62,7 @@ test('persistent ownership is reported as an observation conflict and shutdown i
   const task = await first.submit({ executionMode: 'single-request', workspace, requestId: 'held', prompt: 'one' });
   const owner = await readFile(lock, 'utf8');
   await assert.rejects(second.status({ taskId: task.taskId }), error => error.code === 'STATE_LOCKED' && error.retryable === true && error.operation === 'observation');
+  await assert.rejects(second.usage(), error => error.code === 'STATE_LOCKED' && error.retryable === true && error.operation === 'observation');
   assert.equal(await readFile(lock, 'utf8'), owner);
   const pending = second.result({ taskId: task.taskId });
   await delay(10);

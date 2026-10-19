@@ -2,7 +2,7 @@ import { TaskManager } from './tasks.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BridgeError, requireValue } from './errors.js';
 
-const OBSERVATIONS = new Set(['status', 'list', 'wait', 'result']);
+const OBSERVATIONS = new Set(['status', 'list', 'wait', 'result', 'usage']);
 
 // Tool discovery must not take the exclusive task-store lock. Desktop hosts
 // may open a discovery connection and several conversation connections at once.
@@ -82,6 +82,7 @@ export class ConnectionTasks {
   continue(...args) { return this.use('continue', ...args); }
   status(...args) { return this.use('status', ...args); }
   list(...args) { return this.use('list', ...args); }
+  usage(...args) { return this.use('usage', ...args); }
   wait(...args) { return this.use('wait', ...args); }
   result(...args) { return this.use('result', ...args); }
   cancel(...args) { return this.use('cancel', ...args); }

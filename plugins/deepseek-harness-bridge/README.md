@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 1.2.0
+# DeepSeek Harness Bridge 1.3.0
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -59,6 +59,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 | `dsh_submit` | 提交新任务，立即返回 taskId；同 requestId 和同输入不会重复启动。 |
 | `dsh_status` | 查询某次执行状态、终止原因和清理结果。 |
 | `dsh_list` | 按最近一次执行的开始时间列出最多 50 项任务，便于恢复 taskId。 |
+| `dsh_usage` | 汇总当前状态目录全部保留任务或一个 taskId 的实际回报 token、缺失项和请求记录；与预算保留额分开。零模型调用。 |
 | `dsh_wait` | 等待最多 30 秒并返回简短状态。 |
 | `dsh_result` | 按页读取最终或失败结果；用 nextOffset 继续。 |
 | `dsh_continue` | 续接已完成任务；预算编排任务也可从安全暂停的检查点恢复，总预算不会重置。 |
@@ -92,6 +93,8 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 ```
 
 主智能体收到 taskId 后继续独立工作，随后等待和取回结果。插件不主动向 Codex 聊天发送消息，也不能唤醒已经结束的主回合。执行中不支持插入消息；成功结束或编排任务安全暂停后可以续接，急需改方向时取消并提交明确的新任务。
+
+优先委派可独立验收的完整工作包，例如一个归属明确的模块及测试草稿、多文件证据梳理、完整规则和测试矩阵。只重写两段话或复制少量字段可能不值得委派，但插件不会强制最低 token 消耗，也不会为了增加用量扩大任务。比较效率时计入准备上下文、验收、纠错和集成成本，详见[事实与用量契约](docs/evidence-usage.md)。
 
 ### 在总预算内自动分阶段推进
 
@@ -127,6 +130,12 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 `deliveryValidation` 检查 ID 覆盖、重复、字段和规则引用，不判断分类和算术是否正确。`structure_complete` 仍保持 `parentAcceptance: not_assessed`；父级必须独立核验路径边界、例外与分类是否混淆、阈值及必做算术，再决定能否作为测试预期。运行完成、格式、结构完整和内容验收分别记录，缺项和语义失败不会自动触发新的模型请求。not_requested 和零问题数不等于检查通过；对路径等字面值比较实际解码后的类型与字符，不依据多层转义显示判断错误。原始文本保留，不修补残缺 JSON 或覆盖历史失败。
 
 ## 工作区、预算和状态
+
+报告类任务可提供 `reportContract`，逐项标明 limit、observation 或 execution-status、原值、单位和来源；它默认 drafting/off 并要求返回 `{facts, prose}` JSON。不能与另一种输出形状的 reviewContract 同用。预算上限不代表实际耗时或 RSS，NOT_RUN 不代表已执行，给工作者的写作指令也不是实验事实。`reportValidation` 只检查事实表的覆盖、角色和字面值；`facts_preserved` 仍须逐句核验正文，`proseAcceptance` 与 `parentAcceptance` 保持 not_assessed。事实或语义错误不自动重试。示例与边界见[事实与用量契约](docs/evidence-usage.md)。
+
+查看消费应调用 `dsh_usage`，并同时报告 `tokens.*.reported`、`missingCalls` 和 `unknownReceiptGroups`。新阶段分别持久化请求回执，失败和恢复也计入；汇总不会把最终 attempt 重复计作最后一个阶段。历史缺失阶段保持未知，`orchestrationCharged` 是保守预算扣账，不能充当实测用量。reasoning/cache 是 SDK 上报的组成项，不能再次加到 totalTokens。工具只覆盖本地保留记录，不查询账户账单或推断金额。
+
+`dsh_doctor.validation.modelCalls: 0` 仅指本次诊断没有模型调用。独立工作者的消费不会自动计入桌面对话账本或挂件；本版本提供桥接器侧汇总，不在未确认账户身份、缓存口径和去重方式时自动改写桌面 cost-meter 数据。
 
 默认 `files` profile 的 read-only 提供 `bridge_list`、`bridge_read`。workspace-write 增加 `bridge_write`，覆盖需提交刚读到的 sha256，并备份原内容；创建使用 `expectedSha256: "new"`。`inference-only` 不加载文件工具。默认不提供删除、创建目录、终端、联网工具、测试执行或子智能体；由主智能体完成这些操作。
 
