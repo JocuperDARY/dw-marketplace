@@ -8,11 +8,13 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
-| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.0.2 | Codex MCP：原生 DSH 能力、未指定资源上限与持续进度 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.0.3 | Codex MCP：原生 DSH 能力、备份完整性与 Team 状态文件保护 |
+
+**deepseek-harness-bridge 2.0.3**：验证原内容备份后再发布替换；同名损坏、部分写入或链接备份明确失败并保留原目标及问题备份。内建文件工具在任意深度及大小写下隐藏并拒绝 `.agent-teams-bridge`，原生 Team 工具仍直接维护状态。这是文件工具策略，不约束显式选择的 Shell 或受信任自定义模块。详见[OBS-1 / OBS-2 加固](./plugins/deepseek-harness-bridge/docs/capabilities.md#obs-1--obs-2-后续加固)。
 
 **deepseek-harness-bridge 2.0.2**：补充通用委派模板、前置条件证据要求和逐条父级验收规则；离线反例覆盖格式通过但内容错误的回传，并显式核对终态与用量回执保存。集成 2.0.1 的 native 文件边界修复；不代表真实 Flash 质量已提高。
 
-**deepseek-harness-bridge 2.0.1**：native 文件读写统一使用 bridge 工作区保护；两种访问模式均不加载第三方任意路径读/glob/grep。可写模式的 `ops_replace` 改为带哈希检查和备份的单文件字面替换，只读不广告该工具。独立离线复核已通过，包含真实 native 启动与文件边界回归。OBS-1 备份碰撞和 OBS-2 Teams 状态位置作为已披露后续加固项保留，详见[能力说明](./plugins/deepseek-harness-bridge/docs/capabilities.md#非阻断观察与后续加固)。
+**deepseek-harness-bridge 2.0.1（历史）**：native 文件读写统一使用 bridge 工作区保护；两种访问模式均不加载第三方任意路径读/glob/grep。可写模式的 `ops_replace` 改为带哈希检查和备份的单文件字面替换，只读不广告该工具。独立离线复核已通过，包含真实 native 启动与文件边界回归。当时披露的 OBS-1 备份碰撞和 OBS-2 Teams 状态保护在 2.0.3 加固，详见[能力说明](./plugins/deepseek-harness-bridge/docs/capabilities.md#obs-1--obs-2-后续加固)。
 
 **deepseek-harness-bridge 2.0.0**：优先使用 DSH 原生技能和适配的文件、Shell、Agent Teams；新任务省略资源额度时保持未指定，明确上限与旧任务不变。原生会话压缩优先，检查点阶段可持续扩展；结果区分注册、调用和验收。包含公开 schema 与运行时一致性修复、安全字段错误及旧请求指纹兼容；离线验收不代表真实模型内容或浏览器验收通过。
 
