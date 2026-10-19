@@ -6,7 +6,7 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.5.2 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 1.3.0 | Codex MCP 插件：完整工作包委派、事实契约与跨阶段用量汇总 |
 
@@ -17,6 +17,8 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 **deepseek-harness-bridge 0.2.0（历史）**：引入可选总预算与检查点编排，续接与重启不重置预算。[原版设计](./plugins/deepseek-harness-bridge/docs/budget-orchestration.md)保留供兼容性参考；新任务使用上方 1.0.0 契约。
 
 **deepseek-harness-bridge 0.1.3**：修复多条 Codex MCP 连接争用任务状态锁导致的握手失败。工具发现不再占锁；任务完成并确认清理后释放所有权，后续连接可取回结果或续接原会话，异常清理仍保留锁。支持指定现有 Node、Windows DPAPI 凭据和有界 Flash 委派；详见[安装与使用](./plugins/deepseek-harness-bridge/README.md)。离线验证、实际 Codex 加载和付费 Flash 执行分别记录。
+
+**5.6.0 Windows 进程监管**：[安装与退出语义](./plugins/development-workflow/skills/dw-collaboration/references/process-supervisor.md)说明如何为 stdio MCP 或有界命令接入实际启动监管。专属 Job 在创建时绑定，连接关闭、父进程退出、命令结束和显式超时均触发有界清理；监管器崩溃时由内核回收后代。空闲时等待内核事件，不扫描或按名称结束系统进程。此入口需要显式接入服务器的 command/args，安装插件本身不会接管已有进程。
 
 **5.5.2 写作准确性完善**：[dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 补充符号与别名的取舍、明确且一致的命名、按阅读需要合并重复说明，以及与条件和证据强度一致的结论；适用于技术说明、推导解释、报告与交接，保留必要定义、限定条件和正式标识。
 
@@ -62,7 +64,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.5.2 版本
+3. 将插件更新到当前的 5.6.0 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -139,9 +141,9 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 
 `IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构和相关静态检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要对应功能的运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。
 
-`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付；包内没有通用 Windows/Linux 或 Claude/Codex/Grok 的生产平台 adapter。其测试使用 fake adapter 和隔离文件系统，不能作为真实进程管理的验收。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
+`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付；其完整协议仍没有通用 Windows/Linux 或 Claude/Codex/Grok 的生产平台 adapter。5.6.0 的 Windows stdio 监管器是单独的窄入口，具有真实隔离进程测试；它不提供完整 manager 的恢复、存储和队列适配。manager 的 fake adapter 测试与监管器的实际进程测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
 
-更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。原生 Linux、Grok Build、真实 Claude/Codex 和用户配置安装继续暂缓。
+更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。Windows 监管器的验收覆盖本地隔离 fixture；原生 Linux、Grok Build、真实 Claude/Codex 插件加载和用户配置切换另行验收。
 
 ## 许可
 
