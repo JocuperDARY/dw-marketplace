@@ -1,6 +1,6 @@
-# DeepSeek Harness Bridge 2.0.0-native.1
+# DeepSeek Harness Bridge 2.0.0
 
-本分支是待审查候选，尚未合并或发布到正式市场。
+2.0.0 支持原生 DSH 能力、未指定资源额度和持续进度，并修复公开 schema 与运行时校验的一致性。明确预算、单请求禁止重试、旧任务兼容和独立内容验收边界继续保留。
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 

@@ -1,6 +1,6 @@
-# Resource limits and persistent progress — 2.0.0-native.1
+# Resource limits and persistent progress — 2.0.0
 
-This candidate changes omitted-limit semantics for new tasks. Existing saved
+This release changes omitted-limit semantics for new tasks. Existing saved
 tasks retain their original limits, fingerprints and recovery policy. The
 [delivery contract](output-recovery.md) still separates format from acceptance.
 
@@ -133,7 +133,7 @@ cleanup retains ownership. No lock is automatically deleted or stolen.
   user-approved release step. Candidate installation is not a marketplace release.
 
 No paid test, dependency upgrade, desktop conversation reuse or change to the
-original workspace's 40 dirty entries is part of this candidate. Native tools,
+original workspace's 40 dirty entries is part of this release. Native tools,
 shell and in-process teams are selected under the declared access and capability
 contract. Offline success covers the fixtures; real-provider quality and latency
 remain untested here.

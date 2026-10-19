@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0 — 2026-10-20
+
+- Promote the independently verified 2.0.0-native.1 candidate from PR #23. Release promotion changes version metadata and documentation only; implementation and test behavior remain the verified ec15bd2 candidate.
+- DSH independently passed 188/188 offline tests, 3/3 package checks and interface/lock/fingerprint probes. Preserve omitted limits, native capabilities, safe field diagnostics and historical request replay.
+- No additional paid model test. Browser/approval integration, team reassignment and live Flash content quality remain outside the interface acceptance evidence.
+
 ## 2.0.0-native.1 — candidate, 2026-10-19
 
 - Interface follow-up, 2026-10-20: publish execution-status string/nonblank constraints and review ID uniqueness in JSON Schema. Disclose report ID uniqueness and serialized UTF-8 size as separate admission checks. Return bounded, safe field-level diagnostics in both MCP result channels, before task ownership for invalid report/review contracts. No coercion, lock takeover, retry or paid test.
