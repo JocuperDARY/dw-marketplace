@@ -6,10 +6,10 @@ import { allocateStage } from '../src/orchestration.js';
 const budget = { totalModelRequests: 6, totalOutputTokens: 24576, totalToolCalls: 4, totalDurationMs: 60000 };
 const reviewContract = { caseIds: ['C06'], ruleIds: ['SCRATCH', 'AUDIT'], checkIds: ['SUM'] };
 
-test('rule verification selects reasoning headroom and requires an explicit coverage contract', () => {
+test('rule verification selects reasoning without inventing output limits and requires coverage', () => {
   const plan = planExecution({ budget, workload: 'verification', reviewContract });
   assert.equal(plan.effort, 'high');
-  assert.equal(plan.maxTokens, 16384);
+  assert.equal(plan.maxTokens, null);
   assert.deepEqual(plan.reviewContract, reviewContract);
   assert.equal(planExecution({ budget, reviewContract }).workload, 'verification');
   assert.throws(() => planExecution({ budget, workload: 'verification' }), { code: 'REVIEW_CONTRACT_REQUIRED' });
@@ -27,9 +27,9 @@ test('verification warnings preserve authorized overrides rather than increasing
   assert.match(planExecution({ budget, reviewContract, workload: 'mechanical' }).warnings.join(' '), /mechanical/i);
 });
 
-test('new tasks require total authorization unless explicitly selecting one inference request', () => {
-  assert.throws(() => planExecution({}), { code: 'BUDGET_REQUIRED' });
-  assert.throws(() => planExecution({ maxModelRequests: 1 }), { code: 'BUDGET_REQUIRED' });
+test('omitted totals do not block assigned work; explicit one-request constraints remain', () => {
+  assert.equal(planExecution({}).executionMode, 'automatic');
+  assert.equal(planExecution({ maxModelRequests: 1 }).maxModelRequests, 1);
   const single = planExecution({ executionMode: 'single-request', workload: 'mechanical' });
   assert.equal(single.maxModelRequests, 1);
   assert.equal(single.maxToolCalls, 0);
@@ -40,11 +40,11 @@ test('new tasks require total authorization unless explicitly selecting one infe
   }
 });
 
-test('workload selects suitable effort and request headroom without overriding explicit caps', () => {
-  for (const [workload, effort, maxTokens] of [['mechanical', 'off', 4096], ['standard', 'low', 8192], ['reasoning', 'high', 16384]]) {
+test('workload selects suitable effort without supplying token caps', () => {
+  for (const [workload, effort] of [['mechanical', 'off'], ['standard', 'low'], ['reasoning', 'high']]) {
     const plan = planExecution({ workload, budget });
     assert.equal(plan.effort, effort);
-    assert.equal(plan.maxTokens, maxTokens);
+    assert.equal(plan.maxTokens, null);
     assert.deepEqual(plan.budget, budget);
   }
   const explicit = planExecution({ budget, effort: 'high', maxTokens: 2048 });

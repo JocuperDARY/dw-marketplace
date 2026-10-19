@@ -49,7 +49,7 @@ test('selected skill content is bounded and pinned; changed files require review
   const config = { inventoryHome: root, capabilityProfiles: [{ id: 'docs', access: 'read-only', skills: [{ path, sha256: sha256(content) }] }] };
   const profile = await resolveProfile('docs', config);
   assert.equal(profile.skills[0].text, content);
-  assert.equal((await capabilities(config)).capabilityProfiles.length, 3);
+  assert.equal((await capabilities(config)).capabilityProfiles.length, 4);
   await writeFile(path, 'changed');
   await assert.rejects(resolveProfile('docs', config), { code: 'CAPABILITY_CHANGED' });
   await assert.rejects(resolveProfile('unknown', config), { code: 'INVALID_PROFILE' });

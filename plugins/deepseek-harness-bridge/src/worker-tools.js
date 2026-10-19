@@ -14,8 +14,15 @@ export async function apply(ctx, config) {
   let publication = Promise.resolve();
   let publicationError;
   let calls = 0;
+  const usedTools = new Set();
+  const toolOutcomes = {};
+  let mismatch = null;
   const publish = () => {
-    const content = JSON.stringify({ nonce: config.nonce, tools: currentTools(), toolCalls: calls });
+    // The SDK can finish a preparation/dispatch failure without post-execute.
+    // Preserve the missing outcome instead of dropping the attempted call.
+    const outcomes = Object.fromEntries(Object.entries(toolOutcomes).map(([name, counts]) => [name,
+      { ...counts, unobserved: Math.max(0, counts.attempted - counts.returned - counts.error) }]));
+    const content = JSON.stringify({ nonce: config.nonce, tools: currentTools(), toolCalls: calls, usedTools: [...usedTools].sort(), toolOutcomes: outcomes, mismatch });
     publication = publication.then(async () => {
       await writeFile(`${config.receiptPath}.tmp`, content, { mode: 0o600 });
       await rename(`${config.receiptPath}.tmp`, config.receiptPath);
@@ -25,16 +32,31 @@ export async function apply(ctx, config) {
   ctx.on('tools/change', () => { void publish(); });
   ctx.on('llm/stream', async function* (_options, next) {
     await publication;
-    if (publicationError || JSON.stringify(currentTools()) !== expected) throw new Error('Bridge capabilities changed before model dispatch.');
+    if (publicationError || JSON.stringify(currentTools()) !== expected) {
+      mismatch = currentTools();
+      await publish();
+      throw new Error('Bridge capabilities changed before model dispatch.');
+    }
     yield* next();
   }, { prepend: true });
   ctx.on('tools/pre-execute', async (exec, next) => {
     if (!allowed.includes(exec.name)) return { kind: 'deny', reason: 'This tool is outside the bridge capability set.' };
-    if (calls >= config.maxToolCalls) return { kind: 'deny', reason: 'The bridge tool call budget is exhausted.' };
+    if (config.maxToolCalls != null && calls >= config.maxToolCalls) return { kind: 'deny', reason: 'The explicit bridge tool call budget is exhausted.' };
     calls++;
+    usedTools.add(exec.name);
+    (toolOutcomes[exec.name] ??= { attempted: 0, returned: 0, error: 0 }).attempted++;
     await publish();
     if (publicationError) return { kind: 'deny', reason: 'The bridge tool receipt could not be saved.' };
     return next();
+  }, { prepend: true });
+  ctx.on('tools/post-execute', async (exec, result, next) => {
+    const decision = await next();
+    const status = result.isError || decision.kind === 'block' ? 'error' : 'returned';
+    const counts = toolOutcomes[exec.name] ??= { attempted: 0, returned: 0, error: 0 };
+    counts[status]++;
+    await publish();
+    if (publicationError) throw new Error('The bridge tool outcome receipt could not be saved.');
+    return decision;
   }, { prepend: true });
   const path = { type: 'string', required: true, description: 'Relative workspace path; no parent traversal, links or known protected metadata/credential names. Ordinary file contents are not scanned for secrets.' };
   const register = (name, description, parameters, run) => ctx.tools.register(defineTool({

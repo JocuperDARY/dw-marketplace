@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { CHECKPOINT_PROMPT } from './orchestration.js';
+import { withinLimit, minimumLimit, remainingLimit } from './limits.js';
 
 /** Runs inside the worker, before the official adapter is allowed to open a stream. */
 export async function installBudget(ctx, config) {
@@ -27,19 +28,26 @@ export async function installBudget(ctx, config) {
   let checkpointPrepared = !!config.checkpoint?.forced;
   const checkpointTokens = config.checkpoint?.maxTokens ?? config.maxTokens;
   const snapshot = (toolCalls, includeDeadline = true) => {
-    const chargedOutput = receipt.calls.reduce((sum, call) => sum + (call.finished && Number.isSafeInteger(call.usage?.outputTokens) && call.usage.outputTokens >= 0 && call.usage.outputTokens <= call.reservedOutputTokens ? call.usage.outputTokens : call.reservedOutputTokens), 0);
-    const remainingOutput = (config.maxOutputTokens ?? Infinity) - chargedOutput;
-    return { remainingOutput, checkpoint: !!config.checkpoint && (receipt.modelRequests >= config.maxModelRequests - 1 || remainingOutput < checkpointTokens + 256 || (includeDeadline && Date.now() >= config.checkpoint.softDeadline) || (config.maxToolCalls > 0 && toolCalls >= config.maxToolCalls)) };
+    const chargedOutput = receipt.calls.reduce((sum, call) => {
+      const used = call.finished && Number.isSafeInteger(call.usage?.outputTokens) && call.usage.outputTokens >= 0 && withinLimit(call.usage.outputTokens, call.reservedOutputTokens) ? call.usage.outputTokens : call.reservedOutputTokens;
+      return sum == null || used == null ? null : sum + used;
+    }, 0);
+    const remainingOutput = remainingLimit(config.maxOutputTokens, chargedOutput);
+    return { remainingOutput, checkpoint: !!config.checkpoint && ((config.maxModelRequests != null && receipt.modelRequests >= config.maxModelRequests - 1)
+      || (remainingOutput != null && remainingOutput < (checkpointTokens ?? 0) + 256)
+      || (includeDeadline && config.checkpoint.softDeadline != null && Date.now() >= config.checkpoint.softDeadline)
+      || (config.maxToolCalls > 0 && toolCalls >= config.maxToolCalls)) };
   };
   // This SDK waterfall precedes request freezing and adapter preparation. Do not
   // mutate llm/stream options, or change the route after the adapter was selected.
   if (config.checkpoint) ctx.on('agent/request', async (_request, next) => {
     const proposal = await next();
     const { remainingOutput } = snapshot(await readToolCalls(), false);
+    const requestCap = minimumLimit(checkpointPrepared ? checkpointTokens : config.maxTokens,
+      remainingOutput == null ? null : Math.max(1, remainingOutput - (checkpointPrepared ? 0 : checkpointTokens ?? 0)));
     return { ...proposal, provider: 'deepseek-official', model: 'deepseek-flash',
       reasoningEffort: checkpointPrepared ? 'off' : config.effort,
-      maxTokens: Math.max(1, Math.min(checkpointPrepared ? checkpointTokens : config.maxTokens,
-        remainingOutput - (checkpointPrepared ? 0 : checkpointTokens))) };
+      maxTokens: requestCap == null ? undefined : Math.max(1, requestCap) };
   }, { prepend: true });
   if (config.checkpoint) ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
     const result = await next();
@@ -61,19 +69,23 @@ export async function installBudget(ctx, config) {
     // A soft deadline crossing after prompt assembly applies on the next
     // assembly boundary; it must not invalidate an already prepared request.
     const checkpoint = checkpointPrepared || resourceCheckpoint;
+    // The official compactor omits reasoningEffort. Accept that one native
+    // auxiliary route only when enabled; it still consumes the shared allowance.
+    const compaction = config.allowNativeCompaction === true && options.purpose === 'compaction' && !config.checkpoint;
     if (denial) { /* Initialization is never allowed to spend. */ }
-    else if (options.provider !== 'deepseek-official' || options.model !== 'deepseek-flash' || options.reasoningEffort !== (checkpoint ? 'off' : config.effort)) denial = 'ROUTE_DENIED';
-    else if (receipt.modelRequests >= config.maxModelRequests) denial = 'MODEL_REQUEST_LIMIT';
+    else if (options.provider !== 'deepseek-official' || options.model !== 'deepseek-flash' ||
+      (compaction ? options.reasoningEffort !== undefined && options.reasoningEffort !== config.effort : options.reasoningEffort !== (checkpoint ? 'off' : config.effort))) denial = 'ROUTE_DENIED';
+    else if (config.maxModelRequests != null && receipt.modelRequests >= config.maxModelRequests) denial = 'MODEL_REQUEST_LIMIT';
     else if (receipt.checkpointRequested) denial = 'CHECKPOINT_CLOSED';
-    else if (!Number.isInteger(options.maxTokens) || options.maxTokens < 1 || options.maxTokens > (checkpoint ? checkpointTokens : config.maxTokens)) denial = 'OUTPUT_TOKEN_LIMIT';
-    else if (remainingOutput < options.maxTokens) denial = 'TOTAL_OUTPUT_LIMIT';
-    else if (config.checkpoint && !checkpoint && remainingOutput - options.maxTokens < checkpointTokens) denial = 'CHECKPOINT_RESERVE';
-    else if (options.messages?.some(message => message.content?.some(block => !['text', 'reasoning', 'tool-call', 'tool-result', 'tool-use', 'tool_use', 'tool_result', 'tool-addition', 'tool-removal'].includes(block.type)))) denial = 'NON_TEXT_REQUEST';
+    else if ((options.maxTokens != null && (!Number.isSafeInteger(options.maxTokens) || options.maxTokens < 1)) || !withinLimit(options.maxTokens, checkpoint ? checkpointTokens : config.maxTokens)) denial = 'OUTPUT_TOKEN_LIMIT';
+    else if (!withinLimit(options.maxTokens, remainingOutput)) denial = 'TOTAL_OUTPUT_LIMIT';
+    else if (config.checkpoint && !checkpoint && remainingOutput != null && checkpointTokens != null && remainingOutput - options.maxTokens < checkpointTokens) denial = 'CHECKPOINT_RESERVE';
+    else if (!config.allowNativeContent && options.messages?.some(message => message.content?.some(block => !['text', 'reasoning', 'tool-call', 'tool-result', 'tool-use', 'tool_use', 'tool_result', 'tool-addition', 'tool-removal'].includes(block.type)))) denial = 'NON_TEXT_REQUEST';
     // LOOP requests are deep-frozen. Changes must be assembled into durable session
     // input above, never applied to a stream request after preparation.
     if (!denial && checkpoint && ((options.tools?.length ?? 0) > 0 || !JSON.stringify([options.system, options.messages]).includes('Stage allowance is nearly exhausted.'))) denial = 'CHECKPOINT_REQUIRED';
     const requestBytes = Buffer.byteLength(JSON.stringify({ messages: options.messages, system: options.system, tools: options.tools, toolHistory: options.toolHistory }));
-    if (!denial && requestBytes > config.maxRequestBytes) denial = 'REQUEST_SIZE_LIMIT';
+    if (!denial && !withinLimit(requestBytes, config.maxRequestBytes)) denial = 'REQUEST_SIZE_LIMIT';
     if (denial) {
       receipt.denied = denial;
       await persist();
@@ -82,7 +94,8 @@ export async function installBudget(ctx, config) {
     receipt.modelRequests++;
     if (checkpoint) receipt.checkpointRequested = true;
     receipt.maxRequestBytesObserved = Math.max(receipt.maxRequestBytesObserved, requestBytes);
-    const call = { number: receipt.modelRequests, requestBytes, reservedOutputTokens: options.maxTokens, effort: options.reasoningEffort, checkpoint, usage: null, finished: false };
+    const call = { number: receipt.modelRequests, requestBytes, reservedOutputTokens: options.maxTokens ?? null, effort: options.reasoningEffort ?? null,
+      purpose: compaction ? 'compaction' : 'generation', checkpoint, usage: null, finished: false };
     receipt.calls.push(call);
     await persist();
     try {

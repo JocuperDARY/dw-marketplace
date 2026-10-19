@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0 — 2026-10-20
+
+- Promote the independently verified 2.0.0-native.1 candidate from PR #23. Release promotion changes version metadata and documentation only; implementation and test behavior remain the verified ec15bd2 candidate.
+- DSH independently passed 188/188 offline tests, 3/3 package checks and interface/lock/fingerprint probes. Preserve omitted limits, native capabilities, safe field diagnostics and historical request replay.
+- No additional paid model test. Browser/approval integration, team reassignment and live Flash content quality remain outside the interface acceptance evidence.
+
+## 2.0.0-native.1 — candidate, 2026-10-19
+
+- Interface follow-up, 2026-10-20: publish execution-status string/nonblank constraints and review ID uniqueness in JSON Schema. Disclose report ID uniqueness and serialized UTF-8 size as separate admission checks. Return bounded, safe field-level diagnostics in both MCP result channels, before task ownership for invalid report/review contracts. No coercion, lock takeover, retry or paid test.
+- Candidate follow-up, 2026-10-20: discover omitted official preset skills, distinguish catalog/source availability from zero query matches, and support explicit paged inventory. Preserve native-first and explained supplemental fallback.
+- Add zero-model `dsh_prepare_workspace` for a new worker-owned directory and native Shell preflight. Preserve existing owner/ACLs and upstream confinement; reject foreign ownership, reparse ancestry and state overlap before paid work.
+- Account for attempted tool calls without post-execute receipts as unobserved. Keep runtime completion, tool outcomes and content acceptance separate. Follow-up validation uses offline fixtures and preserved evidence, with no new paid model calls.
+
+- Preserve omitted resource limits as unspecified for new tasks; keep explicit caps, historical budgets, single-request no-retry and unknown usage semantics.
+- Prefer DSH-native skill discovery/loading and adapt installed Skills Manager, dsh-ops, sandboxed PowerShell and in-process Agent Teams with task-owned state and actual registration/use evidence. Bind native SDK peers to the locked runtime graph.
+- Prefer native repeated context compaction and meter auxiliary calls. Support durable checkpoint chains without a fixed stage/attempt ceiling; preserve cancellation, no-progress and failure boundaries.
+- Offline SDK fixtures cover repeated compaction, native tools/child execution and shared limits. No paid model test; candidate only, not a public marketplace release.
+
 ## 1.3.1 — 2026-10-19
 
 - Address DSH-001: deny common credential filenames and directories in built-in resolve/read/write/list at every depth, including Windows names and SSH private-key variants. Preserve ordinary project and public-key files. Describe this as a known-name policy, not arbitrary secret detection or a boundary for trusted custom modules.

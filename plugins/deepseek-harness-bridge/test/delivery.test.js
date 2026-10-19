@@ -1,9 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessDelivery, deliveryPrompt, normalizeReviewContract } from '../src/delivery.js';
+import { z } from 'zod';
+import Ajv from 'ajv';
+import { assessDelivery, deliveryPrompt, normalizeReviewContract, reviewContractSchema } from '../src/delivery.js';
+import { safeError } from '../src/errors.js';
 import { contract, correct, wrongDraft } from './fixtures/verification-data.js';
 
 const assess = value => assessDelivery(JSON.stringify(value), contract, { status: 'completed' });
+
+test('published review schema enforces the same unique string-ID arrays as runtime', () => {
+  const schema = z.toJSONSchema(reviewContractSchema, { target: 'draft-7' });
+  const validate = new Ajv().compile(schema);
+  assert.equal(validate(contract), true);
+  for (const field of ['caseIds', 'ruleIds', 'checkIds']) {
+    assert.equal(schema.properties[field].uniqueItems, true);
+    const input = { ...contract, [field]: ['DUP', 'DUP'] };
+    assert.equal(validate(input), false);
+    assert.throws(() => normalizeReviewContract(input), error => {
+      assert.equal(error.code, 'INVALID_ARGUMENT');
+      const serialized = safeError(error);
+      assert.equal(serialized.validation.phase, 'contract');
+      assert.deepEqual(serialized.validation.issues[0].path, ['reviewContract', field]);
+      assert.equal(JSON.stringify(serialized).includes('DUP'), false);
+      return true;
+    });
+  }
+});
 
 test('review contract requires bounded unique IDs and explicit check coverage', () => {
   assert.equal(normalizeReviewContract(undefined), null);

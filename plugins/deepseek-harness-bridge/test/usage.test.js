@@ -6,6 +6,12 @@ const call = (outputTokens, extras = {}) => ({ number: 1, finished: true, usage:
 const receipt = (nonce, outputTokens) => ({ nonce, modelRequests: 1, calls: [call(outputTokens)] });
 const stage = (number, budget) => ({ number, attempt: 1, nonce: `n${number}`, status: 'completed', budget, charged: { modelRequests: 1, outputTokens: 256, toolCalls: 0 } });
 
+test('an unbounded interrupted reservation stays unknown instead of becoming zero', () => {
+  const unknown = { ...stage(1), charged: { modelRequests: null, outputTokens: null, toolCalls: null } };
+  const record = { attempts: [{ number: 1, status: 'interrupted' }], orchestration: { stages: [unknown, stage(2)] } };
+  assert.deepEqual(summarizeUsage([record]).orchestrationCharged, { modelRequests: null, outputTokens: null, toolCalls: null });
+});
+
 test('usage aggregates every stage once, including recovery, without repeating attempt tails', () => {
   const last = receipt('n2', 7);
   const record = { attempts: [{ number: 1, status: 'completed', budget: last }], orchestration: { stages: [stage(1, receipt('n1', 5)), { ...stage(2, last), purpose: 'format-recovery' }] } };

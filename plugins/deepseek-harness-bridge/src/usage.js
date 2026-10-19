@@ -37,7 +37,11 @@ export function summarizeUsage(records) {
     }
     for (const stage of record.orchestration?.stages ?? []) {
       summary.stages++;
-      for (const key of Object.keys(summary.orchestrationCharged)) summary.orchestrationCharged[key] += stage.charged[key];
+      for (const key of Object.keys(summary.orchestrationCharged)) {
+        const current = summary.orchestrationCharged[key];
+        const used = stage.charged[key];
+        summary.orchestrationCharged[key] = count(current) && count(used) && count(current + used) ? current + used : null;
+      }
     }
     for (const receipt of receipts(record)) {
       if (!validReceipt(receipt)) { summary.unknownReceiptGroups++; continue; }
