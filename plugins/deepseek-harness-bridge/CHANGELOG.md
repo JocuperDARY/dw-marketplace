@@ -2,7 +2,7 @@
 
 ## 2.0.2-rc.1 — candidate, 2026-10-20
 
-- Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require each added prerequisite to cite an explicit rule or a checkable derivation with its operation scope.
+- Separate authoritative rules/facts from claims under review and proposed prerequisites in the reusable verification assignment and worker delivery instructions. Require every asserted or newly added prerequisite to cite an explicit rule or a checkable derivation with its operation scope. A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.
 - Distinguish explaining a general rule from executing a numerical instance, identity metadata from decision variables, and arbitrary optimal choices from requested unique/deterministic selectors. Review compound claims clause by clause.
 - Parent acceptance must independently check source roles, entailment and requested operation; valid rule IDs and complete JSON never certify content. Keep the existing strict schema and no-retry/budget behavior.
 - Synthetic offline counterexamples and controls verify delivery, preservation and non-acceptance boundaries only; no paid model test or accuracy claim. This candidate starts from 2.0.0 and does not include PR #24's native file-boundary changes.

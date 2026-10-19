@@ -11,10 +11,14 @@ test('rendered delivery obligations distinguish authority, reviewed claims, and 
   for (const orchestrated of [false, true]) {
     const prompt = deliveryPrompt(assignment, contract, orchestrated);
     assert.ok(prompt.startsWith(assignment), 'Original rules and reviewed claims remain intact.');
-    for (const phrase of ['Authoritative rules and facts', 'claims under review', 'For every added prerequisite',
+    for (const phrase of ['Authoritative rules and facts', 'claims under review',
       'explicit requirement', 'checkable derivation', 'general rule', 'numerical instance', 'identity metadata', 'compound claim', 'ties']) {
       assert.match(prompt, new RegExp(phrase, 'i'), `Missing generic review obligation: ${phrase}`);
     }
+    assert.ok(prompt.includes('For every asserted or newly added prerequisite'),
+      'Review obligations must cover asserted prerequisites as well as newly added ones.');
+    assert.ok(prompt.includes('A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.'),
+      'Neither a valid locator nor a known rule ID alone establishes source support.');
   }
 });
 

@@ -6,7 +6,9 @@ export function apply(ctx) {
     if (options.reasoningEffort !== 'high' || options.maxTokens !== 4096 || options.tools?.length) throw new Error('Verification request limits changed');
     if (!JSON.stringify(options.messages).includes('Verification delivery contract')) throw new Error('Delivery contract did not reach SDK');
     // Check the actual SDK request carries the generic evidence instructions.
-    for (const instruction of ['claims under review', 'For every added prerequisite', 'numerical instance', 'compound claim']) {
+    for (const instruction of ['claims under review', 'For every asserted or newly added prerequisite',
+      'A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.',
+      'numerical instance', 'compound claim']) {
       if (!JSON.stringify(options.messages).includes(instruction)) throw new Error(`Missing evidence instruction: ${instruction}`);
     }
     const answer = {
