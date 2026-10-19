@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 2.0.4
+# DeepSeek Harness Bridge 2.1.0
 
 2.0.4 修复原生 Teams 的共享阶段检查点：父任务保留收尾请求，停止并回收所属子任务，保存真实终态和迟到的结算通知。Windows 回执原子替换仅对短暂共享冲突做有限重试。增加真实 SDK 内的离线文件、技能、Shell/jobs、会话恢复和 Teams 验证；模型流为合成数据，不代表真实 Flash 质量或费用。见[原生执行与检查点验证](docs/native-validation.md)。
 
@@ -141,6 +141,8 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 `deliveryValidation` 检查 ID 覆盖、重复、字段和规则引用，不判断分类和算术是否正确。`structure_complete` 仍保持 `parentAcceptance: not_assessed`；父级必须独立核验路径边界、例外与分类是否混淆、阈值及必做算术，再决定能否作为测试预期。运行完成、格式、结构完整和内容验收分别记录，缺项和语义失败不会自动触发新的模型请求。not_requested 和零问题数不等于检查通过；对路径等字面值比较实际解码后的类型与字符，不依据多层转义显示判断错误。原始文本保留，不修补残缺 JSON 或覆盖历史失败。
 
 ## 工作区、预算和状态
+
+生命周期表可使用 [lifecycleContract](docs/lifecycle-contract.md)：父级先明确所有允许结果、槽位复用值和未覆盖分支，再逐项检查返回值、顺序与汇总。lifecycleValidation.consistent 只证明与声明一致，caveat 及规则真实性仍须父级验收；内容不一致不自动重试。固定规则可本地计算时优先直接渲染，无须增加模型调用。
 
 报告类任务可提供 `reportContract`，逐项标明 limit、observation 或 execution-status、原值、单位和来源；它默认 drafting/off 并要求返回 `{facts, prose}` JSON。不能与另一种输出形状的 reviewContract 同用。预算上限不代表实际耗时或 RSS，NOT_RUN 不代表已执行，给工作者的写作指令也不是实验事实。`reportValidation` 只检查事实表的覆盖、角色和字面值；`facts_preserved` 仍须逐句核验正文，`proseAcceptance` 与 `parentAcceptance` 保持 not_assessed。事实或语义错误不自动重试。示例与边界见[事实与用量契约](docs/evidence-usage.md)。
 

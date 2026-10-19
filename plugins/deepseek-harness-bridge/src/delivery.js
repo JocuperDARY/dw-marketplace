@@ -13,10 +13,11 @@ const deliverySchema = z.object({
   uncertainty: text, nextAction: text,
 }).strict();
 
-export function normalizeOutputFormat(value, contract, reportContract) {
+export function normalizeOutputFormat(value, ...contracts) {
   requireValue(value === undefined || ['text', 'json-object'].includes(value), 'INVALID_ARGUMENT', 'outputFormat must be text or json-object.');
-  requireValue(!(contract || reportContract) || value !== 'text', 'INVALID_ARGUMENT', 'Delivery contracts require JSON object output.');
-  return value ?? (contract || reportContract ? 'json-object' : 'text');
+  const contracted = contracts.some(Boolean);
+  requireValue(!contracted || value !== 'text', 'INVALID_ARGUMENT', 'Delivery contracts require JSON object output.');
+  return value ?? (contracted ? 'json-object' : 'text');
 }
 
 export function formatPrompt(prompt, format, orchestrated) {

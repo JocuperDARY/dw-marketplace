@@ -1,6 +1,6 @@
 // Only schema-owned field names may leave the process in validation diagnostics.
 // Never expose rejected values, unknown property names, or Zod's raw messages.
-const validationFields = new Set(('requestId prompt workspace access executionMode workload outputFormat reviewContract reportContract effort timeoutMs budget totalModelRequests totalOutputTokens totalToolCalls totalDurationMs maxTokens maxToolCalls maxModelRequests maxRequestBytes nativePlugins capabilityProfile taskId attempt offset limit caseIds ruleIds checkIds facts id kind value unit source').split(' '));
+const validationFields = new Set(('requestId prompt workspace access executionMode workload outputFormat reviewContract reportContract lifecycleContract statuses cases allowedStatuses slotReusable basis effort timeoutMs budget totalModelRequests totalOutputTokens totalToolCalls totalDurationMs maxTokens maxToolCalls maxModelRequests maxRequestBytes nativePlugins capabilityProfile taskId attempt offset limit caseIds ruleIds checkIds facts id kind value unit source').split(' '));
 const validationMessages = {
   invalid_type: 'Use the type specified by the advertised schema.',
   invalid_value: 'Use one of the advertised values.',
@@ -11,6 +11,9 @@ const validationMessages = {
   unrecognized_keys: 'Remove unrecognized fields from this object.',
   custom: 'Value violates an advertised constraint.',
   duplicate_id: 'Fact IDs must be unique.',
+  duplicate_case_id: 'Case IDs must be unique.',
+  status_not_declared: 'Allowed statuses must belong to the declared status vocabulary.',
+  lifecycle_utf8_size_limit: 'Lifecycle contract must not exceed 16384 UTF-8 bytes.',
   utf8_size_limit: 'Report contract must not exceed 16384 UTF-8 bytes.',
 };
 
@@ -22,8 +25,9 @@ function safeValidation(validation) {
       Number.isSafeInteger(part) && part >= 0 ? part : validationFields.has(part) ? part : '[field]') : [];
     const expected = ['string', 'number', 'boolean', 'object', 'array', 'null'].includes(issue.expected) ? issue.expected : undefined;
     const uniqueReviewIds = code === 'custom' && path[0] === 'reviewContract' && ['caseIds', 'ruleIds', 'checkIds'].includes(path[1]);
+    const uniqueLifecycleIds = code === 'custom' && path[0] === 'lifecycleContract' && (path[1] === 'statuses' || path[3] === 'allowedStatuses');
     return { path, code, message: code === 'invalid_type' && expected ? `Expected ${expected}.`
-      : uniqueReviewIds ? 'IDs in this array must be unique.' : validationMessages[code] };
+      : uniqueReviewIds || uniqueLifecycleIds ? 'IDs in this array must be unique.' : validationMessages[code] };
   }), ...(validation.issues.length > 16 ? { issuesTruncated: true } : {}) };
 }
 

@@ -126,7 +126,7 @@ export async function runOrchestrated({ record, attempt, prompt, signal, home, r
   let failedOutput;
   let recoveryPath;
   let recoveredCheckpoint;
-  const outputFormat = normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract);
+  const outputFormat = normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract, record.lifecycleContract);
   const recoveryResult = (output, status) => ({ ...output, recovery: { status, reason: recovering, partialPath: recoveryPath } });
   const retainFailure = async (stage, output, reason) => {
     const partial = { stage: stage.number, terminal: output.terminal, reason, text: output.text ?? '', output: output.output ?? { modelTruncated: output.terminal === 'max-tokens' } };

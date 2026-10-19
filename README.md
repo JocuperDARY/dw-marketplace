@@ -8,7 +8,9 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
-| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.0.4 | Codex MCP：原生 DSH 能力、备份完整性与 Team 状态文件保护 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 2.1.0 | Codex MCP：原生 DSH 能力、未指定资源上限与持续进度 |
+
+**deepseek-harness-bridge 2.1.0**：新增可选生命周期契约，检查父级声明的逐行允许状态、槽位复用值、顺序与重算计数；公开 schema 和安全入场错误保持一致。保留 2.0.4 的原生 Teams 检查点、回执可靠性、native 文件边界、通用委派与逐项验收规则；不因内容不一致自动重试。见[生命周期契约](./plugins/deepseek-harness-bridge/docs/lifecycle-contract.md)。
 
 **deepseek-harness-bridge 2.0.4**：父任务保留原生 Teams 检查点，按运行时所有权回收子任务并保留终态证据；Windows 回执有限重试，新增官方 SDK 的实际工具和子任务离线验证。模型流仍为合成数据，独立验收与实际用量证据保持分开。见[原生验证](./plugins/deepseek-harness-bridge/docs/native-validation.md)。
 

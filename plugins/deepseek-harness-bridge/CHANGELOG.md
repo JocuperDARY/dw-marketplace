@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0 — 2026-10-20
+
+- Add optional parent-declared lifecycle contracts with ordered allowed outcomes, exact slot reuse, recomputed counts and bounded diagnostics; source truth and prose/parent acceptance remain unassessed.
+- Publish uniqueness and nonblank basis constraints in JSON Schema; enforce cross-field membership, unique case IDs and normalized 16384-byte UTF-8 size before admission or credentials. Preserve raw failures and avoid semantic retries.
+- Port onto 2.0.4 while preserving native file boundaries, nullable omitted limits, explicit-v2/v1 replay, report fingerprints and prerequisite-evidence rules.
+- Cover the original S3 wrong-status case, network-blocked SDK/MCP, persistence, replay and explicit continuation. Offline evidence does not establish paid model quality or deployment.
+
 ## 2.0.4 — 2026-10-20
 
 - Reserve native budgeted checkpoints for the captain, account concurrent prepared requests, drain exact owned descendants and preserve bounded terminal/late-notice evidence before checkpoint dispatch. Keep unrelated steering and single-request boundaries.
