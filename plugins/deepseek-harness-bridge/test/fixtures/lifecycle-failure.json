@@ -1,0 +1,61 @@
+{
+  "assignment": {
+    "objective": "Mechanical consistency check of synthetic task lifecycle examples for a delegation ledger; not source-code analysis and not execution.",
+    "scope": "The records below are invented examples. No repository source, private configuration, scientific data, actual process identity or credentials are supplied. No tools or follow-up.",
+    "rules": [
+      "completed with cleanup confirmed and parent accepted is closed",
+      "completed without parent accepted is submitted, not closed",
+      "running is live only when the provided live_handle is true; otherwise unknown",
+      "failed is failure irrespective of cleanup; cleanup pending or unknown prevents slot reuse",
+      "slot_reusable is true only when cleanup confirmed and state completed or failed"
+    ],
+    "records": [
+      {
+        "id": "S1",
+        "state": "completed",
+        "cleanup": "confirmed",
+        "parent": "accepted"
+      },
+      {
+        "id": "S2",
+        "state": "completed",
+        "cleanup": "confirmed",
+        "parent": "pending"
+      },
+      {
+        "id": "S3",
+        "state": "completed",
+        "cleanup": "unknown",
+        "parent": "accepted"
+      },
+      {
+        "id": "S4",
+        "state": "running",
+        "live_handle": true,
+        "cleanup": "pending",
+        "parent": "pending"
+      },
+      {
+        "id": "S5",
+        "state": "running",
+        "live_handle": false,
+        "cleanup": "unknown",
+        "parent": "pending"
+      },
+      {
+        "id": "S6",
+        "state": "failed",
+        "cleanup": "confirmed",
+        "parent": "rejected"
+      },
+      {
+        "id": "S7",
+        "state": "failed",
+        "cleanup": "pending",
+        "parent": "rejected"
+      }
+    ],
+    "output": "One JSON object with rows in input order {id,status:closed|submitted|live|unknown|failure,slot_reusable}, status_counts, caveats array. Note any ambiguity in these literal rules; do not infer real runtime or new approval."
+  },
+  "text": "{\n  \"rows\": [\n    {\"id\": \"S1\", \"status\": \"closed\", \"slot_reusable\": true},\n    {\"id\": \"S2\", \"status\": \"submitted\", \"slot_reusable\": true},\n    {\"id\": \"S3\", \"status\": \"closed\", \"slot_reusable\": false},\n    {\"id\": \"S4\", \"status\": \"live\", \"slot_reusable\": false},\n    {\"id\": \"S5\", \"status\": \"unknown\", \"slot_reusable\": false},\n    {\"id\": \"S6\", \"status\": \"failure\", \"slot_reusable\": true},\n    {\"id\": \"S7\", \"status\": \"failure\", \"slot_reusable\": false}\n  ],\n  \"status_counts\": {\n    \"closed\": 2,\n    \"submitted\": 1,\n    \"live\": 1,\n    \"unknown\": 1,\n    \"failure\": 2\n  },\n  \"caveats\": [\n    \"The rules are applied as literally stated; no real runtime, process identity, or new approval is inferred.\",\n    \"Slot reuse for S2 (submitted, not closed) follows the given rule that slot_reusable is true when cleanup is confirmed and state is completed or failed; the literal rules do not require closure or parent acceptance for reuse.\",\n    \"S3 has parent accepted and otherwise meets the closure rule, but cleanup is unknown; only the cleanup-confirmed-plus-accepted rule yields closed, so it is not treated as closed because no separate rule defines a 'closed' status for accepted records lacking cleanup confirmation.\",\n    \"S5 has live_handle false, so it is classified as unknown rather than live; the rules give no separate bucket for running-but-not-live records.\",\n    \"S7 is failed with cleanup pending; this prevents slot reuse under the stated rule, although it is labeled rejected rather than showing a failure status.\",\n    \"The term 'failure' for failed records is weighted above parent rejection; rejected is not independently mapped to an extra status.\",\n    \"The provided live_handle is treated as the sole indicator of liveness; no new approval or runtime evidence is introduced.\"\n  ]\n}"
+}

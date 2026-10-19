@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 — 2026-10-19
+
+- Add opt-in lifecycleContract: parent-declared status vocabulary, ordered cases, allowed statuses, exact slot-reuse booleans and factual/rule basis. Require explicit handling of uncovered branches rather than silently inventing a lifecycle policy.
+- Return lifecycleValidation for exact row coverage/order, declared status/reuse outcomes and all status counts. Preserve raw output, runtime/cleanup status and unassessed prose/parent acceptance; consistent is not semantic approval or proof of source truth.
+- Default this contract to the existing verification/high workload; preserve explicit off/low and request/output/tool/time caps with warnings. Keep one-request no-continuation and no semantic retries in budgeted mode. Persist the contract across replay and continuation; no SDK dependency or capability change.
+- Replay the original synthetic contradiction offline, plus unit/state/network-blocked SDK/MCP and package regressions. The explicitly supplied S3 unknown fallback is new parent policy, not a rewritten historical requirement. No paid model test or real-model quality claim.
+
 ## 1.3.1 — 2026-10-19
 
 - Address DSH-001: deny common credential filenames and directories in built-in resolve/read/write/list at every depth, including Windows names and SSH private-key variants. Preserve ordinary project and public-key files. Describe this as a known-name policy, not arbitrary secret detection or a boundary for trusted custom modules.

@@ -1,0 +1,67 @@
+{
+  "statuses": [
+    "closed",
+    "submitted",
+    "live",
+    "unknown",
+    "failure"
+  ],
+  "cases": [
+    {
+      "id": "S1",
+      "allowedStatuses": [
+        "closed"
+      ],
+      "slotReusable": true,
+      "basis": "completed, confirmed, accepted: closure and reuse prerequisites are satisfied."
+    },
+    {
+      "id": "S2",
+      "allowedStatuses": [
+        "submitted"
+      ],
+      "slotReusable": true,
+      "basis": "completed, confirmed, pending acceptance: submitted; confirmed terminal cleanup permits reuse."
+    },
+    {
+      "id": "S3",
+      "allowedStatuses": [
+        "unknown"
+      ],
+      "slotReusable": false,
+      "basis": "completed and accepted, but cleanup unknown forbids closed and reuse. Parent explicitly chooses unknown for this previously undefined branch; this is a new fixture policy, not an original rule."
+    },
+    {
+      "id": "S4",
+      "allowedStatuses": [
+        "live"
+      ],
+      "slotReusable": false,
+      "basis": "running with live_handle=true; no confirmed terminal cleanup."
+    },
+    {
+      "id": "S5",
+      "allowedStatuses": [
+        "unknown"
+      ],
+      "slotReusable": false,
+      "basis": "running with live_handle=false; no evidence of liveness or confirmed terminal cleanup."
+    },
+    {
+      "id": "S6",
+      "allowedStatuses": [
+        "failure"
+      ],
+      "slotReusable": true,
+      "basis": "failed irrespective of parent acceptance; confirmed terminal cleanup permits reuse."
+    },
+    {
+      "id": "S7",
+      "allowedStatuses": [
+        "failure"
+      ],
+      "slotReusable": false,
+      "basis": "failed, cleanup pending: failure with no reuse."
+    }
+  ]
+}
