@@ -49,6 +49,8 @@ test('MCP enforces total authorization and the explicit one-request exception', 
   assert.equal(tools.length, 9);
   const submitSchema = tools.find(tool => tool.name === 'dsh_submit').inputSchema;
   assert.ok(submitSchema.properties.workload.enum.includes('verification'));
+  assert.ok(submitSchema.properties.workload.enum.includes('drafting'));
+  assert.deepEqual(submitSchema.properties.outputFormat.enum, ['text', 'json-object']);
   assert.ok(submitSchema.properties.reviewContract.required.includes('checkIds'));
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args });

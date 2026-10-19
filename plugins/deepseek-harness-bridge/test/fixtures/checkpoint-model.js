@@ -8,7 +8,7 @@ export function apply(ctx) {
     const messages = JSON.stringify(options.messages);
     const continued = messages.includes('Previous progress data');
     const truncate = messages.includes('offline-truncate');
-    const recovery = messages.includes('Text-only recovery after a max-tokens stop');
+    const recovery = messages.includes('Text-only recovery after OUTPUT_TRUNCATED');
     let block;
     if (recovery) {
       if (options.reasoningEffort !== 'off' || options.tools?.length) throw new Error('Recovery must be off and tool-free');

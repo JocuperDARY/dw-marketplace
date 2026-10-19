@@ -13,6 +13,36 @@ const deliverySchema = z.object({
   uncertainty: text, nextAction: text,
 }).strict();
 
+export function normalizeOutputFormat(value, contract) {
+  requireValue(value === undefined || ['text', 'json-object'].includes(value), 'INVALID_ARGUMENT', 'outputFormat must be text or json-object.');
+  requireValue(!contract || value !== 'text', 'INVALID_ARGUMENT', 'reviewContract requires JSON object output.');
+  return value ?? (contract ? 'json-object' : 'text');
+}
+
+export function formatPrompt(prompt, format, orchestrated) {
+  if (format !== 'json-object') return prompt;
+  return `${prompt}\n\nStrict output format: return one complete JSON object. No prose prefix/suffix, Markdown fences, concatenated objects or JSON encoded as a string. Serialize values normally; preserve decoded strings exactly, including Windows path separators. Do not manually add extra escaping.
+${orchestrated ? 'The completed outer stage summary string MUST contain ONLY the serialized target JSON object. Keep state and nextSteps in the outer envelope. A checkpoint summary may contain ordinary progress; it is not the final deliverable.' : 'The entire response must be the JSON object.'}
+Validate the whole deliverable before returning it. Format validity is not semantic or parent acceptance.`;
+}
+
+/** Checks the entire final output, without extraction, normalization or repair. */
+export function assessOutput(value, format, { status, orchestrated = false }) {
+  const report = (status, code) => ({ status, scope: 'format_only', ...(code ? { code } : {}) });
+  if (format !== 'json-object') return report('not_requested');
+  if (status !== 'completed') return report('not_evaluated', 'RUNTIME_NOT_COMPLETED');
+  let payload;
+  try {
+    payload = JSON.parse(value);
+    if (orchestrated) {
+      if (payload?.state !== 'completed' || typeof payload.summary !== 'string') return report('invalid', 'INVALID_COMPLETION_ENVELOPE');
+      payload = JSON.parse(payload.summary);
+    }
+  } catch { return report('invalid', 'INVALID_JSON'); }
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? report('valid') : report('invalid', 'JSON_OBJECT_REQUIRED');
+}
+
 export function normalizeReviewContract(value) {
   if (value === undefined) return null;
   const parsed = reviewContractSchema.safeParse(value);
