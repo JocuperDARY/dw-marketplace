@@ -9,7 +9,7 @@ flowchart LR
   C[Codex 主智能体] <-->|MCP stdio| B[本地桥接器]
   B <-->|官方 Harness SDK / JSON-RPC| W[独立 Harness 工作者]
   W <-->|官方 DeepSeek API| F[DeepSeek Flash]
-  W --> T[有界文件工具]
+  W --> T[原生技能、文件、沙箱 Shell、Agent Teams]
   B --> S[任务状态与结果]
 ```
 

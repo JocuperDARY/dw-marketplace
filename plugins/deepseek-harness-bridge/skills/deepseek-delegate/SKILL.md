@@ -3,7 +3,7 @@ name: deepseek-delegate
 description: Delegate a bounded task to an independent DeepSeek Harness Flash worker through this plugin and collect its evidence. Use for explicitly authorized Flash delegation, parallel evidence gathering or scoped text/code edits alongside Codex work.
 ---
 
-Use the bridge as an external worker. The parent retains planning, acceptance, shell commands, tests and integration. Read the [README](../../README.md) for the current capability boundary.
+Use the bridge as an external worker. The parent owns delegation, communication and acceptance. Assign implementation, shell commands and checks to DSH when its selected tools support them; respect a user instruction that Codex only delegates and summarizes. Report unsupported or unperformed checks explicitly instead of silently doing that work in the parent. Read the [README](../../README.md) for the current capability boundary.
 
 Inspect dsh_capabilities with the intended workspace/access/nativePlugins. New tasks default to native: use DSH-native skills first, loading matching bodies after metadata search. Supplement from Codex only after native search finds no suitable skill and record why. Select installed dsh-ops, sandboxed Shell and Agent Teams when useful; use nativePlugins to avoid irrelevant tools. Native in-process teams and compaction share the Bridge meter. Never infer actual use from installation or registration; collect tool outcomes, child evidence, skill load receipts and cleanup. Do not import desktop sessions, credentials or the whole profile. See [capability profiles](../../docs/capabilities.md).
 
