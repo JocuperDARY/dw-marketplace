@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — 2026-10-19
+
+- Add drafting/off for bounded prose from supplied facts; preserve explicit effort/caps and warn that single-request reasoning, including low, may exhaust output without a visible answer.
+- Add explicit outputFormat json-object, strict final response/summary validation and format-only status separate from runtime, review coverage and parent acceptance. Never strip prose/fences, normalize paths or repair JSON implicitly.
+- New budgeted tasks keep a soft request/token reserve while work plus checkpoint fits. Share one tool-free/off recovery across confirmed truncation and explicitly checked JSON format failure, charged to the original totals and deadline; save original failed text before recovery.
+- Preserve single-request prohibition on retry/continuation, old fingerprints, saved task allocation policy and all hard caps. No automatic semantic, transport, cleanup, denied-call or persistence recovery.
+- Add network-blocked SDK/MCP regressions for zero-visible reasoning, summary prose and single-request stopping. Withdrawn path-escaping claims are excluded; valid decoded Windows paths remain unchanged. No paid inference or dependency change.
+
 ## 1.1.0 — 2026-10-19
 
 - Add verification workload for path classification, exception rules and test expectations, defaulting to high/16384. Preserve explicit effort/caps and warn on low/off overrides; no automatic escalation or new authorization.

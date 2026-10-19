@@ -5,7 +5,7 @@ import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { resolveProfile } from './capabilities.js';
 import { allocateStage, budgetSummary, runOrchestrated, validateSavedBudget } from './orchestration.js';
 import { planExecution } from './planning.js';
-import { assessDelivery, deliveryPrompt, normalizeReviewContract } from './delivery.js';
+import { assessDelivery, assessOutput, deliveryPrompt, formatPrompt, normalizeOutputFormat, normalizeReviewContract } from './delivery.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -71,6 +71,7 @@ export class TaskManager {
         requireValue(record.schemaVersion === 1 && record.taskId === entry.name && Array.isArray(record.attempts), 'INVALID_STATE', 'The saved task record is invalid.');
         validateSavedBudget(record);
         if (record.reviewContract) normalizeReviewContract(record.reviewContract);
+        normalizeOutputFormat(record.outputFormat, record.reviewContract);
         this.records.set(record.taskId, record);
         for (const attempt of record.attempts) {
           requireValue(!this.requests.has(attempt.requestId), 'INVALID_STATE', 'Duplicate request ID in saved state.');
@@ -128,7 +129,7 @@ export class TaskManager {
       const workspace = await this.workspace(input.workspace);
       const access = input.access ?? 'read-only';
       const previous = this.requests.get(id);
-      const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined;
+      const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined && input.outputFormat === undefined;
       const planned = planExecution(input, { legacy: !!legacy });
       const { effort, maxTokens, maxToolCalls, maxModelRequests, budget } = planned;
       requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
@@ -139,7 +140,7 @@ export class TaskManager {
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
       const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings };
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}) });
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
@@ -150,7 +151,8 @@ export class TaskManager {
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), planning, attempts: [] };
       if (planned.reviewContract) record.reviewContract = planned.reviewContract;
-      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [] };
+      if (input.outputFormat !== undefined) record.outputFormat = planned.outputFormat;
+      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: Date.parse(record.createdAt) + budget.totalDurationMs, stages: [], recoveryPolicy: 'bounded-v1' };
       await mkdir(join(this.tasksDir, record.taskId), { mode: 0o700 });
       try { return await this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false }); }
       catch (error) {
@@ -204,7 +206,7 @@ export class TaskManager {
       let output;
       try {
         const home = join(this.tasksDir, record.taskId, 'harness');
-        const runner = args => this.runner({ ...args, prompt: deliveryPrompt(args.prompt, record.reviewContract, !!record.orchestration) });
+        const runner = args => this.runner({ ...args, prompt: formatPrompt(deliveryPrompt(args.prompt, record.reviewContract, !!record.orchestration), normalizeOutputFormat(record.outputFormat, record.reviewContract), !!record.orchestration) });
         output = record.orchestration ? await runOrchestrated({ record, attempt, prompt, signal: active.controller.signal, home, runner,
           persist: () => this.persist(record), saveCheckpoint: async (number, text) => {
             const path = join(this.tasksDir, record.taskId, `checkpoint-${number}.json`);
@@ -236,6 +238,7 @@ export class TaskManager {
       if (finished.outputTruncated && finished.status === 'completed') finished.status = 'failed';
       if (finished.outputTruncated && finished.output.kind === 'complete_text') finished.output.kind = 'partial_text';
       if (finished.cleanup !== 'confirmed') { finished.status = 'cleanup_failed'; this.blocked = true; }
+      finished.outputValidation = assessOutput(text, normalizeOutputFormat(record.outputFormat, record.reviewContract), { status: finished.status, orchestrated: !!record.orchestration });
       finished.deliveryValidation = assessDelivery(text, record.reviewContract, { status: finished.status, orchestrated: !!record.orchestration });
       await this.saveResult(record, finished, text);
       finished.outputBytes = Buffer.byteLength(text);
@@ -268,6 +271,7 @@ export class TaskManager {
       maxModelRequests: record.maxModelRequests ?? 16, maxRequestBytes: record.maxRequestBytes ?? 262144,
       capabilityProfile: record.capabilityProfile || 'files', capabilityDigest: record.capabilityDigest ?? null,
       planning: record.planning ?? { executionMode: 'legacy' },
+      ...(record.outputFormat !== undefined ? { outputFormat: record.outputFormat } : {}),
       ...(record.reviewContract ? { reviewContract: record.reviewContract } : {}),
       ...(record.orchestration ? { orchestration: budgetSummary(record.orchestration) } : {}),
       ...publicAttempt, parentAcceptance: 'not_assessed' });

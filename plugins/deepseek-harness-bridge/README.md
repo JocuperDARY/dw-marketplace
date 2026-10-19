@@ -1,4 +1,4 @@
-# DeepSeek Harness Bridge 1.1.0
+# DeepSeek Harness Bridge 1.2.0
 
 让 Codex 将范围明确的工作委派给独立的 DeepSeek Flash 工作者，再收回结果、检查证据并继续主任务。插件作为 DW Marketplace 的独立条目发布，不改变 development-workflow 或 gpt-bridge 的版本。
 
@@ -112,15 +112,19 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 `dsh_status` / `dsh_result` 的 `orchestration` 显示授权、已计入消耗、剩余额度、阶段数和检查点路径。总额度无法再支持工作及进度保存时返回 `paused` / `TOTAL_BUDGET_EXHAUSTED`；重复相同进度返回 `paused` / `NO_PROGRESS`。重启、幂等重放和 `dsh_continue` 都不会补充额度或延长原截止时间。需要扩大预算时由主智能体取得新授权后建立新任务。
 
-未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。供应商 `max-tokens` 会保留部分正文到 `partial-N.json`；仅在清理和记账确认后，允许从同一总预算执行一次 `off`、零工具的恢复请求。它重新生成有效阶段 JSON，不拼接残缺 JSON，也不重复文件操作。整个任务最多一次截断恢复；其他失败不自动重试。预算不足、再次截断、格式错误或清理失败都保留非成功状态。详见[1.0.0 预算可靠性契约](docs/budget-reliability.md)。
+未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。新 budgeted 任务在工作和检查点仍能容纳时，另行软预留一次请求和最多 2048 输出 token；最后普通阶段可释放软预留，硬总额始终不变。确认的 `max-tokens` 和显式检查发现的最终 JSON 格式失败，共享整个任务最多一次 `off`、零工具恢复。先保存原始失败到 `partial-N.json`，确认清理和记账后，从同一总预算重新生成；不拼接残缺文本或重复文件操作。单请求、语义错误、传输/清理/记账/持久化失败不触发此恢复。小预算、耗尽时间和再次失败仍可能无法交付。详见[预算可靠性契约](docs/budget-reliability.md)与[严格交付恢复契约](docs/output-recovery.md)。
 
 插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 的目录将别名标为 DeepSeek-V4.1-Flash；实际服务版本以提供方为准。工作类型 `mechanical`（字面提取/格式转换）默认 off/4096，`standard`（一般维护）默认 low/8192，`reasoning` 默认 high/16384；路径分类、例外优先级和测试预期使用 `verification`，默认 high/16384，必须提供 `reviewContract`。可显式指定 off/low/high/max，max 默认 32768；低档位和小额度覆盖会保留并给出相关提示，不扩大已授权预算。检查点和恢复请求使用 off。模型能力、200 tok/s 和整体加速效果需要真实测量，这些默认值不代表性能保证，也不修改宿主模型白名单。
 
 ### 验证类委派与内容验收
 
+简短的已知事实文案可选择新增 `drafting`，默认 off/4096，避免无必要的推理开销；规则推理仍使用 verification。显式档位和上限优先，包括 low 在内的推理都可能耗尽输出而没有正文。单请求的此类风险会显示为提示，不会自动增加第二次调用。
+
+所有 JSON-only 委派（包括 mechanical 字面提取）应显式设置 `outputFormat: "json-object"`。`reviewContract` 自动要求该格式。完成阶段的整个 summary 字符串只能包含目标 JSON 对象，不能添加说明或围栏；检查点 summary 可保存普通进度。`outputValidation` 独立返回 valid、invalid、not_requested 或 not_evaluated；只验证完整 JSON 及对象根类型，不自动提取子串、修改转义或证明字段值正确。失败恢复后的结果仍须通过同样检查；原始失败不会被覆盖。
+
 有限表格也可能包含规则推理，不能因为行数少就称为 mechanical。为规则标记 ID，并在 `reviewContract` 列出全部 `caseIds`、已给定的 `ruleIds`、必须完成的 `checkIds`（没有额外检查时显式填空数组）。未指定 workload 的清单任务默认 verification。插件要求每项分类、依据、适用规则、预期和不确定性，以及每项检查的独立结果；详见[委派质量契约及示例](docs/delegation-quality.md)。
 
-`deliveryValidation` 检查 ID 覆盖、重复、字段和规则引用，不判断分类和算术是否正确。`structure_complete` 仍保持 `parentAcceptance: not_assessed`；父级必须独立核验路径边界、例外与分类是否混淆、阈值及必做算术，再决定能否作为测试预期。运行完成、结构完整和内容验收分别记录，缺项和质量失败不会自动触发新的模型请求。原始文本保留，不修补残缺 JSON 或覆盖历史失败。
+`deliveryValidation` 检查 ID 覆盖、重复、字段和规则引用，不判断分类和算术是否正确。`structure_complete` 仍保持 `parentAcceptance: not_assessed`；父级必须独立核验路径边界、例外与分类是否混淆、阈值及必做算术，再决定能否作为测试预期。运行完成、格式、结构完整和内容验收分别记录，缺项和语义失败不会自动触发新的模型请求。not_requested 和零问题数不等于检查通过；对路径等字面值比较实际解码后的类型与字符，不依据多层转义显示判断错误。原始文本保留，不修补残缺 JSON 或覆盖历史失败。
 
 ## 工作区、预算和状态
 

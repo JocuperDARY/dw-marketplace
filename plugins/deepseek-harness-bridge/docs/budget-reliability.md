@@ -1,4 +1,8 @@
-# Budget reliability contract — 1.0.0
+# Budget reliability contract — 1.2.0
+
+The original 1.0.0 authorization contract continues to apply. The additive
+[1.2.0 delivery contract](output-recovery.md) defines strict JSON checking,
+bounded drafting, the soft recovery reserve and the shared recovery allowance.
 
 New tasks default to `executionMode: "budgeted"` and MUST supply preauthorized
 `budget` totals: `totalModelRequests`, `totalOutputTokens`, `totalToolCalls` and
@@ -18,8 +22,10 @@ they are not retroactively granted a total budget.
 | Workload | Default work effort | Per-request ceiling |
 | --- | --- | --- |
 | `mechanical`: extraction and formatting | `off` | 4096 |
+| `drafting`: bounded prose from supplied facts | `off` | 4096 |
 | `standard`: ordinary maintenance and review | `low` | 8192 |
 | `reasoning`: substantive reasoning | `high` | 16384 |
+| `verification`: interacting rules and test expectations | `high` | 16384 |
 
 Explicit effort overrides the workload; `max` defaults to 32768 tokens. Explicit
 `maxTokens` is never silently raised. High effort with a small cap returns a
@@ -62,7 +68,8 @@ and legacy `outputTruncated` describe storage clipping. `resultAvailable` and
 `nextOffset: null` describe storage/pagination, not successful completion.
 
 A new budgeted task may use ONE automatic text-only recovery over its entire
-lifetime after max-tokens, confirmed cleanup and valid accounting. Visible
+lifetime, shared between max-tokens and explicitly checked invalid final JSON,
+after confirmed cleanup and valid accounting. Visible
 partial text and metadata are first saved in `partial-N.json`. They are untrusted
 evidence, not a validated checkpoint. Recovery uses a fresh session, `off`, one
 request, zero tools, the original assignment, last validated checkpoint and at
@@ -101,7 +108,7 @@ cleanup retains ownership. No lock is automatically deleted or stolen.
   evidence, one tool-free recovery and total bounds.
 - Verify MCP submission, results, continuation, idempotency, cleanup and
   transient/persistent observation locks without duplicate execution.
-- Review and merge one 1.0.0 PR, then synchronize marketplace and local plugin.
+- Review and merge the versioned PR, then synchronize marketplace and local plugin.
 
 No paid test, dependency upgrade, desktop conversation reuse, nested team,
 shell-permission expansion or change to the original workspace's 40 dirty

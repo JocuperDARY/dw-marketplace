@@ -1,4 +1,9 @@
-# Verification delegation and acceptance (1.1.0)
+# Verification delegation and acceptance (1.2.0)
+
+1.2.0 adds [strict output checks and bounded format recovery](output-recovery.md).
+A reviewContract implies json-object output. JSON syntax/shape-of-root failures
+may share the one recovery allowance with truncation in new budgeted tasks;
+missing cases, wrong rules and semantic errors still do not auto-retry.
 
 Use `verification` for path classification, exception precedence, interacting rules and test expectations. The default is high effort with a 16384-token request ceiling. This is a conservative starting policy, not evidence that high fixes every error. Literal copying or reformatting can remain mechanical/off. One straightforward rule may justify an explicit low setting with parent checks. Never silently change a user-fixed effort, token cap, request count or deadline; the existing budget contract still applies.
 
@@ -66,7 +71,7 @@ For budgeted execution, keep the existing outer `{state, summary, nextSteps}` st
 
 The bridge always returns `parentAcceptance: not_assessed`. It has no endpoint that automatically marks an answer accepted. Other delivery statuses are `incomplete`, `not_evaluated` (runtime not completed) and `not_requested` (ordinary/legacy work with no contract). Historical receipts may lack the new delivery field; absence is not success. Issues are bounded to 64 entries, with total count and a truncation flag. The complete raw answer remains available through result pagination.
 
-Malformed/fenced/partial JSON is not repaired. Missing/duplicate/unexpected IDs, unknown rule references and missing evidence fields report structural incompleteness while preserving the original runtime terminal. A completed incorrect or incomplete draft does not trigger automatic model recovery, continuation or effort escalation. The separate one-off max-tokens recovery for budgeted execution retains its existing conditions and limits; it is not a semantic quality retry.
+Malformed/fenced/partial JSON is not silently repaired. Missing/duplicate/unexpected IDs, unknown rule references and missing evidence fields report structural incompleteness while preserving the original runtime terminal. Semantic or coverage rejection does not trigger automatic model recovery, continuation or effort escalation. New budgeted tasks may regenerate explicitly checked invalid JSON using the shared one-off delivery recovery described above; preserve the original artifact and inspect both outputValidation and deliveryValidation. This is not a semantic quality retry.
 
 ## Parent checks before adoption
 
