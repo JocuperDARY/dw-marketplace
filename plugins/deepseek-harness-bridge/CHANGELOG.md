@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — workspace integrity hardening
+## 2.0.3 — 2026-10-20
 
 - Address OBS-1: verify same-name original-content backups are ordinary, nonlinked, single-link files with the expected SHA-256 before staging a replacement. Valid backups remain reusable; corrupt or partial backups block writes with BACKUP_INVALID and retain the original target and backup evidence. Preserve workspace writer lock ownership.
 - Address OBS-2: hide and deny `.agent-teams-bridge` in built-in list/read/write and guarded ops_replace at every depth and case. Keep native Teams state paths and tools compatible; this file-tool policy does not constrain explicitly selected Shell or trusted third-party code.
