@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { retainedLeases } from './fixtures/committed-state.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises';
@@ -68,5 +69,5 @@ test('offline SDK/MCP returns original contradiction with lifecycle mismatch, cl
   const continuation = await client.callTool({ name: 'dsh_continue', arguments: { taskId: task.taskId, requestId: 'no-auto-retry', prompt: 'Fix it' } });
   assert.equal(continuation.structuredContent.error.code, 'NOT_RESUMABLE');
   assert.equal((await call('dsh_status', { taskId: task.taskId })).budget.modelRequests, 1);
-  await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
+  assert.deepEqual(await retainedLeases(join(root, 'state')), []);
 });

@@ -34,7 +34,7 @@ test('completed incorrect drafts retain evidence and never become parent-accepte
   assert.deepEqual(replay.reviewContract, contract);
   assert.equal(replay.deliveryValidation.status, 'incomplete');
   await assert.rejects(next.submit({ ...input, reviewContract: { ...contract, checkIds: [] } }), { code: 'REQUEST_CONFLICT' });
-  await assert.rejects(next.continue({ taskId: submitted.taskId, requestId: 'retry', prompt: 'repair' }), { code: 'NOT_RESUMABLE' });
+  await assert.rejects(next.continue({ taskId: submitted.taskId, requestId: 'retry', prompt: 'repair', controlToken: submitted.controlToken }), { code: 'NOT_RESUMABLE' });
   await next.close();
 });
 
@@ -94,16 +94,18 @@ test('report request replay accepts the pre-discriminated-schema durable fingerp
   const task = await manager.submit(input);
   await manager.wait({ taskId: task.taskId });
   await manager.close();
-  const path = join(root, 'state', 'tasks', task.taskId, 'task.json');
-  const record = JSON.parse(await readFile(path, 'utf8'));
+  const dataDir = join(root, 'historical');
+  const path = join(dataDir, 'tasks', task.taskId, 'task.json');
+  const record = { ...await manager.record(task.taskId), schemaVersion: 1 };
   record.reportContract = reportContract;
   record.attempts[0].fingerprint = createHash('sha256').update(JSON.stringify({
     prompt: input.prompt, workspace: record.workspace, access: 'read-only', effort: 'off', timeoutMs: null,
     maxTokens: null, maxToolCalls: 0, maxModelRequests: 1, maxRequestBytes: null,
     capabilityProfile: 'inference-only', capabilityDigest: 'offline', executionMode: 'single-request', workload: 'drafting', reportContract,
   })).digest('hex');
+  await mkdir(join(dataDir, 'tasks', task.taskId), { recursive: true });
   await writeFile(path, JSON.stringify(record));
-  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: () => assert.fail('Replay must not launch'),
+  const next = await new TaskManager({ dataDir, runner: () => assert.fail('Replay must not launch'),
     resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
   t.after(() => next.close());
   const replay = await next.submit(input);
@@ -129,7 +131,7 @@ test('report contract persists through replay and rejects changed roles without 
   assert.equal(done.outputValidation.status, 'valid');
   assert.equal(done.reportValidation.status, 'mismatch');
   assert.equal(done.parentAcceptance, 'not_assessed');
-  assert.equal(manager.usage({ taskId: task.taskId }).tokens.totalTokens.reported, 956);
+  assert.equal((await manager.usage({ taskId: task.taskId })).tokens.totalTokens.reported, 956);
   await manager.close();
   const next = await new TaskManager({ dataDir: join(root, 'state'), runner: () => { throw new Error('must not launch'); }, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
   t.after(() => next.close());
@@ -138,8 +140,8 @@ test('report contract persists through replay and rejects changed roles without 
   assert.equal(replay.reportValidation.status, 'mismatch');
   assert.deepEqual(replay.reportContract, reportContract);
   await assert.rejects(next.submit({ ...input, reportContract: { facts: [{ ...reportContract.facts[0], value: 200 }] } }), { code: 'REQUEST_CONFLICT' });
-  await assert.rejects(next.continue({ taskId: task.taskId, requestId: 'repair-report', prompt: 'repair' }), { code: 'NOT_RESUMABLE' });
-  assert.equal(next.usage().tokens.totalTokens.reported, 956);
+  await assert.rejects(next.continue({ taskId: task.taskId, requestId: 'repair-report', prompt: 'repair', controlToken: task.controlToken }), { code: 'NOT_RESUMABLE' });
+  assert.equal((await next.usage({ scope: 'store' })).tokens.totalTokens.reported, 956);
   assert.equal(launches, 1);
   await next.close();
 });
@@ -163,15 +165,15 @@ test('report facts and each stage receipt survive continuation and restart witho
   const done = await manager.wait({ taskId: task.taskId });
   assert.equal(done.reportValidation.status, 'facts_preserved');
   assert.equal(done.reportValidation.proseAcceptance, 'not_assessed');
-  assert.equal(manager.usage().recordedModelRequests, 3);
-  assert.equal(manager.usage().tokens.totalTokens.reported, 150);
+  assert.equal((await manager.usage()).recordedModelRequests, 3);
+  assert.equal((await manager.usage()).tokens.totalTokens.reported, 150);
   await manager.close();
   const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
   t.after(() => next.close());
-  assert.equal(next.usage().recordedModelRequests, 3);
-  assert.equal(next.usage().unknownReceiptGroups, 0);
-  assert.equal(next.record(task.taskId).orchestration.stages.length, 3);
-  assert.ok(next.record(task.taskId).orchestration.stages.every(stage => stage.budget.calls.length === 1));
+  assert.equal((await next.usage({ scope: 'store' })).recordedModelRequests, 3);
+  assert.equal((await next.usage({ scope: 'store' })).unknownReceiptGroups, 0);
+  assert.equal((await next.record(task.taskId)).orchestration.stages.length, 3);
+  assert.ok((await next.record(task.taskId)).orchestration.stages.every(stage => stage.budget.calls.length === 1));
   await next.close();
 });
 const untilAborted = ({ signal }) => new Promise(resolve => {
@@ -182,14 +184,17 @@ const untilAborted = ({ signal }) => new Promise(resolve => {
 test('first-save failure does not publish a phantom task or request', async t => {
   let launches = 0;
   const { manager, workspace } = await fixture(t, async () => { launches++; return completed(); });
-  manager.persist = async () => { throw new Error('offline disk failure'); };
+  const original = manager.store.admit.bind(manager.store);
+  manager.store.admit = async () => { throw Object.assign(new Error('offline disk failure'), { code: 'STATE_WRITE_FAILED' }); };
   const input = { executionMode: 'single-request', requestId: 'disk-failure', prompt: 'task', workspace };
   await assert.rejects(manager.submit(input), { code: 'STATE_WRITE_FAILED' });
   assert.equal(launches, 0);
   assert.equal(manager.records.size, 0);
   assert.equal(manager.requests.size, 0);
-  assert.deepEqual(await readdir(manager.tasksDir), []);
-  await assert.rejects(manager.submit(input), { code: 'RECOVERY_REQUIRED' });
+  assert.equal((await manager.list({ scope: 'store' })).total, 0);
+  manager.store.admit = original;
+  const retry = await manager.submit(input);
+  assert.equal((await manager.wait({ taskId: retry.taskId })).status, 'completed');
 });
 
 test('single-request authorization cannot be continued or refilled', async t => {
@@ -197,20 +202,20 @@ test('single-request authorization cannot be continued or refilled', async t => 
   const task = await manager.submit({ executionMode: 'single-request', requestId: 'saved', prompt: 'task', workspace });
   await manager.wait({ taskId: task.taskId });
   await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'NOT_RESUMABLE' });
-  assert.equal(manager.status({ taskId: task.taskId }).number, 1);
-  assert.equal(manager.status({ taskId: task.taskId }).status, 'completed');
+  assert.equal((await manager.status({ taskId: task.taskId })).number, 1);
+  assert.equal((await manager.status({ taskId: task.taskId })).status, 'completed');
   assert.equal(manager.requests.has('unsaved'), false);
 });
 
-test('startup removes only an empty unpublished task directory', async t => {
+test('observations preserve unpublished legacy directories without creating ownership state', async t => {
   const { manager, root } = await fixture(t, completed);
   await manager.close();
   const orphan = join(root, 'state', 'tasks', '00000000-0000-0000-0000-000000000000');
-  await mkdir(orphan);
+  await mkdir(orphan, { recursive: true });
   const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
-  assert.equal(next.list().total, 0);
+  assert.equal((await next.list({ scope: 'store' })).total, 0);
+  assert.deepEqual(await readdir(orphan), []);
   await next.close();
-  await mkdir(orphan);
   await writeFile(join(orphan, 'unknown'), 'preserve');
   const blocked = new TaskManager({ dataDir: join(root, 'state'), runner: completed });
   await assert.rejects(blocked.open(), { code: 'INVALID_STATE' });
@@ -221,7 +226,7 @@ test('startup rejects malformed saved attempts before registration and retains t
   const { manager, workspace, root } = await fixture(t, completed);
   const task = await manager.submit({ executionMode: 'single-request', requestId: 'valid', prompt: 'fixture', workspace });
   await manager.wait({ taskId: task.taskId });
-  const valid = structuredClone(manager.record(task.taskId));
+  const valid = { ...await manager.record(task.taskId), schemaVersion: 1 };
   await manager.close();
   const invalid = [
     ['empty', []], ['non-array', {}], ['null-element', [null]], ['missing-fields', [{}]],
@@ -249,10 +254,9 @@ test('startup rejects malformed saved attempts before registration and retains t
     const next = new TaskManager({ dataDir, runner: () => { launches++; throw new Error('must not launch'); } });
     try {
       await assert.rejects(next.open(), { code: 'INVALID_STATE' });
-      assert.equal(next.blocked, true);
       assert.equal(next.records.has(task.taskId), false);
       await next.close();
-      await access(join(dataDir, 'owner.lock'));
+      await assert.rejects(access(join(dataDir, 'owner.lock')), { code: 'ENOENT' });
       assert.equal(await readFile(path, 'utf8'), saved);
       assert.equal(launches, 0);
     } finally { await next.close(); }
@@ -272,7 +276,7 @@ test('idempotent retries do not require credentials or start a new attempt', asy
   assert.equal(launches, 1);
 });
 
-test('concurrent duplicate submissions launch once; changed input conflicts and other tasks are busy', async t => {
+test('concurrent duplicate submissions launch once; changed input conflicts and independent tasks overlap', async t => {
   let launches = 0;
   const { manager, workspace } = await fixture(t, args => { launches++; return untilAborted(args); });
   const input = { executionMode: 'single-request', requestId: 'idempotent-1', prompt: 'Task', workspace };
@@ -281,9 +285,10 @@ test('concurrent duplicate submissions launch once; changed input conflicts and 
   assert.equal(duplicate.duplicate, true);
   assert.equal(launches, 1);
   await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, prompt: 'Changed' }), { code: 'REQUEST_CONFLICT' });
-  await assert.rejects(manager.submit({ executionMode: 'single-request', ...input, requestId: 'other' }), { code: 'BUSY' });
+  const other = await manager.submit({ executionMode: 'single-request', ...input, requestId: 'other' });
   assert.equal((await manager.cancel({ taskId: first.taskId })).status, 'cancelled');
   assert.equal((await manager.result({ taskId: first.taskId })).text, 'partial');
+  assert.equal((await manager.status({ taskId: other.taskId })).status, 'running');
 });
 
 test('wall timeout stops and reaps the worker before publishing timed_out', async t => {
@@ -295,45 +300,51 @@ test('wall timeout stops and reaps the worker before publishing timed_out', asyn
   await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'followup', prompt: 'More' }), { code: 'NOT_RESUMABLE' });
 });
 
-test('cleanup failure retains ownership and blocks later workers and restarts', async t => {
+test('cleanup failure retains only its lease and permits safe observations and unrelated workers', async t => {
   const { manager, workspace, root } = await fixture(t, async () => ({ terminal: 'completed', text: 'result', cleanup: 'unverified' }));
   const task = await manager.submit({ executionMode: 'single-request', requestId: 'unclean', prompt: 'Task', workspace });
   assert.equal((await manager.wait({ taskId: task.taskId, timeoutMs: 1000 })).status, 'cleanup_failed');
-  await assert.rejects(manager.submit({ executionMode: 'single-request', requestId: 'blocked', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
+  const second = await manager.submit({ executionMode: 'single-request', requestId: 'independent', prompt: 'Task', workspace });
+  assert.equal((await manager.wait({ taskId: second.taskId })).status, 'cleanup_failed');
+  await assert.rejects(manager.continue({ taskId: task.taskId, requestId: 'blocked', prompt: 'More' }), { code: 'NOT_RESUMABLE' });
+  assert.equal((await manager.store.read()).leases.length, 2);
   await manager.close();
   await access(join(root, 'state', 'owner.lock'));
-  const next = new TaskManager({ dataDir: join(root, 'state'), runner: completed });
-  await assert.rejects(next.open(), { code: 'STATE_LOCKED' });
+  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
+  assert.equal((await next.status({ taskId: task.taskId })).status, 'cleanup_failed');
+  assert.equal((await next.store.read()).leases.length, 2);
+  await next.close();
 });
 
-test('legacy records retain idempotent replay and same-session continuation after upgrade', async t => {
+test('legacy records retain idempotent replay and evidence while continuation is explicitly read-only', async t => {
   const { manager, workspace, root } = await fixture(t, completed);
   const input = { requestId: 'first', prompt: 'Task', workspace, effort: 'high', maxTokens: 8192, maxModelRequests: 1, maxToolCalls: 0, capabilityProfile: 'inference-only' };
   const first = await manager.submit({ ...input, executionMode: 'single-request' });
   await manager.wait({ taskId: first.taskId, timeoutMs: 1000 });
   // Serialize the exact pre-1.0 record/fingerprint shape, including explicit caps.
-  const record = manager.record(first.taskId);
+  const record = { ...await manager.record(first.taskId), schemaVersion: 1 };
   delete record.planning;
   record.attempts[0].fingerprint = createHash('sha256').update(JSON.stringify({ prompt: input.prompt, workspace: record.workspace, access: 'read-only', effort: 'high', timeoutMs: 300000, maxTokens: 8192, maxToolCalls: 0, maxModelRequests: 1, maxRequestBytes: 262144, capabilityProfile: 'inference-only', capabilityDigest: 'offline' })).digest('hex');
-  await manager.persist(record);
   await manager.close();
-  let resumed;
-  const next = await new TaskManager({ dataDir: join(root, 'state'), resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }), runner: async args => { resumed = args; return { terminal: 'completed', text: 'continued', cleanup: 'confirmed' }; } }).open();
+  const dataDir = join(root, 'historical');
+  const directory = join(dataDir, 'tasks', first.taskId);
+  await mkdir(directory, { recursive: true });
+  const serialized = JSON.stringify(record);
+  await writeFile(join(directory, 'task.json'), serialized);
+  await writeFile(join(directory, 'result-1.txt'), 'result');
+  const next = await new TaskManager({ dataDir, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }), runner: () => assert.fail('Historical task must not launch') }).open();
   t.after(() => next.close());
   assert.equal((await next.submit(input)).duplicate, true);
-  const second = await next.continue({ taskId: first.taskId, requestId: 'second', prompt: 'More' });
-  await next.wait({ taskId: first.taskId, timeoutMs: 1000 });
-  assert.equal(second.sessionId, first.sessionId);
-  assert.equal(resumed.resume, true);
+  await assert.rejects(next.continue({ taskId: first.taskId, requestId: 'second', prompt: 'More' }), { code: 'LEGACY_TASK_READ_ONLY' });
   assert.equal((await next.result({ taskId: first.taskId, attempt: 1 })).text, 'result');
-  assert.equal((await next.result({ taskId: first.taskId, attempt: 2, offset: 1, limit: 3 })).text, 'ont');
-  assert.equal(next.list().tasks.length, 1);
+  assert.equal((await next.result({ taskId: first.taskId, offset: 1, limit: 3 })).text, 'esu');
+  assert.equal((await next.list({ scope: 'store' })).tasks.length, 1);
   await next.close();
-  const reopened = await new TaskManager({ dataDir: join(root, 'state'), runner: () => { throw new Error('must not launch'); } }).open();
+  const reopened = await new TaskManager({ dataDir, runner: () => { throw new Error('must not launch'); } }).open();
   try {
-    assert.equal(reopened.status({ taskId: first.taskId }).number, 2);
+    assert.equal((await reopened.status({ taskId: first.taskId })).number, 1);
     assert.equal((await reopened.result({ taskId: first.taskId, attempt: 1 })).text, 'result');
-    assert.equal((await reopened.result({ taskId: first.taskId, attempt: 2 })).text, 'continued');
+    assert.equal(await readFile(join(directory, 'task.json'), 'utf8'), serialized);
   } finally { await reopened.close(); }
 });
 
@@ -357,19 +368,23 @@ test('noncompleted and oversized results are failed, not accepted', async t => {
   }
 });
 
-test('incomplete saved execution is marked interrupted and cannot silently resume', async t => {
+test('incomplete legacy execution is observed without mutation and cannot silently resume', async t => {
   const { manager, workspace, root } = await fixture(t, completed);
   const task = await manager.submit({ executionMode: 'single-request', requestId: 'saved', prompt: 'Task', workspace });
   await manager.wait({ taskId: task.taskId, timeoutMs: 1000 });
   await manager.close();
-  const path = join(root, 'state', 'tasks', task.taskId, 'task.json');
-  const record = JSON.parse(await readFile(path, 'utf8'));
+  const dataDir = join(root, 'historical');
+  const path = join(dataDir, 'tasks', task.taskId, 'task.json');
+  const record = { ...await manager.record(task.taskId), schemaVersion: 1 };
   record.attempts[0].status = 'running';
   record.attempts[0].cleanup = 'pending';
-  await writeFile(path, JSON.stringify(record));
-  const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
-  assert.equal(next.status({ taskId: task.taskId }).status, 'interrupted');
-  await assert.rejects(next.submit({ executionMode: 'single-request', requestId: 'other', prompt: 'Task', workspace }), { code: 'RECOVERY_REQUIRED' });
+  await mkdir(join(dataDir, 'tasks', task.taskId), { recursive: true });
+  const serialized = JSON.stringify(record);
+  await writeFile(path, serialized);
+  const next = await new TaskManager({ dataDir, runner: completed, resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
+  assert.equal((await next.status({ taskId: task.taskId })).status, 'running');
+  await assert.rejects(next.continue({ taskId: task.taskId, requestId: 'other', prompt: 'Task' }), { code: 'LEGACY_TASK_READ_ONLY' });
+  assert.equal(await readFile(path, 'utf8'), serialized);
   await next.close();
 });
 
@@ -388,12 +403,12 @@ for (const stage of ['saveResult', 'persist']) {
     const task = await manager.submit({ executionMode: 'single-request', requestId: `publish-${stage}`, prompt: 'Task', workspace });
     await reached;
     try {
-      assert.equal(manager.status({ taskId: task.taskId }).status, 'running');
+      assert.equal((await manager.status({ taskId: task.taskId })).status, 'running');
       await assert.rejects(manager.result({ taskId: task.taskId }), { code: 'NOT_FINISHED' });
     } finally { release(); }
     await manager.wait({ taskId: task.taskId, timeoutMs: 1000 });
     assert.equal((await manager.result({ taskId: task.taskId })).text, 'result');
-    assert.equal(manager.status({ taskId: task.taskId }).status, 'completed');
+    assert.equal((await manager.status({ taskId: task.taskId })).status, 'completed');
   });
 }
 
@@ -405,13 +420,13 @@ test('recent-task recovery sorts execution timestamps rather than directory orde
     const record = { schemaVersion: 1, taskId, sessionId: `session-${index}`, workspace,
       route: { provider: 'deepseek-official', model: 'deepseek-flash', effort: 'high' }, access: 'read-only', maxTokens: 256, maxToolCalls: 1, createdAt: startedAt,
       attempts: [{ number: 1, requestId: `request-${index}`, fingerprint: createHash('sha256').update(`request-${index}`).digest('hex'), status: 'completed', cleanup: 'confirmed', startedAt }] };
-    await mkdir(join(root, 'state', 'tasks', taskId));
-    await manager.persist(record);
+    await mkdir(join(root, 'state', 'tasks', taskId), { recursive: true });
+    await writeFile(join(root, 'state', 'tasks', taskId, 'task.json'), JSON.stringify(record));
   }
   await manager.close();
   const next = await new TaskManager({ dataDir: join(root, 'state'), runner: completed }).open();
   try {
-    const tasks = next.list().tasks;
+    const tasks = (await next.list({ scope: 'store' })).tasks;
     assert.equal(tasks.length, 50);
     assert.equal(tasks[0].requestId, 'request-0');
     assert.ok(!tasks.some(task => task.requestId === 'request-50'));

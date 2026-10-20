@@ -61,7 +61,7 @@ test('unspecified limits survive persistence, replay and more than sixteen autho
   assert.equal(calls, 18);
   await f.manager.close();
   const next = await new TaskManager(f.options).open();
-  try { assert.equal(next.status({ taskId: task.taskId }).number, 18); }
+  try { assert.equal((await next.status({ taskId: task.taskId })).number, 18); }
   finally { await next.close(); }
 });
 
@@ -72,7 +72,8 @@ test('v1 replay keeps its original finite defaults without relaxing existing aut
   const task = await f.manager.submit({ ...original, maxTokens: 8192, maxRequestBytes: 262144, timeoutMs: 300000 });
   await f.manager.wait({ taskId: task.taskId });
   await f.manager.close();
-  const path = join(f.root, 'data', 'tasks', task.taskId, 'task.json');
+  const registry = JSON.parse(await readFile(join(f.root, 'data', 'registry.json'), 'utf8'));
+  const path = join(f.root, 'data', ...registry.tasks[task.taskId].snapshot.split('/'));
   const saved = JSON.parse(await readFile(path, 'utf8'));
   delete saved.planning.limitsPolicy;
   await writeFile(path, JSON.stringify(saved));
@@ -94,9 +95,9 @@ test('replaying an earlier continuation remains idempotent after a later timeout
   await f.manager.close();
   const next = await new TaskManager(f.options).open();
   try {
-    const replay = await next.continue(continuation);
+    const replay = await next.continue({ ...continuation, controlToken: first.controlToken });
     assert.equal(replay.duplicate, true); assert.equal(replay.timeoutMs, 60000); assert.equal(calls, 3);
-    await assert.rejects(next.continue({ ...continuation, prompt: 'changed' }), { code: 'REQUEST_CONFLICT' });
+    await assert.rejects(next.continue({ ...continuation, prompt: 'changed', controlToken: first.controlToken }), { code: 'REQUEST_CONFLICT' });
   } finally { await next.close(); }
 });
 
@@ -112,7 +113,7 @@ test('partial totals persist without inventing request, tool or time totals', as
   assert.deepEqual(done.orchestration.remaining, { modelRequests: null, outputTokens: 19900, toolCalls: null, durationMs: null });
   await f.manager.close();
   const next = await new TaskManager(f.options).open();
-  try { assert.equal(next.status({ taskId: task.taskId }).orchestration.remaining.outputTokens, 19900); }
+  try { assert.equal((await next.status({ taskId: task.taskId })).orchestration.remaining.outputTokens, 19900); }
   finally { await next.close(); }
 });
 

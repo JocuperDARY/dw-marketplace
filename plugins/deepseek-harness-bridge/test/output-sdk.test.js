@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { retainedLeases } from './fixtures/committed-state.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises';
@@ -95,6 +96,6 @@ for (const single of [false, true]) for (const mode of ['reasoning-only', 'summa
     assert.equal(usage.tokens.inputTokens.reported, requests * 100);
     assert.equal(usage.tokens.outputTokens.missingCalls, 0);
     assert.equal(usage.modelCallsPerformed, 0);
-    await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
+    assert.deepEqual(await retainedLeases(join(root, 'state')), []);
   });
 }

@@ -6,6 +6,13 @@ import { tmpdir } from 'node:os';
 import { TaskManager } from '../src/tasks.js';
 
 const authorization = { totalModelRequests: 6, totalOutputTokens: 3072, totalToolCalls: 4, totalDurationMs: 30000 };
+async function savedTaskPath(dataDir, taskId) {
+  const registry = JSON.parse(await readFile(join(dataDir, 'registry.json'), 'utf8'));
+  return join(dataDir, ...registry.tasks[taskId].snapshot.split('/'));
+}
+async function savedTask(dataDir, taskId) {
+  return JSON.parse(await readFile(await savedTaskPath(dataDir, taskId), 'utf8'));
+}
 async function fixture(t, runner) {
   const root = await mkdtemp(join(tmpdir(), 'bridge-orchestration-'));
   const workspace = join(root, 'workspace');
@@ -28,7 +35,7 @@ test('authorized task saves a checkpoint before autonomously allocating its next
   const f = await fixture(t, async args => {
     seen.push(args);
     if (seen.length === 2) {
-      const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', args.task.taskId, 'task.json'), 'utf8'));
+      const saved = await savedTask(join(f.root, 'state'), args.task.taskId);
       assert.equal(saved.orchestration.stages[0].status, 'checkpoint');
       assert.equal(JSON.parse(await readFile(saved.orchestration.lastCheckpoint.path, 'utf8')).summary, 'read file A');
       assert.match(args.prompt, /read file A/);
@@ -88,7 +95,7 @@ test('an interrupted stage reserves its allocation before launch and cancellatio
   const task = await f.manager.submit(f.input);
   const runningTask = await ready;
   assert.ok(runningTask.stageBudget);
-  const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'task.json'), 'utf8'));
+  const saved = await savedTask(join(f.root, 'state'), task.taskId);
   assert.equal(saved.orchestration.stages[0].charged.modelRequests, 2);
   const done = await f.manager.cancel({ taskId: task.taskId });
   assert.equal(done.status, 'cancelled');
@@ -123,7 +130,7 @@ test('restart and manual continuation preserve totals, deadline and authorizatio
   t.after(() => next.close());
   assert.equal((await next.submit(f.input)).duplicate, true);
   await assert.rejects(next.submit({ ...f.input, budget: { ...authorization, totalModelRequests: 8 } }), { code: 'REQUEST_CONFLICT' });
-  await next.continue({ taskId: submitted.taskId, requestId: 'follow-up', prompt: 'Review the saved result.' });
+  await next.continue({ taskId: submitted.taskId, requestId: 'follow-up', prompt: 'Review the saved result.', controlToken: submitted.controlToken });
   const second = await next.wait({ taskId: submitted.taskId });
   assert.equal(launches, 2);
   assert.equal(second.orchestration.charged.modelRequests, 2);
@@ -143,11 +150,15 @@ test('failed checkpoint publication keeps ownership and starts no further work',
   const task = await f.manager.submit(f.input);
   const done = await f.manager.wait({ taskId: task.taskId });
   assert.equal(done.status, 'state_write_failed');
+  assert.equal(done.durability, 'unconfirmed');
+  assert.equal(done.committedStatus, 'running');
   assert.equal(launches, 1);
-  assert.equal(f.manager.blocked, true);
-  const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'task.json'), 'utf8'));
+  const registry = JSON.parse(await readFile(join(f.root, 'state', 'registry.json'), 'utf8'));
+  assert.equal(registry.tasks[task.taskId].lease.attempt, 1);
+  const saved = await savedTask(join(f.root, 'state'), task.taskId);
+  assert.equal(saved.attempts.at(-1).status, 'running');
   assert.equal(saved.orchestration.stages[0].charged.modelRequests, 2);
-  assert.equal(JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'checkpoint-1.json'), 'utf8')).state, 'checkpoint');
+  assert.equal(JSON.parse(await readFile(join(f.root, 'state', 'tasks-v3', task.taskId, 'checkpoint-1.json'), 'utf8')).state, 'checkpoint');
 });
 
 test('invalid usage receipts keep the full reservation and never auto-retry', async t => {
@@ -179,7 +190,7 @@ test('truncation saves partial evidence before one tool-free recovery charged to
     if (seen.length === 1) return { ...reply(args.task, 'completed', 'unused'), terminal: 'max-tokens', text: '{"rows":[1,2',
       output: { kind: 'partial_text', modelTruncated: true }, error: { code: 'OUTPUT_TRUNCATED', message: 'bounded fixture' } };
     if (seen.length > 2) return reply(args.task, 'completed', 'Reviewed result', '');
-    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', args.task.taskId, 'partial-1.json'), 'utf8'));
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks-v3', args.task.taskId, 'partial-1.json'), 'utf8'));
     assert.equal(saved.text, '{"rows":[1,2');
     assert.equal(args.task.route.effort, 'off');
     assert.equal(args.task.maxModelRequests, 1);
@@ -221,7 +232,7 @@ test('exhaustion, uncertain accounting, failed cleanup and repeated truncation n
     const task = await f.manager.submit(mode === 'exhausted' ? { ...f.input, budget: { ...authorization, totalModelRequests: 2, totalOutputTokens: 1024 } } : f.input);
     const done = await f.manager.wait({ taskId: task.taskId });
     assert.equal(launches, mode === 'twice' ? 2 : 1);
-    assert.equal(done.status, mode === 'cleanup' ? 'cleanup_failed' : 'failed');
+    assert.equal(done.status, mode === 'cleanup' ? 'cleanup_failed' : 'failed', JSON.stringify({ mode, done }));
     assert.equal(done.terminal, 'max-tokens');
     assert.ok(done.orchestration.charged.outputTokens <= done.orchestration.authorized.totalOutputTokens);
     assert.equal((await f.manager.result({ taskId: task.taskId })).text, '{"partial":');
@@ -233,10 +244,10 @@ test('failed continuation publication preserves prior completed work and consume
   const f = await fixture(t, async ({ task }) => { launches++; return reply(task, 'completed', 'done', ''); });
   const first = await f.manager.submit(f.input);
   await f.manager.wait({ taskId: first.taskId });
-  f.manager.persist = async () => { throw new Error('offline disk failure'); };
+  f.manager.store.writeSnapshot = async () => { throw new Error('offline disk failure'); };
   await assert.rejects(f.manager.continue({ taskId: first.taskId, requestId: 'unsaved', prompt: 'more' }), { code: 'STATE_WRITE_FAILED' });
-  assert.equal(f.manager.status({ taskId: first.taskId }).status, 'completed');
-  assert.equal(f.manager.status({ taskId: first.taskId }).number, 1);
+  assert.equal((await f.manager.status({ taskId: first.taskId })).status, 'completed');
+  assert.equal((await f.manager.status({ taskId: first.taskId })).number, 1);
   assert.equal(launches, 1);
   assert.equal(f.manager.requests.has('unsaved'), false);
 });
@@ -261,9 +272,15 @@ test('clipped partial context is labeled for recovery and failed publication sta
     const task = await f.manager.submit(f.input);
     const done = await f.manager.wait({ taskId: task.taskId });
     assert.equal(done.status, failPublication ? 'state_write_failed' : 'completed');
+    if (failPublication) {
+      assert.equal(done.durability, 'unconfirmed');
+      assert.equal(done.committedStatus, 'running');
+    }
     assert.equal(launches, failPublication ? 1 : 2);
-    assert.equal(f.manager.blocked, failPublication);
-    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', task.taskId, 'partial-1.json'), 'utf8'));
+    await f.manager.active.get(task.taskId)?.promise;
+    const registry = JSON.parse(await readFile(join(f.root, 'state', 'registry.json'), 'utf8'));
+    assert.equal(!!registry.tasks[task.taskId].lease, failPublication);
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks-v3', task.taskId, 'partial-1.json'), 'utf8'));
     assert.equal(saved.text, partialText);
   }
 });
@@ -275,7 +292,7 @@ test('corrupt persisted spending cannot increase authorization after restart', a
   const submitted = await f.manager.submit(f.input);
   await f.manager.wait({ taskId: submitted.taskId });
   await f.manager.close();
-  const path = join(f.root, 'state', 'tasks', submitted.taskId, 'task.json');
+  const path = await savedTaskPath(join(f.root, 'state'), submitted.taskId);
   const record = JSON.parse(await readFile(path, 'utf8'));
   record.orchestration.stages[0].charged.modelRequests = -1;
   await writeFile(path, JSON.stringify(record));

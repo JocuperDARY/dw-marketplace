@@ -55,7 +55,7 @@ test('budgeted summary prose saves original evidence then uses one off/tool-free
     seen.push(args);
     assert.match(args.prompt, /summary.*ONLY/i);
     if (seen.length === 1) return reply(args.task, invalid);
-    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks', args.task.taskId, 'partial-1.json'), 'utf8'));
+    const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks-v3', args.task.taskId, 'partial-1.json'), 'utf8'));
     assert.equal(saved.text, invalid);
     assert.equal(saved.reason, 'OUTPUT_FORMAT_INVALID');
     assert.equal(args.task.route.effort, 'off');
@@ -186,7 +186,7 @@ test('exhausted format recovery and failed evidence publication do not launch an
     f.manager.persist = async record => {
       if (record.orchestration.lastPartial && mode === 'publication') throw new Error('disk failed');
       await persist(record);
-      if (record.orchestration.lastPartial && mode === 'cancelled') f.manager.active.controller.abort();
+      if (record.orchestration.lastPartial && mode === 'cancelled') f.manager.active.get(record.taskId).controller.abort();
     };
     const task = await f.manager.submit({ ...f.input, budget: { ...budget, totalModelRequests: 2, totalOutputTokens: 512 } });
     const done = await f.manager.wait({ taskId: task.taskId });
@@ -196,7 +196,13 @@ test('exhausted format recovery and failed evidence publication do not launch an
       assert.equal(done.recovery.status, 'budget_exhausted');
       assert.equal(done.outputValidation.status, 'invalid');
     }
-    if (mode === 'publication') assert.equal(done.status, 'state_write_failed');
+    if (mode === 'publication') {
+      assert.equal(done.status, 'state_write_failed');
+      assert.equal(done.durability, 'unconfirmed');
+      assert.equal(done.committedStatus, 'running');
+      const saved = JSON.parse(await readFile(join(f.root, 'state', 'tasks-v3', task.taskId, 'partial-1.json'), 'utf8'));
+      assert.equal(saved.text, envelope('prefix ' + good()));
+    }
     if (mode === 'cancelled') assert.equal(done.terminal, 'aborted');
   }
 });

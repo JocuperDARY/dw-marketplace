@@ -144,7 +144,7 @@ test('MCP preserves omitted limits and enforces an explicit one-request contract
   assert.equal(noContract.structuredContent.error.code, 'REVIEW_CONTRACT_REQUIRED');
   const duplicateIds = await client.callTool({ name: 'dsh_submit', arguments: { executionMode: 'single-request', requestId: 'duplicate-contract', prompt: 'Rules', workspace, reviewContract: { caseIds: ['C1', 'C1'], ruleIds: ['R1'], checkIds: [] } } });
   assert.equal(JSON.parse(duplicateIds.content[0].text).error.code, 'INVALID_ARGUMENT');
-  assert.equal(manager.list().total, 0);
+  assert.equal((await manager.list()).total, 0);
   const task = await call('dsh_submit', { executionMode: 'single-request', requestId: 'mcp-1', prompt: 'Task', workspace });
   assert.equal((await call('dsh_wait', { taskId: task.taskId })).status, 'completed');
   assert.equal((await call('dsh_result', { taskId: task.taskId })).text, 'Task');

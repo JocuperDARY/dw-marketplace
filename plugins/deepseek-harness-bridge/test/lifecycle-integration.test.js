@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, access } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TaskManager } from '../src/tasks.js';
+import { committedTask, snapshotPath } from './fixtures/committed-state.js';
 
 const source = JSON.parse(await readFile(new URL('./fixtures/lifecycle-failure.json', import.meta.url), 'utf8'));
 const lifecycleContract = JSON.parse(await readFile(new URL('./fixtures/lifecycle-contract.json', import.meta.url), 'utf8'));
@@ -95,7 +96,7 @@ test('automatic lifecycle submission adds no omitted resource caps or capability
   assert.equal(actual.maxModelRequests, null);
   assert.equal(actual.maxRequestBytes, null);
   assert.equal(actual.orchestration, undefined);
-  const saved = JSON.parse(await readFile(join(f.dataDir, 'tasks', submitted.taskId, 'task.json'), 'utf8'));
+  const saved = await committedTask(f.dataDir, submitted.taskId);
   assert.equal(saved.attempts[0].timeoutMs, null);
 });
 
@@ -104,7 +105,7 @@ test('invalid persisted lifecycle contract retains original record and ownership
   const task = await f.manager.submit(f.input);
   await f.manager.wait({ taskId: task.taskId });
   await f.manager.close();
-  const path = join(f.dataDir, 'tasks', task.taskId, 'task.json');
+  const path = await snapshotPath(f.dataDir, task.taskId);
   const saved = JSON.parse(await readFile(path, 'utf8'));
   saved.lifecycleContract.cases[2].allowedStatuses = [];
   const bytes = JSON.stringify(saved);
@@ -112,10 +113,10 @@ test('invalid persisted lifecycle contract retains original record and ownership
   const reopened = f.create();
   await assert.rejects(reopened.open(), { code: 'INVALID_STATE' });
   assert.equal(reopened.records.size, 0);
-  assert.equal(reopened.blocked, true);
+  assert.equal(reopened.blocked, false);
   assert.equal(await readFile(path, 'utf8'), bytes);
   await access(join(f.dataDir, 'owner.lock'));
-  await assert.rejects(f.create().open(), { code: 'STATE_LOCKED' });
+  await assert.rejects(f.create().open(), { code: 'INVALID_STATE' });
 });
 
 test('budgeted content mismatch does not spend recovery allowance; explicit continuation retains the contract', async t => {

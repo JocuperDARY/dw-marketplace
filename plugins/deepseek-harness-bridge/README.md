@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 2.1.0
+# DeepSeek Harness Bridge 3.0.0
+
+3.0.0 支持同一状态目录内的跨聊天并行任务。任务独立持有会话、预算、执行锁和取消信号；跨连接控制需要首次提交返回的 `controlToken`。写入任务与重叠工作区互斥，旧任务仅保留只读访问。升级须等待旧任务结束，停止旧宿主后切换；详见[并行会话与升级边界](docs/parallel-conversations.md)。
 
 2.0.4 修复原生 Teams 的共享阶段检查点：父任务保留收尾请求，停止并回收所属子任务，保存真实终态和迟到的结算通知。Windows 回执原子替换仅对短暂共享冲突做有限重试。增加真实 SDK 内的离线文件、技能、Shell/jobs、会话恢复和 Teams 验证；模型流为合成数据，不代表真实 Flash 质量或费用。见[原生执行与检查点验证](docs/native-validation.md)。
 
@@ -56,7 +58,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 | `DSH_BRIDGE_DATA_DIR` | 建议显式设置的绝对状态目录，必须与每个任务工作区互不包含。 |
 | `PLUGIN_DATA` / `CLAUDE_PLUGIN_DATA` | 未指定状态目录时优先使用的宿主数据根；其下建立 `.deepseek-harness-bridge`。均未提供时使用用户目录下同名子目录。 |
 
-同一数据目录允许多个 MCP 发现连接，但同时只运行一个 Flash 任务；活动任务持有独占锁。若需要不同聊天并行执行 Flash 任务，应配置不同的数据目录和互不冲突的工作区。安装、配置和已连接是三个不同状态；以目标聊天实际列出并可调用 `dsh_doctor` 为连接证据。
+同一数据目录支持多个 MCP 连接同时运行独立 Flash 任务。每个任务有独立会话、预算和取消清理；共享只读工作区可并发，写任务必须与其他活动任务的工作区互不重叠。安装、配置和已连接是三个不同状态；以目标聊天实际列出并可调用 `dsh_doctor` 为连接证据。
 
 ## 使用
 
@@ -67,10 +69,10 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 | MCP 工具 | 作用 |
 | --- | --- |
 | `dsh_prepare_workspace` | 零模型调用创建一个新的独立目录，由 Bridge 工作者账户持有；拒绝接管现有目录或改写其 ACL。Windows 原生 Shell 任务先准备工作区。 |
-| `dsh_submit` | 提交新任务，立即返回 taskId；同 requestId 和同输入不会重复启动。 |
+| `dsh_submit` | 提交新任务，立即返回 taskId 与仅首次发放的 controlToken；同 requestId 和同输入不会重复启动。 |
 | `dsh_status` | 查询某次执行状态、终止原因和清理结果。 |
-| `dsh_list` | 按最近一次执行的开始时间列出最多 50 项任务，便于恢复 taskId。 |
-| `dsh_usage` | 汇总当前状态目录全部保留任务或一个 taskId 的实际回报 token、缺失项和请求记录；与预算保留额分开。零模型调用。 |
+| `dsh_list` | 默认列出本连接最多 50 项任务；`scope: store` 查看全部保留任务。 |
+| `dsh_usage` | 默认汇总本连接任务；`scope: store` 或一个 taskId 读取相应用量、缺失项和请求记录；与预算保留额分开。零模型调用。 |
 | `dsh_wait` | 等待最多 30 秒并返回简短状态。 |
 | `dsh_result` | 按页读取最终或失败结果；用 nextOffset 继续。 |
 | `dsh_continue` | 续接已完成任务；预算编排任务也可从安全暂停的检查点恢复，总预算不会重置。 |
@@ -178,9 +180,9 @@ workspace-write 另提供 bridge 维护的 `ops_replace`：仅对一个既有 UT
 
 ## 异常退出与恢复
 
-MCP 握手、工具发现、doctor 和 capabilities 不独占状态目录。任务工具按需取得 owner.lock，活动任务和自动阶段之间保持独占，结果持久化且清理确认后释放。观察操作遇到短暂冲突最多等待 1500 ms，`dsh_wait` 与原超时共用此额度；仍冲突时返回 `STATE_LOCKED`、`operation: observation` 和重试间隔。仅重试原读取，不重新提交或消费。持续冲突需核对持有者，不能删除锁；这不证明旧持有者是否仍存活。新的预算阶段使用隔离 SDK 会话，不影响其他桌面对话。
+MCP 握手、发现与观察不获取执行锁，也不改写其他任务状态。提交使用短暂 registry 事务和独立 task lease；等待模型时不持有 registry 锁。`owner.lock` 在 protocol 3 中是永久兼容保护标记，存在不表示有任务运行；以 `activeTaskIds` 与任务回执为准。
 
-正常关闭会先取消该连接的活动任务、等待 SDK 进程退出，再释放 owner.lock。无法确认清理或写入失败时保留锁并阻止新任务。已有锁不会因为 PID 不存在就被自动删除。
+正常关闭只取消该连接拥有的活动任务并等待清理。清理不明或持久化失败会保留该任务及工作区 claim，其他独立工作区仍可运行。跨连接续接或取消需提供 controlToken，凭据不进入 worker prompt、普通观察或日志。旧 schema 1 记录与原始证据不改写，不自动恢复旧任务。
 
 发生 STATE_LOCKED / RECOVERY_REQUIRED 时，保留状态目录，检查是否还有桥接进程及其所属 Harness 运行时；先核实进程身份并完成清理，必要时由操作者归档整个状态目录。确认旧资源均已停止后再建立新的数据目录继续。不要把删除锁当成自动修复。旧结果仍可由操作者从 task.json 和 result-N.txt 取回；未完成任务不得自动续跑。
 
