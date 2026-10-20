@@ -7,6 +7,8 @@ missing cases, wrong rules and semantic errors still do not auto-retry.
 
 Use `verification` for path classification, exception precedence, interacting rules and test expectations. The default is high effort; an omitted output ceiling remains unspecified. This is a conservative starting policy, not evidence that high fixes every error. Literal copying or reformatting can remain mechanical/off. One straightforward rule may justify an explicit low setting with parent checks. Never silently change a user-fixed effort, token cap, request count or deadline; the existing budget contract still applies.
 
+The parent should classify geometry or numerical reasoning, array slicing/broadcasting, and cross-file implications by the reasoning they require, rather than by the size of the requested inventory. These commonly warrant `reasoning` or, for evidence acceptance, `verification`, with high as the starting effort when effort is omitted. The parent makes that choice before dispatch within the authorized resources. An already fixed worker route remains fixed; these examples do not authorize worker escalation or an extra request, and high is not an accuracy guarantee.
+
 There is no prompt-keyword classifier. The parent must choose the workload and provide the contract. Existing tasks without it retain their behavior and request fingerprints. Supplying a contract defaults an omitted workload to verification. Explicit mechanical/low/off combinations are preserved with warnings. Verification without a contract returns `REVIEW_CONTRACT_REQUIRED` before launching a worker.
 
 ## Assignment
@@ -62,6 +64,15 @@ authoritative evidence, and one of: explicitly required, derived requirement,
 not established, or contradicted. A derived requirement needs a concise,
 checkable justification from the cited facts/rules. A plausible recommendation
 is not a requirement; label it as a proposal. Do not invent missing values.
+
+For dimensions, write each operand's rank, ordered axes and symbolic or known
+sizes; trace slices, indexing, reductions and broadcasting operation by
+operation. Check the actual expression, not just compatible sizes. For only,
+all, never and necessarily (including 必然), state the quantified set, inspected
+source boundary and coverage, then seek a counterexample within that scope.
+Distinguish code existence, import, direct or resolved call-site evidence, and
+observed runtime execution. Preserve supported clauses when correcting a local
+error; bounded static absence must not become a repository or runtime claim.
 
 Distinguish stating a parameterized general policy from executing a numerical
 instance. Missing values may prevent computing the latter without preventing
@@ -143,8 +154,25 @@ For claims and proposed prerequisites, maintain an independent parent acceptance
 
 The parent checks the evidence and implication itself, including all added prerequisites, rather than copying the worker's verdicts into this record. Accept a compound case in full only when every requested clause is supported or correctly bounded; record accepted clauses and necessary corrections separately. A correct result with an unsupported rationale or prerequisite still needs correction. Unknown evidence stays unresolved, and a genuinely required missing input blocks only the operation that needs it. Conflicting sources need a scoped uncertainty statement unless supplied authority or precedence resolves the conflict. Neither a valid locator nor a known rule ID alone establishes entailment. These checks do not introduce a new authorization gate or authorize another model call.
 
+For array claims, independently write a dimension ledger before accepting the prose. A synthetic stack with axes `(member, row, column)` and shape `(4, 2, 3)` has `stack.shape[1:] == (2, 3)`. A boolean mask of shape `(2, 3)` matches each member matrix and the mean after reduction over axis 0; it does not have the full stack's rank or shape. Distinguish the shape tuple slice from an array slice. Under trailing-axis elementwise broadcasting, the mask aligns as `(1, 2, 3)` and can expand over the stack, but that compatibility alone establishes neither `stack[mask]` boolean-index validity nor correct axis meaning. Record the actual expression, operand axes, slice/index/reduction axis and resulting shape. Use rectangular and singleton cases when helpful: equal sizes or one member can hide an axis mix-up, while `(1, 2, 3)` and `(2, 3)` still differ in rank. When source or operation rules are incomplete, retain symbolic dimensions and state the missing rule instead of inventing compatibility.
+
+For an absolute qualifier, check its scope separately from the main conclusion. In a synthetic complete file importing `Loader`, `Settings` and `Catalog`, the assertion "imports only Loader and Settings, and has no direct score() call" contains two clauses. `Catalog` refutes the exclusive import clause; it does not refute a separately evidenced absence of a direct `score()` call in that file. Conversely, finding no counterexample in a few excerpts does not establish all/never/only over a repository. Record the quantified set, inspected boundaries, whether coverage was exhaustive for that set, any counterexample and corrected wording. Preserve the supported core and identify the local error; do not accept or reject the whole finding solely because one clause is right or wrong.
+
+Keep code evidence levels explicit:
+
+| Evidence | Supported claim | Further evidence needed |
+| --- | --- | --- |
+| Definition in inspected source | Code exists there | Import, invocation and execution are separate |
+| Import statement | A static import is present | A callable import does not show the callable was invoked or succeeded |
+| Direct or resolved call site | A source path can invoke the routine under stated conditions | Reachability, actual invocation and successful outcome require further evidence |
+| Observed execution trace and outputs | The recorded invocation/outcome for that run and inputs | Other inputs, paths and broader acceptance remain outside that observation |
+
+An exhaustive direct-call inventory of one supplied file can support a bounded absence claim. It cannot by itself exclude calls elsewhere, aliases or dynamic dispatch, and source inspection does not prove successful runtime behavior. A runtime claim requires matching execution evidence. These distinctions fit the existing basis/expected/uncertainty strings and parent acceptance record; no new result schema or automatic semantic validator is added.
+
 ## Evidence boundary
 
 Offline tests use synthetic cases, wrong-but-well-formed drafts, missing checks and network-blocked pinned SDK streams. They verify planning, coverage validation, persistence, result propagation, lack of automatic retries and cleanup. They do not measure real Flash accuracy or establish that changing effort improves task quality. No paid inference is needed for these tests.
 
 The synthetic fixture `test/fixtures/delegation-evidence-data.js` contains six counterexamples: a reviewed claim promoted to authority (`reviewed_authority`), an unsupported added prerequisite (`added_prerequisite`), a general policy incorrectly blocked by missing numerical values (`general_policy`), stable identity metadata mistaken for a fixed decision (`stable_identity`), a compound claim with one invalid clause (`compound_claim`), and an arbitrary optimal choice incorrectly blocked on a tie selector (`ties_any`). Its four legitimate controls are an explicitly required condition (`explicit_constraint`), a numerical instance that really lacks inputs (`numerical_inputs`), a required decision expressly reserved to the parent (`missing_decision`), and a deterministic winner whose required tie priority is expressly reserved to the parent (`ties_unique`). A structurally complete bad draft may still return `structure_complete`; a hand-reviewed fixture expectation documents why its content is rejected. Such tests exercise prompt delivery and the recorded fixture distinctions, not automated proof of natural-language meaning, source truth or improved live model behavior.
+
+Five further anonymous source-review fixtures cover full-stack/trailing-shape confusion with a valid mean clause (`tensor_axes`), an unsupported exclusive-import clause beside a valid direct-call absence (`exclusive_imports`), an import incorrectly treated as successful execution (`import_is_execution`), valid elementwise broadcasting with a separately unresolved boolean-index claim (`broadcast_control`), and explicitly bounded static absence (`scoped_absence`). Their reference judgments are authored review examples. The offline tests confirm that these instructions reach the worker and that complete bad drafts remain preserved without semantic acceptance or retry; passing them is not evidence that real model content quality improved.

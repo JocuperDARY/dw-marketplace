@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2.0 — 2026-10-20
+
+- Add a parent-side complete-result reader and read-only CLI using only existing dsh_result calls. Keep the 32000 UTF-16 page ceiling and 16000 default; add saved-text page metadata to pin attempts and validate contiguous pages, length and digest before JSON parsing. Preserve task failures, unknown evidence, clipping and retrieval failures separately; never resubmit or repair output.
+- Add per-axis shape/slice/reduction/broadcast checks, quantified-claim scope/counterexamples and existence/import/call/execution evidence levels to review guidance. Anonymous offline counterexamples retain supported clauses and original rejected drafts without semantic retries or automatic acceptance.
+- Clarify substantive shape and cross-file reasoning before dispatch; preserve explicitly selected effort, original budgets and single-request restrictions.
+- Fix success receipts emitted before output-stream disposal completed. Write, flush, disposal and runspace cancellation faults now cannot produce a successful receipt. Verify exact owned child identity and released log handles under PowerShell 5.1/7.
+- Exercise the staged helper through the real SDK/native Shell with a synthetic offline model, retaining actual nonzero exits, output bytes and owned descendant cancellation. Offline fixtures do not establish general real-model quality or measured performance savings.
+
 ## 3.1.0 — 2026-10-20
 
 - Add opt-in `stageRuntimeSupport` to NEW workspace preparation: package a Windows ProcessStart launcher and current Bridge Node path/version without probing tools, reading credentials or adopting existing workspaces. Partial staging fails with evidence preserved.

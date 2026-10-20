@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { ConcurrentStore, createAtomicStoreWriter } from '../src/concurrent-store.js';
 import { TaskManager } from '../src/tasks.js';
 
@@ -192,20 +193,42 @@ const filesystemError = code => Object.assign(new Error(`fixture ${code}`), { co
 for (const persistent of [false, true]) {
   test(`terminal registry publication ${persistent ? 'retains quarantine after persistent' : 'recovers from one transient'} Windows sharing failure`, async t => {
     const f = await fixture(t); let armed = false; let attempts = 0; let elapsed = 0; let calls = 0;
-    const waits = [];
+    let nativeSharingFailures = 0;
+    const waits = []; const expectedWaits = []; const publications = []; const sourceAttempts = new Map();
     const manager = await new TaskManager({ dataDir: f.dataDir,
       runner: async () => { calls++; armed = true; return { terminal: 'completed', text: 'done', cleanup: 'confirmed' }; },
       resolveCapabilities: async id => ({ id, digest: 'offline', access: 'read-only' }) }).open();
     t.after(() => manager.close());
-    manager.store.writer = createAtomicStoreWriter({ platform: 'win32', now: () => elapsed,
-      wait: async ms => { waits.push(ms); elapsed += ms; },
+    const writer = createAtomicStoreWriter({ platform: 'win32', now: () => elapsed,
+      // Real bounded waits let incidental Windows readers release their handles;
+      // an immediate fake wait would turn that contention into a tight retry loop.
+      wait: async ms => { waits.push(ms); elapsed += ms; await delay(ms); },
       renameFile: async (source, destination) => {
         if (armed && destination === join(f.dataDir, 'registry.json')) {
           attempts++;
-          if (persistent || attempts === 1) throw filesystemError('EPERM');
+          const sourceAttempt = (sourceAttempts.get(source) ?? 0) + 1;
+          sourceAttempts.set(source, sourceAttempt);
+          const nextWait = [10, 20, 40, 80, 160][sourceAttempt - 1];
+          if (persistent || attempts === 1) {
+            if (nextWait !== undefined) expectedWaits.push(nextWait);
+            throw filesystemError('EPERM');
+          }
+          try { await rename(source, destination); }
+          catch (error) {
+            if (['EPERM', 'EBUSY'].includes(error.code)) {
+              nativeSharingFailures++;
+              if (nextWait !== undefined) expectedWaits.push(nextWait);
+            }
+            throw error;
+          }
+          return;
         }
         await rename(source, destination);
       } });
+    manager.store.writer = async (path, content, options) => {
+      if (armed && path === join(f.dataDir, 'registry.json')) publications.push(JSON.parse(content).revision);
+      return writer(path, content, options);
+    };
     const receipt = await manager.submit({ requestId: `sharing-${persistent}`, prompt: 'offline', workspace: f.workspace,
       executionMode: 'single-request', capabilityProfile: 'inference-only' });
     const status = await manager.wait({ taskId: receipt.taskId });
@@ -220,7 +243,10 @@ for (const persistent of [false, true]) {
       await assert.rejects(f.second.admit(attempted, options(attempted)), { code: 'WORKSPACE_BUSY' });
     } else {
       assert.equal(status.status, 'completed'); assert.equal(status.cleanup, 'confirmed'); assert.equal(view.leases.length, 0);
-      assert.equal(attempts, 3, 'one failed terminal rename, success, and normal lease-release publication'); assert.deepEqual(waits, [10]);
+      assert.deepEqual(publications, [2, 3], 'exactly one terminal commit and one lease-release commit');
+      assert.equal(sourceAttempts.size, 2, 'retries retain the same temporary file for each logical publication');
+      assert.equal(attempts, 3 + nativeSharingFailures, 'one injected failure, two publications, and only observed native sharing retries');
+      assert.deepEqual(waits, expectedWaits, 'every retry delay is explained by its source-local failure ordinal');
     }
     assert.equal((await readdir(f.dataDir)).some(name => name.endsWith('.tmp')), false);
   });
