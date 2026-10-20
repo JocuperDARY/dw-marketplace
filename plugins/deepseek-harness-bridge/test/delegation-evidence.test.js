@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskManager } from '../src/tasks.js';
 import { assessDelivery, deliveryPrompt } from '../src/delivery.js';
-import { assignment, contract, delivery } from './fixtures/delegation-evidence-data.js';
+import { assignment, contract, delivery, scenarios } from './fixtures/delegation-evidence-data.js';
 
 test('rendered delivery obligations distinguish authority, reviewed claims, and derived prerequisites', () => {
   for (const orchestrated of [false, true]) {
@@ -19,6 +19,26 @@ test('rendered delivery obligations distinguish authority, reviewed claims, and 
       'Review obligations must cover asserted prerequisites as well as newly added ones.');
     assert.ok(prompt.includes('A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.'),
       'Neither a valid locator nor a known rule ID alone establishes source support.');
+    for (const phrase of ['axis meanings', 'slices', 'broadcast', 'only, all, never',
+      'counterexample', 'code existence', 'import', 'call site', 'runtime evidence']) {
+      assert.ok(prompt.includes(phrase), `Missing source-review obligation: ${phrase}`);
+    }
+  }
+});
+
+test('anonymous source-review fixtures retain accepted clauses and explicitly bounded evidence', () => {
+  // Check authored examples and distinctions, not natural-language truth or model quality.
+  const byId = Object.fromEntries(scenarios.map(item => [item.id, item]));
+  assert.equal(byId.tensor_axes.referenceJudgment, 'partly_supported');
+  assert.ok(byId.tensor_axes.referenceOutcome.includes('(4, 2, 3)'));
+  assert.ok(byId.tensor_axes.referenceOutcome.includes('(2, 3)'));
+  assert.equal(byId.exclusive_imports.referenceJudgment, 'partly_supported');
+  assert.ok(byId.exclusive_imports.referenceOutcome.includes('no direct score() call in this file'));
+  assert.equal(byId.import_is_execution.referenceJudgment, 'reject');
+  assert.equal(byId.broadcast_control.referenceJudgment, 'support');
+  assert.equal(byId.scoped_absence.referenceJudgment, 'support');
+  for (const id of ['tensor_axes', 'exclusive_imports', 'import_is_execution']) {
+    assert.ok(byId[id].workerOutcome, `${id} must include a structurally valid bad draft.`);
   }
 });
 

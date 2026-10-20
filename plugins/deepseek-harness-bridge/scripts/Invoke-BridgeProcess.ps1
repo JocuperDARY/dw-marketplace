@@ -32,6 +32,11 @@ function Assert-BridgeDirectory {
     }
 }
 
+function Open-BridgeOutputStream {
+    param([string]$Path)
+    return [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+}
+
 function Invoke-BridgeProcess {
     [CmdletBinding()]
     param(
@@ -64,10 +69,10 @@ function Invoke-BridgeProcess {
     }
     $stdoutPath = Join-Path $outputPath 'stdout.log'
     $stderrPath = Join-Path $outputPath 'stderr.log'
-    $stdout = $null; $stderr = $null; $process = $null; $started = $false
+    $stdout = $null; $stderr = $null; $process = $null; $started = $false; $receipt = $null
     try {
-        $stdout = [IO.File]::Open($stdoutPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        $stderr = [IO.File]::Open($stderrPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $stdout = Open-BridgeOutputStream $stdoutPath
+        $stderr = Open-BridgeOutputStream $stderrPath
         $info = New-Object System.Diagnostics.ProcessStartInfo
         $info.FileName = $FilePath
         $info.WorkingDirectory = $canonical
@@ -93,7 +98,7 @@ function Invoke-BridgeProcess {
         }
         [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutCopy, $stderrCopy))
         $stdout.Flush(); $stderr.Flush()
-        [pscustomobject]@{
+        $receipt = [pscustomobject]@{
             exitCode = $process.ExitCode
             startedAt = $startedAt
             endedAt = [DateTimeOffset]::UtcNow.ToString('o')
@@ -119,4 +124,6 @@ function Invoke-BridgeProcess {
             finally { if ($null -ne $stderr) { $stderr.Dispose() } }
         }
     }
+    # Only publish a receipt after process and log handles were released.
+    $receipt
 }

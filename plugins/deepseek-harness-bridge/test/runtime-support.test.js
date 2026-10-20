@@ -17,7 +17,10 @@ const quote = value => `'${value.replaceAll("'", "''")}'`;
 const windows = { skip: process.platform !== 'win32', timeout: 30000 };
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'bridge-runtime-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => {
+    if (t.passed) await rm(root, { recursive: true, force: true });
+    else t.diagnostic(`Retained runtime failure evidence: ${root}`);
+  });
   return root;
 }
 async function invoke(root, { args = ['echo'], output = 'artifacts/run-001', exe = process.execPath, cwd = root, shell = 'powershell.exe' } = {}) {
@@ -108,3 +111,31 @@ test('PowerShell 7 ArgumentList preserves Windows argv and streams', windows, as
   assert.deepEqual(JSON.parse(await readFile(receipt.stdoutPath, 'utf8')), { args: values, cwd: root });
   assert.equal(await readFile(receipt.stderrPath, 'utf8'), 'stderr-中文');
 });
+
+for (const shell of ['powershell.exe', 'pwsh.exe']) {
+  for (const mode of ['write', 'flush', 'dispose', 'cancel', 'cancel-early-receipt']) {
+    const earlyReceipt = mode === 'cancel-early-receipt';
+    test(`${shell} ${mode} ${earlyReceipt ? 'control retains earlier receipt' : 'failure produces no receipt'} and releases its child and log handles`, windows, async t => {
+      const root = await fixture(t);
+      try { await exec(shell, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { windowsHide: true }); }
+      catch (error) { if (error.code === 'ENOENT') return t.skip(`${shell} is not installed`); throw error; }
+      const result = await exec(shell, ['-NoProfile', '-NonInteractive', '-File', join(base, 'fixtures/runtime-process-harness.ps1'),
+        '-Helper', helper, '-Node', process.execPath, '-Child', child, '-Root', root, '-Mode', mode],
+      { windowsHide: true, timeout: 25000, maxBuffer: 1024 * 1024 });
+      const observation = JSON.parse(result.stdout.trim().replace(/^\uFEFF/, ''));
+      t.diagnostic(JSON.stringify(observation));
+      assert.equal(observation.receiptCount, earlyReceipt ? 1 : 0, JSON.stringify(observation));
+      assert.ok(observation.failure, JSON.stringify(observation));
+      assert.ok(Number(observation.childPid) > 0);
+      assert.match(observation.childStartTicks, /^\d+$/);
+      assert.equal(observation.childExited, true, JSON.stringify(observation));
+      assert.deepEqual(observation.releasedLogs, ['stdout.log', 'stderr.log']);
+      if (mode.startsWith('cancel') || mode === 'write') assert.equal(observation.completed, false);
+      if (mode === 'write') assert.ok(observation.stdoutBytes > 0 && observation.stdoutBytes < 2 * 1024 * 1024);
+      if (mode.startsWith('cancel')) {
+        assert.match(observation.failure, /PipelineStoppedException$/);
+        assert.ok(observation.stdoutBytes > 0 && observation.stderrBytes > 0);
+      }
+    });
+  }
+}

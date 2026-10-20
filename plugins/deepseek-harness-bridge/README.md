@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.1.0
+# DeepSeek Harness Bridge 3.2.0
+
+3.2.0 提供[只读完整结果读取器](docs/result-retrieval.md)：按既有上限分页，固定 attempt，验证页边界、长度和摘要后再解析 JSON；读取错误、任务失败、截断和语义验收分别保留。补充维度逐轴分析、限定性断言与代码执行证据的验收规则。启动 helper 修复了日志释放失败前已输出成功回执的问题，并增加写入、flush、dispose、取消及官方 native Shell 后代清理回归。未改变 11 个工具、用户预算或单请求禁止重试边界。
 
 3.1.0 可通过 `dsh_prepare_workspace` 的 `stageRuntimeSupport: true` 为新工作区放置本机进程启动 helper 和当前 Bridge Node 信息。既有工作区不接管，默认仍创建空目录；不添加工具、权限、次数或 token 上限。补充已验证启动方式与训练/评估证据复用、几何/数值任务的推理选择及父级验收清单。详见[执行复用与验收](docs/execution-efficiency.md)。离线 launcher 回归不等于新版 native Shell 实跑或已证明成本下降。
 

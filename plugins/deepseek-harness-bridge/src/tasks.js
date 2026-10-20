@@ -436,7 +436,9 @@ export class TaskManager {
     try { text = await readFile(join(this.store.taskDirectory(taskId, { legacy: record.schemaVersion !== 3 }), `result-${status.number}.txt`), 'utf8'); }
     catch (error) { if (error.code === 'ENOENT') return { ...status, text: '', resultAvailable: false }; throw error; }
     return { ...status, text: text.slice(offset, offset + limit), resultAvailable: true, offset,
-      nextOffset: offset + limit < text.length ? offset + limit : null };
+      nextOffset: offset + limit < text.length ? offset + limit : null,
+      resultPage: { unit: 'utf16-code-units', totalCharacters: text.length,
+        sha256: createHash('sha256').update(text, 'utf8').digest('hex') } };
   }
 
   async cancel({ taskId, controlToken, timeoutMs = 10000 }) {
