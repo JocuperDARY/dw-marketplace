@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectNativeWorkspace, prepareNativeWorkspace, validateNativeShellWorkspace } from '../src/native-workspace.js';
@@ -24,11 +24,41 @@ test('native workspace preparation creates exactly one new directory with the ca
   assert.equal(result.aclChanged, false);
   assert.equal(result.modelRequests, 0);
   assert.equal(result.shellExecutionVerified, false);
+  assert.equal(result.runtimeSupport, undefined);
+  assert.deepEqual(await readdir(workspace), []);
   assert.equal(result.evidence.ownerSid, result.evidence.currentSid);
   assert.deepEqual(result.evidence.reparseAncestors, []);
   assert.equal((await stat(workspace)).isDirectory(), true);
   assert.deepEqual(await validateNativeShellWorkspace(workspace), result.evidence);
   await assert.rejects(prepareNativeWorkspace({ workspace, dataDir }), { code: 'NATIVE_WORKSPACE_EXISTS' });
+});
+
+test('runtime support preparation is opt-in and not a claim of Shell execution', windows, async t => {
+  const root = await fixture(t);
+  const workspace = join(root, 'prepared');
+  const result = await prepareNativeWorkspace({ workspace, dataDir: join(root, 'state'), stageRuntimeSupport: true });
+  assert.deepEqual(await readdir(workspace), ['.bridge-runtime']);
+  assert.equal(result.runtimeSupport.staged, true);
+  assert.equal(result.runtimeSupport.shellExecutionVerified, false);
+  assert.equal(result.modelRequests, 0);
+  assert.equal(result.aclChanged, false);
+  const manifest = JSON.parse(await readFile(result.runtimeSupport.manifestPath, 'utf8'));
+  assert.equal(manifest.node.path, process.execPath);
+  assert.equal(manifest.node.childProcessVerified, false);
+  assert.deepEqual(manifest, result.runtimeSupport.manifest);
+});
+
+test('failed support staging preserves partial evidence and never reports preparation success', windows, async t => {
+  const root = await fixture(t);
+  const workspace = join(root, 'partial');
+  await assert.rejects(prepareNativeWorkspace({ workspace, dataDir: join(root, 'state'), stageRuntimeSupport: true }, {
+    stage: async target => {
+      await writeFile(join(target, 'partial-evidence'), 'preserve');
+      throw Object.assign(new Error('Support staging failed.'), { code: 'STAGING_FAILED' });
+    },
+  }), error => error.code === 'STAGING_FAILED' && error.message.includes('could not be removed as an empty directory'));
+  assert.equal(await readFile(join(workspace, 'partial-evidence'), 'utf8'), 'preserve');
+  await assert.rejects(prepareNativeWorkspace({ workspace, dataDir: join(root, 'state'), stageRuntimeSupport: true }), { code: 'NATIVE_WORKSPACE_EXISTS' });
 });
 
 test('preparation preserves existing contents and never creates missing ancestors', windows, async t => {

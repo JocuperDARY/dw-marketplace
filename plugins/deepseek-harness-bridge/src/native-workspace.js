@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { BridgeError, requireValue } from './errors.js';
+import { stageRuntimeSupport as stageSupport } from './runtime-support.js';
 
 // Read-only, fixed program. The path is data in an environment variable, never
 // interpolated into PowerShell source. Do not add ACL preparation to this probe.
@@ -84,7 +85,7 @@ export async function validateNativeShellWorkspace(workspace, { inspect = inspec
 }
 
 /** Create one new worker-owned directory. Existing paths are never adopted. */
-export async function prepareNativeWorkspace({ workspace, dataDir }, { inspect = inspectNativeWorkspace } = {}) {
+export async function prepareNativeWorkspace({ workspace, dataDir, stageRuntimeSupport = false }, { inspect = inspectNativeWorkspace, stage = stageSupport } = {}) {
   requireValue(typeof workspace === 'string' && isAbsolute(workspace), 'INVALID_ARGUMENT', 'workspace must be an absolute NEW directory path.');
   requireValue(typeof dataDir === 'string' && isAbsolute(dataDir), 'INVALID_ARGUMENT', 'Bridge dataDir must be supplied as an absolute path.');
   const target = resolve(workspace);
@@ -105,7 +106,9 @@ export async function prepareNativeWorkspace({ workspace, dataDir }, { inspect =
   try {
     const evidence = await validateNativeShellWorkspace(target, { inspect });
     requireValue(samePath(await realpath(target), target), 'NATIVE_WORKSPACE_REPARSE', 'New workspace does not resolve to the requested direct path.');
+    const runtimeSupport = stageRuntimeSupport ? { staged: true, shellExecutionVerified: false, ...await stage(target) } : undefined;
     return { workspace: target, created: true, evidence, aclChanged: false, modelRequests: 0,
+      ...(runtimeSupport ? { runtimeSupport } : {}),
       shellExecutionVerified: false,
       nextAction: 'Submit a task using this workspace. Official native Shell confinement may add its own workspace ACL grants when Shell first executes.' };
   } catch (error) {
