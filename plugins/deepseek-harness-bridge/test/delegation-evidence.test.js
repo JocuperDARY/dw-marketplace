@@ -83,7 +83,7 @@ for (const mode of ['single-request', 'budgeted']) {
       assert.equal(receipt.recovery, undefined);
     };
     assertPreserved(done);
-    assertPreserved(manager.record(submitted.taskId).attempts[0]);
+    assertPreserved((await manager.record(submitted.taskId)).attempts[0]);
     assert.equal(done.outputValidation.status, 'valid');
     assert.equal(done.deliveryValidation.status, 'structure_complete');
     assert.equal(done.parentAcceptance, 'not_assessed');
@@ -91,12 +91,12 @@ for (const mode of ['single-request', 'budgeted']) {
     const decoded = mode === 'budgeted' ? JSON.parse(JSON.parse(done.text).summary) : JSON.parse(done.text);
     assert.deepEqual(decoded, fabricated);
     assert.equal(launches, 1, 'Semantic defects do not trigger an automatic retry.');
-    assert.equal(manager.record(submitted.taskId).attempts.length, 1);
-    assert.equal(manager.record(submitted.taskId).attempts[0].recovery, undefined);
+    assert.equal((await manager.record(submitted.taskId)).attempts.length, 1);
+    assert.equal((await manager.record(submitted.taskId)).attempts[0].recovery, undefined);
     if (mode === 'budgeted') {
       assert.equal(done.orchestration.stages, 1);
       assert.deepEqual(done.orchestration.charged, { modelRequests: 1, outputTokens: 100, toolCalls: 0 });
-      const stage = manager.record(submitted.taskId).orchestration.stages[0];
+      const stage = (await manager.record(submitted.taskId)).orchestration.stages[0];
       assert.equal(stage.terminal, 'completed');
       assert.equal(stage.status, 'completed');
       assert.deepEqual(stage.budget, expectedReceipt);
@@ -109,10 +109,10 @@ for (const mode of ['single-request', 'budgeted']) {
     assert.equal(replay.duplicate, true);
     assertPreserved(replay);
     assertPreserved(await restarted.result({ taskId: submitted.taskId }));
-    assertPreserved(restarted.record(submitted.taskId).attempts[0]);
+    assertPreserved((await restarted.record(submitted.taskId)).attempts[0]);
     if (mode === 'budgeted') {
       assert.deepEqual(replay.orchestration.charged, { modelRequests: 1, outputTokens: 100, toolCalls: 0 });
-      const stage = restarted.record(submitted.taskId).orchestration.stages[0];
+      const stage = (await restarted.record(submitted.taskId)).orchestration.stages[0];
       assert.equal(stage.terminal, 'completed');
       assert.equal(stage.status, 'completed');
       assert.deepEqual(stage.budget, expectedReceipt);
@@ -120,7 +120,7 @@ for (const mode of ['single-request', 'budgeted']) {
     assert.equal(replay.parentAcceptance, 'not_assessed');
     assert.equal(replay.deliveryValidation.status, 'structure_complete');
     assert.equal((await restarted.result({ taskId: submitted.taskId })).text, outputText);
-    assert.equal(restarted.record(submitted.taskId).attempts.length, 1);
+    assert.equal((await restarted.record(submitted.taskId)).attempts.length, 1);
     assert.equal(launches, 1);
   });
 }

@@ -1,81 +1,32 @@
 import { TaskManager } from './tasks.js';
-import { setTimeout as delay } from 'node:timers/promises';
-import { BridgeError, requireValue } from './errors.js';
+import { requireValue } from './errors.js';
 
-const OBSERVATIONS = new Set(['status', 'list', 'wait', 'result', 'usage']);
-
-// Tool discovery must not take the exclusive task-store lock. Desktop hosts
-// may open a discovery connection and several conversation connections at once.
+// Keep the connection identity across idle periods. Only registry commits and
+// individual task attempts take locks; observing another chat never acquires one.
 export class ConnectionTasks {
   constructor(options) {
     this.options = options;
     this.manager = null;
-    this.users = 0;
+    this.opening = null;
     this.closed = false;
-    this.releaseFailed = false;
-    this.transitions = Promise.resolve();
-    this.watched = new WeakSet();
-    this.closing = new AbortController();
-  }
-
-  transition(operation) {
-    const pending = this.transitions.then(operation);
-    this.transitions = pending.catch(() => {});
-    return pending;
-  }
-
-  async releaseIdle() {
-    if (!this.manager || this.users || this.manager.active || this.manager.blocked) return;
-    try {
-      await this.manager.close();
-      this.manager = null;
-    } catch (error) {
-      this.releaseFailed = true;
-      throw error;
-    }
-  }
-
-  watch(manager) {
-    const pending = manager.active?.promise;
-    if (!pending || this.watched.has(pending)) return;
-    this.watched.add(pending);
-    // Completion releases the lease even when the parent never polls again.
-    pending.then(() => this.transition(() => this.releaseIdle()))
-      .catch(() => { this.releaseFailed = true; });
+    this.closing = null;
   }
 
   async use(method, ...args) {
-    const startedAt = Date.now();
-    const waitMs = method === 'wait' ? args[0]?.timeoutMs ?? 10000 : Infinity;
-    const allowance = OBSERVATIONS.has(method) ? Math.min(this.options.observationWaitMs ?? 1500, waitMs) : 0;
-    let manager;
-    let backoff = 25;
-    while (!manager) {
-      try {
-        manager = await this.transition(async () => {
-          requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
-          requireValue(!this.releaseFailed, 'RECOVERY_REQUIRED', 'Task ownership release failed; reconcile the saved state.');
-          this.manager ??= await new TaskManager(this.options).open();
-          this.users++;
-          return this.manager;
-        });
-      } catch (error) {
-        if (error.code !== 'STATE_LOCKED' || !OBSERVATIONS.has(method)) throw error;
-        const remaining = allowance - (Date.now() - startedAt);
-        if (remaining <= 0) throw new BridgeError('STATE_LOCKED', 'Ownership remains unavailable after a bounded read wait. Retry this observation only; if it persists, reconcile the owner. No worker was launched and no lock was removed.', { retryable: true, operation: 'observation', retryAfterMs: 1000 });
-        // Never sleep inside the transition queue: shutdown and an existing owner
-        // must be able to release their lease while this connection is waiting.
-        try { await delay(Math.min(backoff, remaining), undefined, { signal: this.closing.signal }); }
-        catch { throw new BridgeError('CLOSED', 'The bridge is closing.'); }
-        backoff = Math.min(200, backoff * 2);
-      }
-    }
-    if (method === 'wait') args[0] = { ...args[0], timeoutMs: Math.max(0, waitMs - (Date.now() - startedAt)) };
-    try { return await manager[method](...args); }
-    finally {
-      this.watch(manager);
-      await this.transition(async () => { this.users--; await this.releaseIdle(); });
-    }
+    requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+    if (this.manager) return this.manager[method](...args);
+    this.opening ??= (async () => {
+      const manager = new TaskManager(this.options);
+      await manager.open();
+      this.manager = manager;
+      return manager;
+    })().catch(error => {
+      this.opening = null;
+      throw error;
+    });
+    const manager = await this.opening;
+    requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+    return manager[method](...args);
   }
 
   submit(...args) { return this.use('submit', ...args); }
@@ -89,10 +40,10 @@ export class ConnectionTasks {
 
   close() {
     this.closed = true;
-    this.closing.abort();
-    return this.transition(async () => {
-      if (this.manager) await this.manager.close();
-      this.manager = null;
-    });
+    return this.closing ??= (async () => {
+      // A failed read-only open owns neither a worker nor a task lease.
+      const manager = this.manager ?? await this.opening?.catch(() => null);
+      await manager?.close();
+    })();
   }
 }

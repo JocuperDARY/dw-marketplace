@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { readFile, access } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { safeError } from './src/errors.js';
+import { ConcurrentStore } from './src/concurrent-store.js';
 
 export function stateDirectory(env = process.env) {
   return resolve(env.DSH_BRIDGE_DATA_DIR || join(env.PLUGIN_DATA || env.CLAUDE_PLUGIN_DATA || homedir(), '.deepseek-harness-bridge'));
@@ -20,12 +21,22 @@ export async function doctor(env = process.env) {
   }
   let ownerLockPresent = false;
   try { await access(join(stateDirectory(env), 'owner.lock')); ownerLockPresent = true; } catch (error) { if (error.code !== 'ENOENT') ownerLockPresent = 'unknown'; }
+  let concurrency;
+  try {
+    const store = new ConcurrentStore({ dataDir: stateDirectory(env) });
+    const protocol = await store.protocol();
+    const snapshot = await store.read();
+    concurrency = { protocol: protocol?.protocol ?? null, protocolGuardPresent: protocol?.protocol === 3,
+      activeTaskIds: snapshot.leases.filter(lease => snapshot.records.some(record => record.taskId === lease.taskId && ['running', 'cancelling'].includes(record.attempts.at(-1).status))).map(lease => lease.taskId),
+      retainedTaskLeases: snapshot.leases.length, legacyTasks: snapshot.legacyRecords.length };
+  } catch (error) { concurrency = { status: 'unavailable', error: safeError(error) }; }
   const [major, minor] = process.versions.node.split('.').map(Number);
   return { plugin: 'deepseek-harness-bridge', version, node: process.versions.node,
     nodeSupported: major > 24 || (major === 24 && minor >= 18), dependencies,
     credentialConfigured: Boolean(env.DEEPSEEK_API_KEY?.trim()), stateDirectory: stateDirectory(env), ownerLockPresent,
     route: { provider: 'deepseek-official', model: 'deepseek-flash', displayName: 'DeepSeek-V4.1-Flash (SDK catalog)' },
-    tools: ['bounded-list', 'bounded-read', 'guarded-write'], maxActiveTasks: 1,
+    tools: ['bounded-list', 'bounded-read', 'guarded-write'], maxActiveTasks: null,
+    concurrency: { mode: 'task-scoped', ...concurrency },
     validation: { modelCalls: 0, liveModel: 'NOT_RUN', codexHost: 'NOT_ASSESSED', desktopSessionReuse: false } };
 }
 

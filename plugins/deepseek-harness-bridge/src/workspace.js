@@ -151,7 +151,7 @@ export class WorkspaceFiles {
         await this.resolve(path, expectedSha256 === 'new');
         if (previous) {
           requireValue(digest(await this.readBytes(target)) === expectedSha256, 'FILE_CHANGED', 'File content changed before publication.');
-          // Shared bridge lock serializes bridge writers. External editors must respect file ownership.
+          // Task workspace claims serialize overlapping bridge writers. External editors must respect file ownership.
           await rename(temporary, target);
         } else {
           // A link publishes a complete new file atomically and cannot replace a concurrent creator.

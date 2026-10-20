@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.0 — 2026-10-20
+
+- Allow independent tasks from multiple MCP chat connections to run concurrently in one store. Use short registry transactions, immutable committed snapshots, task leases and workspace overlap claims instead of a whole-store execution lock.
+- Keep task sessions, worker homes, budgets, controllers and teardown independent. Cancel mailboxes target an exact attempt/lease; closing one connection does not stop another. Unconfirmed cleanup retains the affected claim without blocking unrelated workspaces.
+- Return a private controlToken only on initial admission; require it for cross-connection continuation/cancellation. Default list/usage to the current connection; explicit store scope observes historical and other tasks without control or recovery.
+- Preserve original explicit budgets, unspecified limits and single-request prohibitions. Preserve schema 1 records read-only, with a permanent protocol guard preventing old hosts from reopening protocol 3. Never steal a live or stale lock automatically.
+- Add real two-process offline MCP tests, cold-start/idempotency/control/continuation/cancellation races, budget isolation and durable failure regressions. Offline synthetic runtime evidence is separate from real Flash verification.
+
 ## 2.1.0 — 2026-10-20
 
 - Add optional parent-declared lifecycle contracts with ordered allowed outcomes, exact slot reuse, recomputed counts and bounded diagnostics; source truth and prose/parent acceptance remain unassessed.

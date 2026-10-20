@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { committedTask, retainedLeases } from './fixtures/committed-state.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, rm, access } from 'node:fs/promises';
@@ -69,7 +70,7 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
   assert.equal(done.orchestration.charged.outputTokens, 300);
   assert.equal(done.orchestration.charged.toolCalls, 1);
   assert.match((await call('dsh_result', { taskId: submitted.taskId })).text, /Finished using saved evidence/);
-  const saved = JSON.parse(await readFile(join(root, 'state', 'tasks', submitted.taskId, 'task.json'), 'utf8'));
+  const saved = await committedTask(join(root, 'state'), submitted.taskId);
   const checkpoint = JSON.parse(await readFile(saved.orchestration.stages[0].checkpointPath, 'utf8'));
   assert.match(checkpoint.summary, /Read input\.txt: offline evidence \(sha256=[a-f0-9]{64}\)/);
   assert.equal(saved.orchestration.stages[0].charged.toolCalls, 1);
@@ -81,7 +82,7 @@ test('real SDK and MCP complete checkpoint orchestration using an offline model 
   assert.equal(continued.orchestration.charged.modelRequests, 4);
   assert.equal(continued.orchestration.deadlineAt, done.orchestration.deadlineAt);
   assert.equal((await call('dsh_continue', followup)).duplicate, true);
-  await assert.rejects(access(join(root, 'state', 'owner.lock')), { code: 'ENOENT' });
+  assert.deepEqual(await retainedLeases(join(root, 'state')), []);
 });
 
 for (const mode of ['partial-json', 'reasoning-only']) test(`real SDK recovers ${mode} with one off request and no network`, { timeout: 150000 }, async t => {
