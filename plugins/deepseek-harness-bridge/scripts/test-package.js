@@ -17,7 +17,8 @@ try {
   ], { cwd: packageRoot, timeout: 60000, maxBuffer: 1024 * 1024, windowsHide: true });
   const [archive] = JSON.parse(stdout);
   const paths = new Set(archive.files.map(file => file.path));
-  for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js']) {
+  for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js',
+    'scripts/Invoke-BridgeProcess.ps1', 'src/runtime-support.js', 'src/execution-guidance.js', 'docs/execution-efficiency.md']) {
     assert.ok(paths.has(path), `Actual npm archive is missing ${path}`);
   }
   console.log(`Archive verified: ${archive.filename}, ${archive.entryCount} entries`);

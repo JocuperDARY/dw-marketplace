@@ -12,6 +12,29 @@ import { createServer } from '../src/server.js';
 import { workerEnvironment } from '../src/sdk-runner.js';
 import Ajv from 'ajv';
 
+test('workspace runtime support schema is optional boolean and invalid values never reach preparation', async t => {
+  const server = createServer({ manager: {}, doctor: () => ({}), preflight: () => assert.fail('No model preflight') });
+  const client = new Client({ name: 'support-schema-test', version: '1' });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  t.after(async () => { await client.close(); await server.close(); });
+  await server.connect(serverSide);
+  await client.connect(clientSide);
+  const tools = (await client.listTools()).tools;
+  assert.equal(tools.length, 11);
+  const schema = tools.find(tool => tool.name === 'dsh_prepare_workspace').inputSchema;
+  const validate = new Ajv({ strict: false }).compile(schema);
+  for (const flag of [undefined, true, false]) {
+    assert.equal(validate({ workspace: 'not-created', ...(flag === undefined ? {} : { stageRuntimeSupport: flag }) }), true);
+  }
+  const invalid = { workspace: 'private-workspace-marker', stageRuntimeSupport: 'private-invalid-flag' };
+  assert.equal(validate(invalid), false);
+  const result = await client.callTool({ name: 'dsh_prepare_workspace', arguments: invalid });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.structuredContent.error.validation.issues[0].path, ['stageRuntimeSupport']);
+  assert.equal(result.structuredContent.error.validation.phase, 'schema');
+  assert.equal(JSON.stringify(result).includes('private-'), false);
+});
+
 test('published MCP schema and runtime reject malformed report facts with safe field errors before admission', async t => {
   let admissions = 0;
   const manager = { submit: async input => { admissions++; return { accepted: input.reportContract }; } };

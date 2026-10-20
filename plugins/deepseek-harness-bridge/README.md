@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.0.0
+# DeepSeek Harness Bridge 3.1.0
+
+3.1.0 可通过 `dsh_prepare_workspace` 的 `stageRuntimeSupport: true` 为新工作区放置本机进程启动 helper 和当前 Bridge Node 信息。既有工作区不接管，默认仍创建空目录；不添加工具、权限、次数或 token 上限。补充已验证启动方式与训练/评估证据复用、几何/数值任务的推理选择及父级验收清单。详见[执行复用与验收](docs/execution-efficiency.md)。离线 launcher 回归不等于新版 native Shell 实跑或已证明成本下降。
 
 3.0.0 支持同一状态目录内的跨聊天并行任务。任务独立持有会话、预算、执行锁和取消信号；跨连接控制需要首次提交返回的 `controlToken`。写入任务与重叠工作区互斥，旧任务仅保留只读访问。升级须等待旧任务结束，停止旧宿主后切换；详见[并行会话与升级边界](docs/parallel-conversations.md)。
 

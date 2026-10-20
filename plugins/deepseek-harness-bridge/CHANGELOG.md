@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.0 — 2026-10-20
+
+- Add opt-in `stageRuntimeSupport` to NEW workspace preparation: package a Windows ProcessStart launcher and current Bridge Node path/version without probing tools, reading credentials or adopting existing workspaces. Partial staging fails with evidence preserved.
+- Capture stdout/stderr concurrently to exclusive local files, preserve argv and actual exit status, and resolve relative logs against the declared cwd. Use the existing native Shell; add no executor, permission bypass, retry or resource cap.
+- Give registered native Shell workers compact execution-reuse and evidence-ledger guidance. Clarify existing reasoning/high selection for geometric transforms, numerical boundaries and runtime diagnosis, preserving explicit effort, budgets and single-request rules.
+- Require identity-aware reuse and independently scoped parent acceptance; separate smoke/synthetic checks, full training, frozen-model evaluation and failed launches. Preserve the measured long-task baseline without claiming an unmeasured speedup or paid-quality improvement.
+- Add offline real PowerShell 5.1/7 launcher, new-workspace, SDK-patch, schema and packaging regressions. These do not establish the new helper's execution inside native confinement or real Flash behavior.
+
 ## 3.0.0 — 2026-10-20
 
 - Allow independent tasks from multiple MCP chat connections to run concurrently in one store. Use short registry transactions, immutable committed snapshots, task leases and workspace overlap claims instead of a whole-store execution lock.
