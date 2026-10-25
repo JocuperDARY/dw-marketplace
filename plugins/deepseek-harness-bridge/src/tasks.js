@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { resolveProfile } from './capabilities.js';
 import { allocateStage, budgetSummary, runOrchestrated, validateSavedBudget } from './orchestration.js';
-import { planExecution } from './planning.js';
+import { canonicalStatePath, inputPrompt, requestId, resolveWorkspace, normalizeSubmission, previewSubmission } from './submission-plan.js';
 import { assessDelivery, assessOutput, deliveryPrompt, formatPrompt, normalizeOutputFormat, normalizeReviewContract } from './delivery.js';
 import { assessReport, normalizeReportContract, reportPrompt } from './report.js';
 import { assessLifecycle, lifecyclePrompt, normalizeLifecycleContract } from './lifecycle.js';
@@ -16,30 +16,6 @@ const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const clone = value => structuredClone(value);
-const inside = (root, child) => { const p = relative(root, child); return p === '' || (!p.startsWith(`..${sep}`) && p !== '..' && !isAbsolute(p)); };
-
-// An observation must not create the state directory merely to resolve aliases.
-async function canonicalStatePath(path) {
-  try { return await realpath(path); }
-  catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    const parent = dirname(path);
-    if (parent === path) throw error;
-    return join(await canonicalStatePath(parent), basename(path));
-  }
-}
-
-function inputPrompt(value) {
-  requireValue(typeof value === 'string' && value.trim().length > 0 && Buffer.byteLength(value) <= 65536,
-    'INVALID_ARGUMENT', 'prompt must be nonempty and at most 64 KiB.');
-  return value;
-}
-
-function requestId(value) {
-  requireValue(typeof value === 'string' && ID.test(value), 'INVALID_ARGUMENT', 'requestId must contain 1–80 letters, digits, dots, underscores or hyphens.');
-  return value;
-}
-
 function validateSavedAttempts(attempts) {
   requireValue(Array.isArray(attempts) && attempts.length >= 1,
     'INVALID_STATE', 'Saved tasks must contain at least one attempt.');
@@ -119,13 +95,11 @@ export class TaskManager {
     return pending;
   }
 
-  async workspace(value) {
-    requireValue(typeof value === 'string' && isAbsolute(value), 'INVALID_ARGUMENT', 'workspace must be an absolute existing directory.');
-    let resolved;
-    try { resolved = await realpath(value); requireValue((await stat(resolved)).isDirectory(), 'INVALID_ARGUMENT', 'workspace must be a directory.'); }
-    catch (error) { if (error instanceof BridgeError) throw error; throw new BridgeError('INVALID_ARGUMENT', 'workspace is not an accessible directory.'); }
-    requireValue(!inside(resolved, this.dataDir) && !inside(this.dataDir, resolved), 'INVALID_ARGUMENT', 'Task workspace and bridge state must not contain one another.');
-    return resolved;
+  workspace(value) { return resolveWorkspace(value, this.dataDir); }
+
+  plan(input) {
+    this.assertAvailable();
+    return previewSubmission(input, { dataDir: this.dataDir, resolveCapabilities: this.resolveCapabilities });
   }
 
   assertAvailable() {
@@ -147,15 +121,11 @@ export class TaskManager {
       const prompt = inputPrompt(input.prompt);
       const id = requestId(input.requestId);
       const workspace = await this.workspace(input.workspace);
-      const access = input.access ?? 'read-only';
       const previous = this.requests.get(id);
       const legacy = previous && !this.records.get(previous.taskId).planning && input.executionMode === undefined && input.workload === undefined && input.reviewContract === undefined && input.reportContract === undefined && input.lifecycleContract === undefined && input.outputFormat === undefined;
       const compatibilityV1 = !!previous && this.records.get(previous.taskId).planning?.limitsPolicy !== 'explicit-v2';
-      const planned = planExecution(input, { legacy: !!legacy, compatibilityV1 });
+      const { planned, access, timeoutMs, maxRequestBytes } = normalizeSubmission(input, { legacy: !!legacy, compatibilityV1, validateDeadlines: !previous });
       const { effort, maxTokens, maxToolCalls, maxModelRequests, budget } = planned;
-      requireValue(['read-only', 'workspace-write'].includes(access), 'INVALID_ARGUMENT', 'access must be read-only or workspace-write.');
-      const timeoutMs = compatibilityV1 ? boundedInteger(input.timeoutMs, 300000, 1000, 1800000, 'timeoutMs') : optionalLimit(input.timeoutMs, 'timeoutMs');
-      const maxRequestBytes = compatibilityV1 ? boundedInteger(input.maxRequestBytes, 262144, 1024, 1048576, 'maxRequestBytes') : optionalLimit(input.maxRequestBytes, 'maxRequestBytes');
       const profile = await this.resolveCapabilities(planned.capabilityProfile, undefined, { workspace, requestedWorkspace: input.workspace, access, nativePlugins: input.nativePlugins });
       requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
       const capabilityProfile = profile.id;
@@ -165,8 +135,6 @@ export class TaskManager {
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
-      if (input.parentLabel !== undefined) requireValue(typeof input.parentLabel === 'string' && input.parentLabel.length <= 160,
-        'INVALID_ARGUMENT', 'parentLabel must be a string of at most 160 characters.');
       await beforeLaunch();
       const record = { schemaVersion: 3, taskId: randomUUID(), sessionId: `bridge-${randomUUID()}`, workspace,
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,

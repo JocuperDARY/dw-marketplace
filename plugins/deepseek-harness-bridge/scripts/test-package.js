@@ -19,7 +19,7 @@ try {
   const paths = new Set(archive.files.map(file => file.path));
   for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js',
     'scripts/Invoke-BridgeProcess.ps1', 'src/runtime-support.js', 'src/execution-guidance.js', 'docs/execution-efficiency.md',
-    'scripts/read-result.js', 'src/result-reader.js', 'docs/result-retrieval.md']) {
+    'src/submission-plan.js', 'src/implementation-constraints.js', 'docs/submission-plan.md', 'scripts/read-result.js', 'src/result-reader.js', 'docs/result-retrieval.md']) {
     assert.ok(paths.has(path), `Actual npm archive is missing ${path}`);
   }
   console.log(`Archive verified: ${archive.filename}, ${archive.entryCount} entries`);

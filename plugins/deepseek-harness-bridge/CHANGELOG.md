@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.3.0 — 2026-10-26
+
+- Add read-only `dsh_plan` with the same submission schema and normalization. Preview mode, effort, optional limits and their input origins, warnings, capability metadata and recovery/continuation constraints before spending.
+- Planning never creates task state, opens task records, checks credentials, starts workers or acquires execution locks; it is not outbound authorization, admission reservation, replay validation or parent acceptance.
+- Preserve explicit limits, omitted totals, legacy replay and single-request no-retry boundaries. Cover parity, safe schema/contract errors, UTF-8 prompt bounds, existing lock preservation and production stdio with no API key.
+
 ## 3.2.0 — 2026-10-20
 
 - Add a parent-side complete-result reader and read-only CLI using only existing dsh_result calls. Keep the 32000 UTF-16 page ceiling and 16000 default; add saved-text page metadata to pin attempts and validate contiguous pages, length and digest before JSON parsing. Preserve task failures, unknown evidence, clipping and retrieval failures separately; never resubmit or repair output.

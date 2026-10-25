@@ -6,6 +6,7 @@ import { join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireValue } from './errors.js';
 import { validateNativeShellWorkspace } from './native-workspace.js';
+import { commonImplementationConstraints } from './implementation-constraints.js';
 
 const require = createRequire(import.meta.url);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -85,9 +86,8 @@ export async function resolveNativeProfile(config, { workspace, requestedWorkspa
     modules, tools: tools.sort(), skills: [], native: { selected, components, runtimePeers: 'Bridge locked @deepseek-ai SDK graph; no alternate cached peer SDK is loaded.',
       skillPolicy: 'Search the DSH registry first. Load selected skill bodies only; supplement from Codex only after no suitable native skill is found.',
       remainingImplementationConstraints: [
-        'Pinned SDK 0.2.1-rc.2 supplies a 256000 output-token default and 1000000 context setting. These are SDK adapter settings, not verified provider hard maxima; inspect recorded reservations for actual requests.',
+        ...commonImplementationConstraints,
         'Automatic native sessions use the official compaction service; its auxiliary requests share the bridge meter and explicit caps. The native compactor defaults to 65536 summary tokens and limited no-progress/overflow recovery. Budgeted mode uses durable checkpoint stages without a fixed total stage count. Neither mechanism creates infinite physical context or guarantees completion.',
-        'SDK initialization is bounded at 30 seconds, teardown at 1/3/2 seconds. Bridge prompt storage is 64 KiB, stage JSON 32 KiB and retained text 1 MiB. File/tool output paging remains. These are implementation boundaries, not task spending authorization.',
         'Native Agent Teams defaults to 8 members; the official subagent service defaults to 8 active children and depth 1. These are native configurable defaults, not removed limits or bridge task totals.',
         'Native shell foreground waits can promote work to jobs; job_output/job_list/job_kill are provided. Native file selection uses bridge workspace list/read/write; ops_replace is a guarded single-file literal adapter with the existing 256 KiB bound and whole-file hash, not the dsh-ops recursive API. Installation and registration alone do not prove successful execution.',
       ] } };

@@ -1,0 +1,15 @@
+# Submission preview
+
+Call `dsh_plan` before a NEW submission to inspect the execution plan without spending. It accepts the same input schema as `dsh_submit`; reuse the intended requestId. Planning neither consumes that ID nor reserves a task, workspace or execution lease. It does not open the task registry, check credentials, start a worker, send data to DeepSeek or modify files. Capability resolution reads local metadata and pinned capability files without executing them.
+
+The response reports effective mode, workload, effort, access, profile, output format, normalized nullable limits and budget totals. `limitSources` distinguishes explicit caller limits, explicitly unspecified values, omitted limits and constraints imposed by the chosen mode. These labels describe the input, **not proof that a human authorized it**. Explicit values are never raised, omitted totals remain null, and single-request remains exactly one inference with zero tools and no continuation/recovery.
+
+Every profile, including inference-only and custom profiles, receives common `implementationConstraints`: inspected SDK defaults, initialization/teardown settings and storage boundaries. Native metadata adds its own service constraints. These are separate from caller spending ceilings and are not verified provider hard maxima. New duration limits are checked for representable absolute deadlines at preview/admission time; a later submission rechecks the clock. Existing replay keeps its original receipt and deadline.
+
+Review `warnings` before submitting. A small output allowance also funds reasoning: even low effort can leave a partial or empty visible answer. Use drafting/off for prose assembled from supplied facts; select suitable reasoning/verification for substantive analysis. Only change a user-fixed setting with appropriate authorization. Planning does not automatically rewrite inputs or grant an extra retry.
+
+`recovery.available` and `continuation.available` describe mode eligibility, not a guarantee: actual completion state, remaining authorization, accounting, cleanup and ownership are checked when execution occurs. New budgeted tasks currently share one text-only recovery across truncation and invalid final JSON. No mode promises infinite physical context or certain completion.
+
+`checks.admission`, `checks.replay` and `checks.credentials` remain `not_checked`; `checks.authorization` and `parentAcceptance` remain `not_assessed`. A preview does not certify outbound data approval, side-effect safety, no concurrent conflicts, existing requestId compatibility, model quality or runtime availability. Existing task replay uses its saved policy and is not previewed. Workspace/configuration can change after preview; submit revalidates the actual inputs.
+
+Schema and contract errors preserve the existing bounded field diagnostics without rejected values or raw exception details. Neither a successful preview nor a rejected preview enters task usage or generation-quality denominators. Submit only after the parent has resolved relevant warnings and confirmed the already-authorized scope.

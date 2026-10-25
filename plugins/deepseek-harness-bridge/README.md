@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.2.0
+# DeepSeek Harness Bridge 3.3.0
+
+3.3.0 新增零模型调用的 `dsh_plan`，复用提交 schema 和参数归一化，预览执行方式、额度来源、风险及恢复边界；不创建任务、不读取凭据、不取得执行锁，也不授予外发许可。见[提交前预检](docs/submission-plan.md)。
 
 3.2.0 提供[只读完整结果读取器](docs/result-retrieval.md)：按既有上限分页，固定 attempt，验证页边界、长度和摘要后再解析 JSON；读取错误、任务失败、截断和语义验收分别保留。补充维度逐轴分析、限定性断言与代码执行证据的验收规则。启动 helper 修复了日志释放失败前已输出成功回执的问题，并增加写入、flush、dispose、取消及官方 native Shell 后代清理回归。未改变 11 个工具、用户预算或单请求禁止重试边界。
 
@@ -73,6 +75,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 | MCP 工具 | 作用 |
 | --- | --- |
 | `dsh_prepare_workspace` | 零模型调用创建一个新的独立目录，由 Bridge 工作者账户持有；拒绝接管现有目录或改写其 ACL。Windows 原生 Shell 任务先准备工作区。 |
+| `dsh_plan` | 零调用预览新任务参数、风险及续接/恢复条件；不消耗 requestId，不代表授权或入场成功。 |
 | `dsh_submit` | 提交新任务，立即返回 taskId 与仅首次发放的 controlToken；同 requestId 和同输入不会重复启动。 |
 | `dsh_status` | 查询某次执行状态、终止原因和清理结果。 |
 | `dsh_list` | 默认列出本连接最多 50 项任务；`scope: store` 查看全部保留任务。 |
