@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.1 — 2026-10-26
+
+- Fix a confirmed offline Teams cancellation-test race: an empty/partial synthetic heartbeat while the fixture rewrites it is unobserved evidence, not PID0. Await a complete parsed heartbeat before capturing child identity; retain cancellation deadline, PID ownership, stream settlement and no-orphan assertions. Runtime execution behavior is unchanged.
+
 ## 3.7.0 — 2026-10-26
 
 - Extend dsh_list with1–50 item pages, exact parent labels, latest-attempt status filters and UTC time bounds. Default connection scope and50 items remain.

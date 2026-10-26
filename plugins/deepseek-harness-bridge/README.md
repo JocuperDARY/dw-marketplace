@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.7.0
+# DeepSeek Harness Bridge 3.7.1
+
+3.7.1 修复离线 Teams 取消测试的心跳读取竞态：等待完整 PID/时间戳后再记录子任务身份，避免将写入瞬间的空文件误判成 PID0。运行时行为未变，原有取消限时、进程归属与无残留断言保留。
 
 3.7.0 的 `dsh_list` 支持稳定分页及父级标签、状态、起始时间筛选。首次调用固定摘要快照，后续直接使用 `pagination.nextRequest`，不会因并行任务新增、续接或状态变化而漏项、重复；新查询才反映当前状态。游标限当前连接，10 分钟有效，缓存有容量边界，失效明确报错。见[历史分页](docs/history-pagination.md)。
 

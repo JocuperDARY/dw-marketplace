@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { HarnessClient } from '@deepseek-ai/dsh-sdk-client';
 import { resolveProfile } from '../src/capabilities.js';
 import { createSdkRunner, workerEnvironment } from '../src/sdk-runner.js';
+import { readHeartbeat } from './fixtures/heartbeat.js';
 
 const modulePath = fileURLToPath(new URL('./fixtures/native-teams-campaign-model.js', import.meta.url));
 const networkImport = new URL('./fixtures/offline-network.js', import.meta.url).href;
@@ -275,15 +276,18 @@ test('native Teams active child stops at the owned cancellation deadline with no
   const controller = new AbortController();
   const wall = AbortSignal.timeout(45000);
   const running = h.run(AbortSignal.any([controller.signal, wall]));
+  let before;
   await until(async () => {
     try {
-      await access(h.heartbeat);
+      const heartbeat = await readHeartbeat(h.heartbeat);
+      if (!heartbeat) return false;
       const { events } = await parsed(h.requestsPath);
-      return events.some(event => event.type === 'child-active') && events.some(event => event.type === 'captain-active');
+      const active = events.some(event => event.type === 'child-active') && events.some(event => event.type === 'captain-active');
+      if (active) before = heartbeat;
+      return active;
     }
     catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
   }, wall);
-  const before = await readFile(h.heartbeat, 'utf8');
   await delay(50, undefined, { signal: wall });
   const stoppedAt = Date.now();
   controller.abort(new Error('Offline fixture reached its explicit active-child deadline.'));
@@ -300,7 +304,7 @@ test('native Teams active child stops at the owned cancellation deadline with no
     assert.equal(await readFile(h.heartbeat, 'utf8'), after, 'Child continued running after its owned runtime exited.');
     const receipt = await parsed(h.requestsPath);
     h.quiescent(receipt.pid);
-    assert.equal(Number(before.split(':')[0]), receipt.pid, 'The observed active child must run in the owned SDK process.');
+    assert.equal(before.pid, receipt.pid, 'The observed active child must run in the owned SDK process.');
     assert.ok(receipt.requests.some(request => request.member));
     assert.ok(receipt.events.some(event => event.type === 'child-stream-settled' && event.aborted));
     assert.ok(receipt.events.some(event => event.type === 'captain-stream-settled' && event.aborted));

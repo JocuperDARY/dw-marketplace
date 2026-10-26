@@ -15,7 +15,7 @@ import { payloadSha256Schema, preparePayloadSchema, preparePayload, validatePayl
 import { rejectionSchema, recordRejection } from './rejection-evidence.js';
 import { historySchema, normalizeHistory } from './history.js';
 
-export const VERSION = '3.7.0';
+export const VERSION = '3.7.1';
 const taskId = z.string().uuid();
 const controlToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().describe('Opaque capability returned only by initial submit. Required to continue or cancel from another connection. Keep in the parent chat; never include in worker prompts or shared reports.');
 const scope = z.enum(['connection', 'store']).optional().describe('Default connection lists this connection’s owned tasks. Explicit store includes all retained tasks and historical read-only records for recovery; it grants no execution control.');
