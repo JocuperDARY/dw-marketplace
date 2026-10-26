@@ -63,32 +63,62 @@ export function normalizeSubmission(input, options = {}) {
 const origin = (object, key, derived = false) => object?.[key] != null ? 'caller'
   : derived ? 'mode' : object?.[key] === null ? 'caller-unspecified' : 'omitted';
 
-export async function previewSubmission(input, { dataDir, resolveCapabilities = resolveProfile }) {
+// This bounds the observation response, not task execution or uncancellable OS I/O.
+async function withinDeadline(work, timeoutMs) {
+  let expired = false;
+  let timer;
+  const check = () => { if (expired) throw new BridgeError('PLAN_TIMEOUT', 'Submission preview exceeded its local metadata deadline. No task was admitted.'); };
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => { expired = true; try { check(); } catch (error) { reject(error); } }, timeoutMs);
+  });
+  try { return await Promise.race([work(check), timeout]); }
+  finally { clearTimeout(timer); }
+}
+
+export async function previewSubmission(input, { dataDir, resolveCapabilities = resolveProfile, previewTimeoutMs = 5000 }) {
   const { planned, access, timeoutMs, maxRequestBytes } = normalizeSubmission(input);
   requireValue(typeof dataDir === 'string' && isAbsolute(dataDir), 'INVALID_CONFIG', 'The bridge data directory must be absolute.');
-  const workspace = await resolveWorkspace(input.workspace, await canonicalStatePath(dataDir));
-  const profile = await resolveCapabilities(planned.capabilityProfile, undefined, { workspace, requestedWorkspace: input.workspace, access, nativePlugins: input.nativePlugins });
-  requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
-  const single = planned.executionMode === 'single-request';
-  const limits = { maxTokens: planned.maxTokens, maxModelRequests: planned.maxModelRequests, maxToolCalls: planned.maxToolCalls,
-    timeoutMs, maxRequestBytes, budget: planned.budget };
-  const limitSources = Object.fromEntries(['maxTokens', 'maxModelRequests', 'maxToolCalls', 'timeoutMs', 'maxRequestBytes'].map(key =>
-    [key, origin(input, key, (key === 'maxModelRequests' && single) || (key === 'maxToolCalls' && (single || planned.capabilityProfile === 'inference-only')))]));
-  if (planned.budget) for (const key of Object.keys(planned.budget)) limitSources[`budget.${key}`] = origin(input.budget, key);
-  return {
-    kind: 'submission-plan', scope: 'new-task',
-    route: { provider: 'deepseek-official', model: 'deepseek-flash' },
-    execution: { executionMode: planned.executionMode, workload: planned.workload, effort: planned.effort,
-      effortSource: input.effort === undefined ? 'workload' : 'caller', capabilityProfile: planned.capabilityProfile, access, outputFormat: planned.outputFormat },
-    workspace, limits, limitSources, warnings: planned.warnings,
-    implementationConstraints: [...commonImplementationConstraints],
-    recovery: { available: planned.executionMode === 'budgeted', policy: planned.executionMode === 'budgeted' ? 'bounded-v1' : 'none',
-      condition: 'Only eligible format/truncation failures with confirmed cleanup, valid accounting and remaining authorization; no side effects are repeated.' },
-    continuation: { available: !single, condition: single ? 'Prohibited by single-request.' : 'Only completed sessions or safely paused budgeted tasks, with original authorization and control ownership.' },
-    capabilities: { id: profile.id, digest: profile.digest, fileTools: profile.fileTools, declaredTools: profile.tools,
-      moduleCount: profile.modules.length, skillCount: profile.skills.length, runtimeVerified: false,
-      ...(profile.native?.remainingImplementationConstraints ? { remainingImplementationConstraints: profile.native.remainingImplementationConstraints } : {}) },
-    checks: { arguments: 'valid', workspace: 'valid', capabilities: 'resolved', credentials: 'not_checked', admission: 'not_checked', replay: 'not_checked', authorization: 'not_assessed' },
-    parentAcceptance: 'not_assessed', validation: { modelCalls: 0, workerStarts: 0, stateWrites: 0 },
-  };
+  requireValue(Number.isSafeInteger(previewTimeoutMs) && previewTimeoutMs > 0 && previewTimeoutMs <= 5000,
+    'INVALID_CONFIG', 'Preview metadata deadline must be between 1 and 5000 milliseconds.');
+  return withinDeadline(async check => {
+    const statePath = await canonicalStatePath(dataDir);
+    check();
+    const workspace = await resolveWorkspace(input.workspace, statePath);
+    check();
+    const profile = await resolveCapabilities(planned.capabilityProfile, undefined, { workspace, requestedWorkspace: input.workspace, access, nativePlugins: input.nativePlugins });
+    check();
+    requireValue(access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This capability profile requires workspace-write access.');
+    const single = planned.executionMode === 'single-request';
+    const limits = { maxTokens: planned.maxTokens, maxModelRequests: planned.maxModelRequests, maxToolCalls: planned.maxToolCalls,
+      timeoutMs, maxRequestBytes, budget: planned.budget };
+    const limitSources = Object.fromEntries(['maxTokens', 'maxModelRequests', 'maxToolCalls', 'timeoutMs', 'maxRequestBytes'].map(key =>
+      [key, origin(input, key, (key === 'maxModelRequests' && single) || (key === 'maxToolCalls' && (single || planned.capabilityProfile === 'inference-only')))]));
+    if (planned.budget) for (const key of Object.keys(planned.budget)) limitSources[`budget.${key}`] = origin(input.budget, key);
+    const limitInputs = Object.fromEntries(Object.keys(limitSources).map(key => [key,
+      key.startsWith('budget.') ? origin(input.budget, key.slice(7)) : origin(input, key)]));
+    const native = profile.native ? { selected: [...profile.native.selected], components: profile.native.components.map(component => ({
+      capability: component.capability, selected: component.selected, runtimeVerified: false,
+      ...(component.implementation ? { implementation: component.implementation } : {}),
+      ...(component.reason ? { reason: component.reason } : {}),
+    })) } : undefined;
+    const warnings = [...planned.warnings];
+    for (const component of native?.components ?? []) if (!component.selected) warnings.push(`Requested native capability ${component.capability} is unavailable: ${component.reason ?? 'No compatible implementation was resolved.'}`);
+    return {
+      kind: 'submission-plan', scope: 'new-task',
+      route: { provider: 'deepseek-official', model: 'deepseek-flash' },
+      execution: { executionMode: planned.executionMode, workload: planned.workload, effort: planned.effort,
+        effortSource: input.effort === undefined ? 'workload' : 'caller', capabilityProfile: planned.capabilityProfile, access, outputFormat: planned.outputFormat },
+      workspace, limits, limitSources, limitInputs, warnings,
+      implementationConstraints: [...commonImplementationConstraints],
+      recovery: { available: planned.executionMode === 'budgeted', policy: planned.executionMode === 'budgeted' ? 'bounded-v1' : 'none',
+        condition: 'Only eligible format/truncation failures with confirmed cleanup, valid accounting and remaining authorization; no side effects are repeated.' },
+      continuation: { available: !single, condition: single ? 'Prohibited by single-request.' : 'Only completed sessions or safely paused budgeted tasks, with original authorization and control ownership.' },
+      capabilities: { id: profile.id, digest: profile.digest, fileTools: profile.fileTools, declaredTools: profile.tools,
+        moduleCount: profile.modules.length, skillCount: profile.skills.length, runtimeVerified: false,
+        ...(native ? { native } : {}),
+        ...(profile.native?.remainingImplementationConstraints ? { remainingImplementationConstraints: profile.native.remainingImplementationConstraints } : {}) },
+      checks: { arguments: 'valid', workspace: 'valid', capabilities: 'resolved', credentials: 'not_checked', admission: 'not_checked', replay: 'not_checked', authorization: 'not_assessed' },
+      parentAcceptance: 'not_assessed', validation: { modelCalls: 0, workerStarts: 0, stateWrites: 0 },
+    };
+  }, previewTimeoutMs);
 }

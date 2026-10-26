@@ -8,6 +8,7 @@ import { normalizeReportContract, reportContractSchema } from './report.js';
 import { lifecycleContractSchema, normalizeLifecycleContract } from './lifecycle.js';
 import { prepareNativeWorkspace } from './native-workspace.js';
 import { inputPrompt } from './submission-plan.js';
+import { validateNativeSelection } from './planning.js';
 
 export const VERSION = '3.3.0';
 const taskId = z.string().uuid();
@@ -38,11 +39,12 @@ const submissionSchema = z.object({ requestId, prompt, parentLabel: z.string().m
   maxToolCalls: resourceLimit(0).describe('Optional user-specified per-stage tool-call ceiling. Omitted/null is unspecified, except single-request/inference-only permits no tools.'),
   maxModelRequests: resourceLimit().describe('Optional user-specified per-stage model-call ceiling. Omitted/null is unspecified; explicit single-request remains exactly one request.'),
   maxRequestBytes: resourceLimit().describe('Optional user-specified serialized model-input byte ceiling. Omitted/null adds no bridge request-byte cap; protocol, file and storage constraints are separate.'),
-  nativePlugins: z.array(z.enum(['skills', 'files', 'shell', 'teams'])).optional().describe('Optional native capability selection; omit to inspect/use compatible capabilities for the access mode. Explicit [] disables native extensions. Skills are searched in DSH first; supplemental skill text is used only when no suitable native skill exists.'),
+  nativePlugins: z.array(z.enum(['skills', 'files', 'shell', 'teams'])).optional().describe('Only permitted with the effective native capability profile. Omit this field for inference-only (including single-request), files and custom profiles; even [] is invalid there. With native, omission selects compatible capabilities for the access mode and [] disables native extensions. Skills are searched in DSH first; supplemental skill text is used only when no suitable native skill exists.'),
   capabilityProfile: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).optional().describe('native (default), files, inference-only, or a configured profile. single-request defaults to inference-only. Installed, registered, called and model-applied are separate evidence.') }).strict();
 
 function validateSubmissionContracts(input) {
   inputPrompt(input.prompt);
+  validateNativeSelection(input);
   // Pure contract checks precede connection ownership, credentials and task admission.
   normalizeReviewContract(input.reviewContract);
   normalizeReportContract(input.reportContract);

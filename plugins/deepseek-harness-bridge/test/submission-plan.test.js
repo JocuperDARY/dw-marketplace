@@ -72,6 +72,58 @@ test('preview exposes the exact single-request limits and warning without touchi
   assert.equal(nullLimits.limits.maxModelRequests, 1);
   assert.equal(nullLimits.limitSources.maxModelRequests, 'mode');
   assert.equal(nullLimits.limitSources.maxToolCalls, 'mode');
+  assert.equal(nullLimits.limitInputs.maxModelRequests, 'caller-unspecified');
+  assert.equal(nullLimits.limitInputs.maxToolCalls, 'caller-unspecified');
+  assert.equal(result.limitInputs.maxModelRequests, 'omitted');
+  assert.equal(result.limitInputs.maxTokens, 'caller');
+});
+
+test('native preview reports unavailable requested components without exposing module settings', async t => {
+  const f = await fixture(t);
+  const result = await previewSubmission({ requestId: 'missing-teams', workspace: f.workspace, prompt: 'Task',
+    access: 'workspace-write', nativePlugins: ['files', 'teams'] }, { dataDir: f.dataDir,
+    resolveCapabilities: () => resolveProfile('native', { inventoryHome: join(f.workspace, 'empty-inventory') },
+      { workspace: f.workspace, access: 'workspace-write', nativePlugins: ['files', 'teams'] }) });
+  assert.deepEqual(result.capabilities.native.selected, ['files', 'teams']);
+  const components = result.capabilities.native.components;
+  assert.equal(components.find(c => c.capability === 'files').selected, true);
+  assert.equal(components.find(c => c.capability === 'teams').selected, false);
+  assert.match(components.find(c => c.capability === 'teams').reason, /not installed/);
+  assert.match(result.warnings.join(' '), /teams is unavailable/);
+  assert.equal(components.every(c => c.runtimeVerified === false), true);
+  assert.equal(JSON.stringify(result).includes('managerCore'), false);
+  await assert.rejects(access(f.dataDir), { code: 'ENOENT' });
+});
+
+test('preview deadline returns safely while a late metadata rejection is observed', async t => {
+  const f = await fixture(t);
+  let rejectResolution;
+  const stalled = previewSubmission(f.input, { dataDir: f.dataDir, previewTimeoutMs: 100,
+    resolveCapabilities: () => new Promise((_, reject) => { rejectResolution = reject; }) });
+  await assert.rejects(stalled, { code: 'PLAN_TIMEOUT' });
+  assert.equal(typeof rejectResolution, 'function');
+  rejectResolution(new Error('private-metadata-exception'));
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(access(f.dataDir), { code: 'ENOENT' });
+});
+
+test('inapplicable nativePlugins is a field error before state access, even for empty selection', async t => {
+  const f = await fixture(t, { locked: true });
+  for (const nativePlugins of [[], ['files']]) for (const tool of ['dsh_plan', 'dsh_submit']) {
+    const result = await f.call(tool, { ...f.input, nativePlugins });
+    assert.equal(result.error.code, 'INVALID_ARGUMENT');
+    assert.deepEqual(result.error.validation.issues[0].path, ['nativePlugins']);
+    assert.equal(result.error.validation.issues[0].code, 'native_profile_required');
+    assert.match(result.error.message, /Omit this field/);
+    assert.equal(JSON.stringify(result).includes('private-assignment-marker'), false);
+  }
+  const corrected = await f.call('dsh_plan', f.input);
+  assert.equal(corrected.limits.maxModelRequests, 1);
+  assert.equal(corrected.limits.maxToolCalls, 0);
+  const native = await f.call('dsh_plan', { ...f.input, executionMode: 'automatic', nativePlugins: [] });
+  assert.equal(native.execution.capabilityProfile, 'native');
+  assert.deepEqual(f.effects, { workers: 0, credentials: 0 });
+  assert.equal(f.manager.manager, null);
 });
 
 test('preview does not consume the request ID and matches new-task admission without restoring omitted limits', async t => {

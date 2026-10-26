@@ -2,7 +2,7 @@
 
 `dsh_result.limit` counts UTF-16 code units, defaults to **16000**, and cannot exceed
 **32000**. A request for `50000` is a schema error before task-manager execution.
-The existing eleven MCP tools and the result input limits are unchanged.
+The existing result endpoint and its input limits are unchanged.
 
 Each available result page also returns:
 
