@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.4.0
+# DeepSeek Harness Bridge 3.5.0
+
+3.5.0 的新预算任务支持[进展驱动恢复](docs/progress-recovery.md)：父级可预先声明工作区 JSON 里程碑，普通阶段新达成条件后才重新开放后续文本恢复；不重置总预算，不把进度措辞变化当作证据。单请求禁止重试、历史恢复策略和原始失败记录继续保留。
 
 3.4.0 新增 `dsh_check_result` 和 `scripts/check-result.js`：对保存结果的字面值、计数、算术、引用行和执行回执做确定性检查，返回 PASS/FAIL/UNKNOWN；父级语义与科学验收仍独立。见[父级证据检查](docs/parent-evidence.md)。
 
@@ -138,7 +140,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 `dsh_status` / `dsh_result` 的 `orchestration` 显示授权、已计入消耗、剩余额度、阶段数和检查点路径。总额度无法再支持工作及进度保存时返回 `paused` / `TOTAL_BUDGET_EXHAUSTED`；重复相同进度返回 `paused` / `NO_PROGRESS`。重启、幂等重放和 `dsh_continue` 都不会补充额度或延长原截止时间。需要扩大预算时由主智能体取得新授权后建立新任务。
 
-未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。新 budgeted 任务在工作和检查点仍能容纳时，另行软预留一次请求和最多 2048 输出 token；最后普通阶段可释放软预留，硬总额始终不变。确认的 `max-tokens` 和显式检查发现的最终 JSON 格式失败，共享整个任务最多一次 `off`、零工具恢复。先保存原始失败到 `partial-N.json`，确认清理和记账后，从同一总预算重新生成；不拼接残缺文本或重复文件操作。单请求、语义错误、传输/清理/记账/持久化失败不触发此恢复。小预算、耗尽时间和再次失败仍可能无法交付。详见[预算可靠性契约](docs/budget-reliability.md)与[严格交付恢复契约](docs/output-recovery.md)。
+未知用量按预留上限计入；无效回执保留整阶段预留额度。输出 token 包含推理，不是金额或精确输入 token 上限。新 budgeted 任务在工作和检查点仍能容纳时，另行软预留一次请求和最多 2048 输出 token；最后普通阶段可释放软预留，硬总额始终不变。确认的 `max-tokens` 和显式检查发现的最终 JSON 格式失败，默认共享一次 `off`、零工具恢复；新 progress-v2 任务可凭父级预先声明且新达成的里程碑开放后续恢复（见 docs/progress-recovery.md）。先保存原始失败到 `partial-N.json`，确认清理和记账后，从同一总预算重新生成；不拼接残缺文本或重复文件操作。单请求、语义错误、传输/清理/记账/持久化失败不触发此恢复。小预算、耗尽时间和再次失败仍可能无法交付。详见[预算可靠性契约](docs/budget-reliability.md)与[严格交付恢复契约](docs/output-recovery.md)。
 
 插件固定路由为 `deepseek-official / deepseek-flash`。锁定 SDK 将别名标为 DeepSeek-V4.1-Flash；实际服务版本以提供方为准。mechanical/drafting 默认 off，standard 默认 low，reasoning/verification 默认 high；verification 必须提供 reviewContract。推理档位不再暗中设置输出上限；显式档位和额度优先。检查点与交付恢复使用 off。原生压缩请求的 effort 未指定时如实记录 null。模型能力、200 tok/s 和加速效果仍须真实测量。
 

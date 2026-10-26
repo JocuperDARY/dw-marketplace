@@ -5,9 +5,22 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile, li
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { WorkspaceFiles } from '../src/workspace.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const backupName = (path, text) => `${sha(path)}-${sha(text)}.txt`;
+
+test('evidence reader rejects non-regular files before opening them', async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.files.readEvidence('.'), { code: 'PATH_DENIED' });
+});
+
+test('POSIX FIFO evidence is rejected without a blocking open', { skip: process.platform === 'win32', timeout: 3000 }, async t => {
+  const f = await fixture(t);
+  await promisify(execFile)('mkfifo', [join(f.workspace, 'fifo')]);
+  await assert.rejects(f.files.readEvidence('fifo'), { code: 'PATH_DENIED' });
+});
 
 async function fixture(t, access = 'workspace-write', maxToolCalls = 32) {
   const root = await mkdtemp(join(tmpdir(), 'bridge-files-'));

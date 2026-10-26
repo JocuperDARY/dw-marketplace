@@ -1,6 +1,6 @@
 // Only schema-owned field names may leave the process in validation diagnostics.
 // Never expose rejected values, unknown property names, or Zod's raw messages.
-const validationFields = new Set(('requestId prompt parentLabel controlToken scope workspace stageRuntimeSupport access executionMode workload outputFormat reviewContract reportContract lifecycleContract statuses cases allowedStatuses slotReusable basis effort timeoutMs budget totalModelRequests totalOutputTokens totalToolCalls totalDurationMs maxTokens maxToolCalls maxModelRequests maxRequestBytes nativePlugins capabilityProfile taskId attempt offset limit caseIds ruleIds checkIds facts id kind value unit source checks pointer expected operator operands absoluteTolerance path sha256 receipt identity exitCodePointer reason').split(' '));
+const validationFields = new Set(('requestId prompt parentLabel controlToken scope workspace stageRuntimeSupport access executionMode workload outputFormat reviewContract reportContract lifecycleContract statuses cases allowedStatuses slotReusable basis effort timeoutMs budget totalModelRequests totalOutputTokens totalToolCalls totalDurationMs maxTokens maxToolCalls maxModelRequests maxRequestBytes nativePlugins capabilityProfile taskId attempt offset limit caseIds ruleIds checkIds facts id kind value unit source recoveryMilestones assertions checks pointer expected operator operands absoluteTolerance path sha256 receipt identity exitCodePointer reason').split(' '));
 const validationMessages = {
   invalid_type: 'Use the type specified by the advertised schema.',
   invalid_value: 'Use one of the advertised values.',
@@ -17,6 +17,7 @@ const validationMessages = {
   status_not_declared: 'Allowed statuses must belong to the declared status vocabulary.',
   lifecycle_utf8_size_limit: 'Lifecycle contract must not exceed 16384 UTF-8 bytes.',
   utf8_size_limit: 'Report contract must not exceed 16384 UTF-8 bytes.',
+  budgeted_required: 'Recovery milestones require budgeted mode; single-request never retries.',
   native_profile_required: 'Omit nativePlugins unless capabilityProfile is native; an empty array is still a supplied field.',
 };
 
