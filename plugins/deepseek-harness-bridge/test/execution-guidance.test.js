@@ -49,3 +49,46 @@ test('reasoning selection remains explicit and does not infer new caps or overri
   assert.equal(explicit.maxTokens, 8192);
   assert.equal(explicit.maxModelRequests, 2);
 });
+
+test('implementation guidance reaches source-only workers without granting execution or changing explicit limits', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-implementation-guidance-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const kind of ['native-files', 'files', 'shell', 'inference-only']) {
+    const profile = {
+      access: 'read-only', digest: 'test', modules: [], skills: [],
+      fileTools: kind === 'files', tools: kind === 'shell' ? ['pwsh'] : [],
+      ...(kind.startsWith('native') || kind === 'shell' ? { native: {
+        selected: [kind === 'shell' ? 'shell' : 'files'],
+        components: [{ capability: kind === 'shell' ? 'shell' : 'files', selected: true }],
+      } } : {}),
+    };
+    for (const workload of ['standard', 'reasoning', 'verification', 'mechanical', 'drafting']) {
+      const task = {
+        taskId: kind, sessionId: kind, workspace: root, access: 'read-only',
+        route: { ...ROUTE, effort: 'low' }, maxTokens: 8192, maxModelRequests: 1,
+        maxToolCalls: 0, maxRequestBytes: 10000, attempts: [{ number: 1 }],
+        planning: { workload, executionMode: kind === 'inference-only' ? 'single-request' : 'automatic' },
+      };
+      const prepared = await prepareRuntime({ task, home: join(root, kind, workload), env: {}, resolveCapabilities: async () => profile });
+      const patch = JSON.parse(await readFile(prepared.options.patches[0], 'utf8'));
+      const persona = patch.find(row => row.id === 'system-prompt').config.personaPrefix;
+      const applies = !['mechanical', 'drafting'].includes(workload);
+      assert.equal(persona.includes('Generated code/test quality:'), applies, `${kind}/${workload}`);
+      if (applies) {
+        for (const text of ['NOT_RUN', 'CPU-only', 'before unsafe arithmetic', 'equal-size', 'backward', 'unique test methods', 'inference/export', 'not execution authorization']) {
+          assert.ok(persona.includes(text), `${kind}/${workload}: ${text}`);
+        }
+      }
+      assert.equal(persona.includes('Execution reuse:'), kind === 'shell');
+      assert.deepEqual(prepared.expectedTools, kind === 'files' ? ['bridge_list', 'bridge_read'] : profile.tools);
+      const inserted = patch.flatMap(row => row.insert ?? []);
+      const budget = inserted.find(row => row.id === 'bridge-budget').config;
+      assert.equal(budget.effort, 'low');
+      assert.equal(budget.maxTokens, 8192);
+      assert.equal(budget.maxModelRequests, 1);
+      assert.equal(budget.maxRequestBytes, 10000);
+      assert.equal(inserted.find(row => row.id === 'bridge-files').config.maxToolCalls, 0);
+      if (kind === 'inference-only') assert.equal(patch.find(row => row.id === 'compaction-basic').disabled, true);
+    }
+  }
+});

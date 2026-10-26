@@ -8,7 +8,9 @@ export function apply(ctx) {
     // Check the actual SDK request carries the generic evidence instructions.
     for (const instruction of ['claims under review', 'For every asserted or newly added prerequisite',
       'A valid locator alone, like a known rule ID, does not establish that the text supports the conclusion.',
-      'numerical instance', 'compound claim']) {
+      'numerical instance', 'compound claim', 'Generated code/test quality:',
+      'CPU-only', 'before unsafe arithmetic', 'equal-size', 'backward',
+      'unique test methods', 'inference/export', 'not execution authorization']) {
       if (!JSON.stringify(options.messages).includes(instruction)) throw new Error(`Missing evidence instruction: ${instruction}`);
     }
     const answer = {

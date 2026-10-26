@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.7.2 — 2026-10-26
+
+- Deliver conditional implementation/test guidance to standard, reasoning and verification workers independently of native Shell selection, including source-only skills/files. Preserve mechanical/drafting overhead, selected capabilities, explicit effort and limits, and single-request no-retry semantics.
+- Require generated tests to honor execution/device/RNG boundaries; cover semantic axes, silent equal-dimension broadcasting, padding before unsafe arithmetic, backward/parameter gradients, fixture validity and independently derived numerical expectations when relevant.
+- Add a reusable parent acceptance template for exact unique-method/execution/error-record counts, scoped reruns, source binding and checkpoint/inference/export evidence. Preserve original failures and NOT_RUN; deterministic checks and complete delivery do not certify semantic or scientific acceptance. No paid model-quality claim.
+
 ## 3.7.1 — 2026-10-26
 
 - Fix a confirmed offline Teams cancellation-test race: an empty/partial synthetic heartbeat while the fixture rewrites it is unobserved evidence, not PID0. Await a complete parsed heartbeat before capturing child identity; retain cancellation deadline, PID ownership, stream settlement and no-orphan assertions. Runtime execution behavior is unchanged.

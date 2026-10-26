@@ -32,6 +32,45 @@ async function fixture(t, object, receiptPatch = {}) {
     source: async (path, content) => { await writeFile(join(workspace, path), content); return { path, sha256: digest(content) }; } };
 }
 
+for (const corrected of [false, true]) test(`implementation test accounting keeps evidence levels separate (${corrected ? 'correct control' : 'inflated claims'})`, async t => {
+  // Anonymous synthetic counterexample; these are parent-declared facts, not
+  // test totals inferred from prose or a claim of scientific acceptance.
+  const draft = {
+    uniqueMethods: corrected ? 115 : 117, executions: 117, errorRecords: 5,
+    finalFullRun: !corrected, workerExecuted: !corrected,
+    firstRun: { identity: 'full-1', status: corrected ? 'failed' : 'succeeded' },
+    targetedRerun: { identity: 'affected-2', status: 'succeeded' },
+    gradients: { identity: 'gradient-probe', status: 'succeeded' },
+  };
+  const original = JSON.stringify(draft);
+  const f = await fixture(t, original);
+  const first = await f.source('full-1.json', '{"runId":"full-1","exitCode":1}');
+  const rerun = await f.source('affected-2.json', '{"runId":"affected-2","exitCode":0}');
+  const execution = (id, pointer, receipt, identity) => ({ id, kind: 'execution', pointer, receipt,
+    identity: { pointer: '/runId', expected: identity }, exitCodePointer: '/exitCode' });
+  const result = await f.run([
+    { id: 'unique-methods', kind: 'literal', pointer: '/uniqueMethods', expected: 115 },
+    { id: 'executions', kind: 'arithmetic', pointer: '/executions', operands: [115, 2], operator: 'sum' },
+    { id: 'error-records', kind: 'literal', pointer: '/errorRecords', expected: 5 },
+    { id: 'final-full-run', kind: 'literal', pointer: '/finalFullRun', expected: false },
+    { id: 'worker-execution', kind: 'literal', pointer: '/workerExecuted', expected: false },
+    execution('original-failure', '/firstRun', first, 'full-1'),
+    execution('targeted-pass', '/targetedRerun', rerun, 'affected-2'),
+    execution('missing-gradient-evidence', '/gradients', { path: 'absent.json', sha256: 'a'.repeat(64) }, 'gradient-probe'),
+    { id: 'shape-and-gradient-correctness', kind: 'manual', reason: 'semantic' },
+    { id: 'scientific-acceptance', kind: 'manual', reason: 'scientific' },
+  ]);
+  const claim = corrected ? 'PASS' : 'FAIL';
+  assert.deepEqual(result.items.map(item => item.status), [claim, 'PASS', 'PASS', claim, claim, claim, 'PASS', 'UNKNOWN', 'UNKNOWN', 'UNKNOWN']);
+  assert.equal(result.status, corrected ? 'incomplete' : 'checks_failed');
+  assert.equal(result.parentAcceptance, 'not_assessed');
+  assert.equal(result.sourceAuthority, 'not_assessed');
+  assert.ok(f.calls.every(request => request.name === 'dsh_result'));
+  const preserved = await f.callTool({ name: 'dsh_result', arguments: { taskId: f.taskId, attempt: 1, offset: 0, limit: 32000 } });
+  assert.equal(preserved.text, original);
+  assert.equal(await readFile(join(f.workspace, 'full-1.json'), 'utf8'), '{"runId":"full-1","exitCode":1}');
+});
+
 test('literal, count and arithmetic checks pass independently without claiming semantic acceptance', async t => {
   const f = await fixture(t, { value: 4, items: ['a', 'b'], sum: 6, product: 24, padded: '界😀'.repeat(14000) });
   const result = await f.run([

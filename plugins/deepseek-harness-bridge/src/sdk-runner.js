@@ -8,6 +8,7 @@ import { resolveProfile } from './capabilities.js';
 import { STAGE_PROTOCOL } from './orchestration.js';
 import { withinLimit } from './limits.js';
 import { executionGuidance } from './execution-guidance.js';
+import { implementationGuidance } from './implementation-guidance.js';
 
 export const SDK_VERSION = '0.2.1-rc.2';
 export const ROUTE = { provider: 'deepseek-official', model: 'deepseek-flash' };
@@ -55,7 +56,7 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
     { id: 'sandbox-policy', config: { mode: task.access, workspaceRoot: task.workspace } },
     { id: 'tools', config: { mode: 'native', ...(profile.native ? {} : { maxParallelSubCalls: 1 }) } },
     { id: 'system-prompt', config: { includeHarnessIdentity: false, includeRuntimeContext: false,
-      personaPrefix: SYSTEM_PROMPT + (profile.native ? '\nUse relevant DSH-native skills and plugins actively within the assigned access and scope. Search the native skill registry first, then load a matching skill before applying it. Add supplemental Codex skill material only when no suitable native skill is available. Do not equate installation, registration, loading, use and successful verification. Agent Teams are available when selected; use them if useful, and wait for required members and cleanup before final delivery. Omitted bridge resource limits are not a mandate to spend or to expand the assignment.' : '') + executionGuidance(profile) + (task.stageBudget ? `\n${STAGE_PROTOCOL}` : '') + profile.skills.map(skill => `\n<skill-reference path=${JSON.stringify(skill.path)}>\n${skill.text}\n</skill-reference>`).join('') } },
+      personaPrefix: SYSTEM_PROMPT + (profile.native ? '\nUse relevant DSH-native skills and plugins actively within the assigned access and scope. Search the native skill registry first, then load a matching skill before applying it. Add supplemental Codex skill material only when no suitable native skill is available. Do not equate installation, registration, loading, use and successful verification. Agent Teams are available when selected; use them if useful, and wait for required members and cleanup before final delivery. Omitted bridge resource limits are not a mandate to spend or to expand the assignment.' : '') + executionGuidance(profile) + implementationGuidance(task.planning?.workload) + (task.stageBudget ? `\n${STAGE_PROTOCOL}` : '') + profile.skills.map(skill => `\n<skill-reference path=${JSON.stringify(skill.path)}>\n${skill.text}\n</skill-reference>`).join('') } },
     { insert: [{ id: 'bridge-budget', name: new URL('./worker-budget.js', import.meta.url).href,
       config: { budgetPath, armedPath, nonce, effort: task.route.effort, maxTokens: task.maxTokens,
         allowNativeContent: !!profile.native, allowNativeCompaction: nativeCompaction,

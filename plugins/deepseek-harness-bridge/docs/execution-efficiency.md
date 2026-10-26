@@ -1,5 +1,7 @@
 # Execution efficiency and evidence reuse
 
+Source-only implementation needs quality guidance even when Shell is absent. Use [implementation quality](implementation-quality.md) for generated-test boundaries, numerical counterexamples and parent acceptance. Reuse targeted correction evidence with its exact scope; do not relabel it as a final full-suite run.
+
 Reduce repeated discovery and duplicate execution while preserving task identity, failures and parent acceptance. A prior local observation report recorded 382 requests, 3 complete training runs and 9 test/evaluation executions. Those counts motivate this workflow; they are a baseline observation, not measured savings, a target quota, or proof that any run was redundant. Keep its detailed request accounting in the local report.
 
 ## Prepare once, then prove the selected runtime
