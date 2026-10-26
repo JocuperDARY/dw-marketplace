@@ -1,5 +1,6 @@
 import { TaskManager } from './tasks.js';
 import { requireValue } from './errors.js';
+import { previewSubmission } from './submission-plan.js';
 
 // Keep the connection identity across idle periods. Only registry commits and
 // individual task attempts take locks; observing another chat never acquires one.
@@ -27,6 +28,11 @@ export class ConnectionTasks {
     const manager = await this.opening;
     requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
     return manager[method](...args);
+  }
+
+  plan(input) {
+    requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+    return previewSubmission(input, this.options);
   }
 
   submit(...args) { return this.use('submit', ...args); }

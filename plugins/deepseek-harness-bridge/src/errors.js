@@ -15,6 +15,7 @@ const validationMessages = {
   status_not_declared: 'Allowed statuses must belong to the declared status vocabulary.',
   lifecycle_utf8_size_limit: 'Lifecycle contract must not exceed 16384 UTF-8 bytes.',
   utf8_size_limit: 'Report contract must not exceed 16384 UTF-8 bytes.',
+  native_profile_required: 'Omit nativePlugins unless capabilityProfile is native; an empty array is still a supplied field.',
 };
 
 function safeValidation(validation) {

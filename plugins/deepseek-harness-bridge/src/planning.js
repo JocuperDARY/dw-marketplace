@@ -1,4 +1,4 @@
-import { boundedInteger, requireValue } from './errors.js';
+import { BridgeError, boundedInteger, requireValue } from './errors.js';
 import { normalizeBudget } from './orchestration.js';
 import { normalizeOutputFormat, normalizeReviewContract } from './delivery.js';
 import { normalizeReportContract } from './report.js';
@@ -7,6 +7,13 @@ import { optionalLimit } from './limits.js';
 
 const EFFORT = { mechanical: 'off', drafting: 'off', standard: 'low', reasoning: 'high', verification: 'high' };
 const HEADROOM = { off: 4096, low: 8192, high: 16384, max: 32768 };
+
+export function validateNativeSelection(input, capabilityProfile = input.capabilityProfile ||
+  (input.executionMode === 'single-request' ? 'inference-only' : 'native')) {
+  if (input.nativePlugins !== undefined && capabilityProfile !== 'native') throw new BridgeError('INVALID_ARGUMENT',
+    'nativePlugins is permitted only with the native capability profile. Omit this field for inference-only, including single-request.',
+    { validation: { phase: 'contract', issues: [{ path: ['nativePlugins'], code: 'native_profile_required' }] } });
+}
 
 /** Omitted resource limits remain omitted; only explicit limits constrain work. */
 export function planExecution(input, { legacy = false, compatibilityV1 = false } = {}) {
@@ -27,7 +34,7 @@ export function planExecution(input, { legacy = false, compatibilityV1 = false }
   requireValue(Object.hasOwn(HEADROOM, effort), 'INVALID_ARGUMENT', 'effort must be off, low, high or max.');
   const single = executionMode === 'single-request';
   const capabilityProfile = input.capabilityProfile || (single ? 'inference-only' : oldDefaults ? 'files' : 'native');
-  requireValue(input.nativePlugins === undefined || capabilityProfile === 'native', 'INVALID_ARGUMENT', 'nativePlugins applies only to the native capability profile; single-request cannot enable tools.');
+  validateNativeSelection(input, capabilityProfile);
   const maxTokens = oldDefaults ? boundedInteger(input.maxTokens, legacy ? 8192 : HEADROOM[effort], 256, 32768, 'maxTokens') : optionalLimit(input.maxTokens, 'maxTokens');
   const maxModelRequests = oldDefaults ? boundedInteger(input.maxModelRequests, single ? 1 : legacy ? 16 : 6, 1, 128, 'maxModelRequests') : optionalLimit(input.maxModelRequests ?? (single ? 1 : null), 'maxModelRequests');
   const maxToolCalls = oldDefaults ? boundedInteger(input.maxToolCalls, single || (!legacy && capabilityProfile === 'inference-only') ? 0 : 32, 0, 128, 'maxToolCalls') : optionalLimit(input.maxToolCalls ?? (single || capabilityProfile === 'inference-only' ? 0 : null), 'maxToolCalls', 0);
