@@ -33,11 +33,23 @@ export function normalizeHistory(input = {}) {
     ...(value.startedBefore ? { startedBefore: new Date(value.startedBefore).toISOString() } : {}) } };
 }
 
+function compareTime(left, right) {
+  const milliseconds = Date.parse(left) - Date.parse(right);
+  if (milliseconds) return Math.sign(milliseconds);
+  // Retained legacy timestamps may contain precision beyond the public query
+  // schema. Date.parse truncates it; keep the fractional tail for exact order.
+  const tail = value => /:\d{2}\.(\d+)/.exec(value)?.[1].slice(3).replace(/0+$/, '') ?? '';
+  const a = tail(left); const b = tail(right);
+  const width = Math.max(a.length, b.length);
+  const x = a.padEnd(width, '0'); const y = b.padEnd(width, '0');
+  return x === y ? 0 : x < y ? -1 : 1;
+}
+
 function matches(summary, query) {
   return (query.parentLabel === undefined || query.parentLabel === summary.parentLabel)
     && (!query.statuses || query.statuses.includes(summary.status))
-    && (!query.startedFrom || Date.parse(summary.startedAt) >= Date.parse(query.startedFrom))
-    && (!query.startedBefore || Date.parse(summary.startedAt) < Date.parse(query.startedBefore));
+    && (!query.startedFrom || compareTime(summary.startedAt, query.startedFrom) >= 0)
+    && (!query.startedBefore || compareTime(summary.startedAt, query.startedBefore) < 0);
 }
 
 // Observation cache only: no disk writes, task locks or task-control capabilities.
@@ -64,7 +76,7 @@ export class HistoryPages {
       requireValue(bytes <= this.maxBytes, 'HISTORY_SNAPSHOT_TOO_LARGE', 'History snapshot exceeds the observation cache. Narrow the filters and start a fresh query.');
       rows.push(structuredClone(summary));
     }
-    rows.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.taskId.localeCompare(a.taskId));
+    rows.sort((a, b) => compareTime(b.startedAt, a.startedAt) || b.taskId.localeCompare(a.taskId));
     const ids = new Set(rows.map(row => row.taskId));
     const active = [...new Set(activeTaskIds)].filter(id => ids.has(id));
     const snapshot = { id: randomBytes(16).toString('hex'), query: structuredClone(query), key: JSON.stringify(query),

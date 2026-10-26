@@ -72,6 +72,18 @@ test('sub-millisecond filter precision is rejected instead of silently moving in
   assert.equal(query({ startedFrom: '2026-01-01T00:00:00.1Z' }).startedFrom, '2026-01-01T00:00:00.100Z');
 });
 
+test('retained high-precision timestamps keep chronological order across offsets and filter boundaries', () => {
+  const history = new HistoryPages();
+  const rows = [row(9, { startedAt: '2026-01-01T00:00:00.0001Z' }),
+    row(1, { startedAt: '2026-01-01T01:00:00.0002+01:00' }), row(8, { startedAt: '2026-01-01T00:00:00.0000Z' })];
+  const first = history.capture(query({ limit: 1 }), rows);
+  assert.equal(first.tasks[0].taskId, 'task-001');
+  assert.equal(next(history, first.pagination.nextRequest).tasks[0].taskId, 'task-009');
+  assert.equal(history.capture(query({ startedBefore: '2026-01-01T00:00:00.001Z' }), rows).total, 3);
+  assert.equal(history.capture(query({ startedBefore: '2026-01-01T00:00:00.000Z' }), rows).total, 0);
+  assert.equal(history.capture(query({ startedFrom: '2026-01-01T00:00:00.000Z' }), rows).total, 3);
+});
+
 test('scope/filter/page size drift, tampering and foreign connection cursors fail clearly', () => {
   const history = new HistoryPages();
   const first = history.capture(query({ scope: 'store', limit: 1 }), [row(0), row(1)]);
@@ -123,18 +135,19 @@ test('real store pages over50 legacy records without refreshing or modifying evi
   }
   const manager = await new TaskManager({ dataDir: f.dataDir, runner: () => assert.fail('No runner') }).open();
   t.after(() => manager.close());
+  const originalPaths = (await readdir(f.dataDir, { recursive: true })).sort();
+  const originals = await Promise.all(records.map(({ path }) => readFile(path, 'utf8')));
   assert.equal((await manager.list()).total, 0, 'connection scope does not claim legacy ownership');
   const first = await manager.list({ scope: 'store' });
   assert.equal(first.total, 61); assert.equal(first.tasks.length, 50);
   assert.equal(first.tasks.every(x => x.readOnly === true && x.controlToken === undefined), true);
-  const original = await readFile(records[0].path, 'utf8');
   const refresh = manager.refresh.bind(manager);
   manager.refresh = () => assert.fail('Cursor must not refresh live store');
   const final = await manager.list(first.pagination.nextRequest);
   assert.equal(final.tasks.length, 11); assert.equal(final.pagination.nextCursor, null);
   assert.equal(new Set([...first.tasks, ...final.tasks].map(x => x.taskId)).size, 61);
-  assert.equal(await readFile(records[0].path, 'utf8'), original);
-  assert.deepEqual(await readdir(f.dataDir), ['tasks']);
+  assert.deepEqual(await Promise.all(records.map(({ path }) => readFile(path, 'utf8'))), originals);
+  assert.deepEqual((await readdir(f.dataDir, { recursive: true })).sort(), originalPaths);
   manager.refresh = refresh;
 });
 

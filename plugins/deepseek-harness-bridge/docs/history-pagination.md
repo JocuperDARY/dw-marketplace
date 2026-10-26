@@ -2,6 +2,8 @@
 
 `dsh_list` still defaults to this connection's owned tasks and at most50 recent summaries. Explicit `scope: store` includes other connections and retained legacy records, without granting control. Each summary describes the latest attempt at initial observation, sorted by start time descending and then task ID descending. Legacy summaries keep `readOnly: true`; no control tokens are returned.
 
+Saved legacy timestamps with finer fractional precision retain their ordering and filtering meaning, including equivalent timezone offsets. They are not rewritten or truncated. New query bounds accept millisecond precision as specified below.
+
 Optional filters:
 
 - `limit`: integer1–50, default50.
