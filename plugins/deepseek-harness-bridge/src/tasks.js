@@ -12,6 +12,7 @@ import { summarizeUsage } from './usage.js';
 import { optionalLimit, minimumLimit, deadlineAfter, deadlineTimer } from './limits.js';
 import { ConcurrentStore, atomicWrite } from './concurrent-store.js';
 import { checkSavedResult } from './parent-evidence.js';
+import { HistoryPages, normalizeHistory } from './history.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -66,6 +67,7 @@ export class TaskManager {
     this.blocked = false;
     this.closed = false;
     this.mutations = Promise.resolve();
+    this.history = new HistoryPages();
   }
 
   async open() {
@@ -368,13 +370,16 @@ export class TaskManager {
     return { activeTaskIds, activeTaskId: activeTaskIds.length === 1 ? activeTaskIds[0] : null };
   }
 
-  async list({ scope = 'connection' } = {}) {
+  async list(input = {}) {
+    requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+    const { query, cursor } = normalizeHistory(input);
+    if (cursor) return this.history.next(query, cursor);
     await this.refresh();
-    const records = this.scopedRecords(scope);
-    const recent = records.sort((a, b) =>
-      b.attempts.at(-1).startedAt.localeCompare(a.attempts.at(-1).startedAt) || b.taskId.localeCompare(a.taskId));
-    return { tasks: recent.slice(0, 50).map(record => this.observedSummary(record, record.attempts.at(-1))),
-      total: records.length, blocked: false, ...this.activeSummary(records) };
+    requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
+    const records = this.scopedRecords(query.scope);
+    const manager = this;
+    function* summaries() { for (const record of records) yield manager.observedSummary(record, record.attempts.at(-1)); }
+    return this.history.capture(query, summaries(), this.activeSummary(records).activeTaskIds);
   }
 
   async usage({ taskId, scope = 'connection' } = {}) {
@@ -432,6 +437,7 @@ export class TaskManager {
   async close() {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
+    this.history.clear();
     this.closePromise = (async () => {
       await this.mutations;
       const owned = [...this.active.values()];

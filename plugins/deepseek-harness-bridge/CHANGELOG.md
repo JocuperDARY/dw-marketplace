@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.7.0 — 2026-10-26
+
+- Extend dsh_list with1–50 item pages, exact parent labels, latest-attempt status filters and UTC time bounds. Default connection scope and50 items remain.
+- Retain immutable connection-local summary snapshots so insertion, continuation and status changes do not duplicate or omit later pages. Explicit nextRequest binds scope, filters and page size; cursors are authenticated and grant no task control.
+- Keep history observation free of execution leases/state writes. Snapshot cache limits (10minutes,8 snapshots,16MiB) are separate from task budgets; unavailable or oversized snapshots fail explicitly. Legacy records remain read-only.
+
 ## 3.6.0 — 2026-10-26
 
 - Prepare labeled user prompts and manifests locally; internal entries require explicit selection, which is not transmission authorization. Preserve authority/assertion/fact roles and evidence requirements.
