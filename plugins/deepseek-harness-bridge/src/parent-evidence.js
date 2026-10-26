@@ -83,11 +83,13 @@ async function assess(check, deliverable, readArtifact) {
   if (check.kind === 'literal') return compare(check, value === check.expected, 'VALUE_MISMATCH');
   if (check.kind === 'count') return compare(check, Array.isArray(value) && value.length === check.expected, 'COUNT_MISMATCH');
   if (check.kind === 'arithmetic') {
-    const integerOnly = check.operands.every(Number.isInteger);
     let expected = check.operator === 'sum' ? 0 : 1;
     for (const operand of check.operands) {
+      const previous = expected;
       expected = check.operator === 'sum' ? expected + operand : expected * operand;
-      if (!Number.isFinite(expected) || (integerOnly && (!Number.isSafeInteger(operand) || !Number.isSafeInteger(expected)))) {
+      if (!Number.isFinite(expected) || (Number.isInteger(operand) && !Number.isSafeInteger(operand))
+        || (Number.isInteger(expected) && !Number.isSafeInteger(expected))
+        || (check.operator === 'product' && previous !== 0 && operand !== 0 && expected === 0)) {
         return item(check, 'UNKNOWN', 'NUMERIC_RANGE');
       }
     }

@@ -157,6 +157,17 @@ test('binary, invalid UTF-8 and oversized evidence remain unknown without echoin
   assert.equal(JSON.stringify(result).includes('private-file-marker'), false);
 });
 
+test('fractional operands do not disable integer guards and product underflow stays unknown', async t => {
+  const f = await fixture(t, { rounded: 1.5, small: 0, valid: 2.5 });
+  const result = await f.run([
+    { id: 'mixed-overflow', kind: 'arithmetic', pointer: '/rounded', operator: 'sum', operands: [Number.MAX_SAFE_INTEGER, 2, -Number.MAX_SAFE_INTEGER, 0.5] },
+    { id: 'mixed-control', kind: 'arithmetic', pointer: '/valid', operator: 'sum', operands: [1, 2, -1, 0.5] },
+    { id: 'underflow', kind: 'arithmetic', pointer: '/small', operator: 'product', operands: [1e-300, 1e-300] },
+    { id: 'zero-control', kind: 'arithmetic', pointer: '/small', operator: 'product', operands: [0, 1e-300] },
+  ]);
+  assert.deepEqual(result.items.map(x => x.status), ['UNKNOWN', 'PASS', 'UNKNOWN', 'PASS']);
+});
+
 test('invalid or duplicate check contracts reject before result/file observation and suppress private inputs', async () => {
   let observations = 0;
   const call = async () => { observations++; throw new Error('must not observe'); };
