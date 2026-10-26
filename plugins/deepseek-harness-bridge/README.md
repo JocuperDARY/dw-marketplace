@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.6.0
+# DeepSeek Harness Bridge 3.7.0
+
+3.7.0 的 `dsh_list` 支持稳定分页及父级标签、状态、起始时间筛选。首次调用固定摘要快照，后续直接使用 `pagination.nextRequest`，不会因并行任务新增、续接或状态变化而漏项、重复；新查询才反映当前状态。游标限当前连接，10 分钟有效，缓存有容量边界，失效明确报错。见[历史分页](docs/history-pagination.md)。
 
 3.6.0 新增 `dsh_prepare_payload`：根据父级声明的类别生成最小提示词，默认排除 internal 内容，保留权威规则、待审核断言与事实的区别。`payloadSha256` 绑定用户提示词，内容变化在提交前报错；它不覆盖 SDK/工具/历史附加输入，也不授予外发许可。`dsh_record_rejection` 单独保存父级报告的准入前拒绝元数据，不计入任务用量或模型质量。见[载荷与拒绝证据](docs/payload-minimization.md)。
 

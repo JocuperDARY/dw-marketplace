@@ -26,6 +26,7 @@ const validationMessages = {
 };
 
 for (const field of ['payloadSha256', 'objective', 'segments', 'classification', 'includeIds', 'role', 'text']) validationFields.add(field);
+for (const field of ['cursor', 'startedFrom', 'startedBefore']) validationFields.add(field);
 
 function safeValidation(validation) {
   if (!validation || !['schema', 'contract'].includes(validation.phase) || !Array.isArray(validation.issues)) return undefined;

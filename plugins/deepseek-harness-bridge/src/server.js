@@ -13,8 +13,9 @@ import { checkResultSchema, normalizeEvidenceChecks } from './parent-evidence.js
 import { recoveryMilestonesSchema, normalizeRecoveryMilestones } from './recovery-progress.js';
 import { payloadSha256Schema, preparePayloadSchema, preparePayload, validatePayloadIdentity } from './payload.js';
 import { rejectionSchema, recordRejection } from './rejection-evidence.js';
+import { historySchema, normalizeHistory } from './history.js';
 
-export const VERSION = '3.6.0';
+export const VERSION = '3.7.0';
 const taskId = z.string().uuid();
 const controlToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().describe('Opaque capability returned only by initial submit. Required to continue or cancel from another connection. Keep in the parent chat; never include in worker prompts or shared reports.');
 const scope = z.enum(['connection', 'store']).optional().describe('Default connection lists this connection’s owned tasks. Explicit store includes all retained tasks and historical read-only records for recovery; it grants no execution control.');
@@ -85,8 +86,8 @@ export function createServer({ manager, doctor, preflight = () => {} }) {
       }, write: true, network: true },
     { name: 'dsh_status', description: 'Read one task attempt and its process-cleanup status. completed means worker completion; parent acceptance is separate.',
       schema: z.object({ taskId, attempt }).strict(), run: input => manager.status(input) },
-    { name: 'dsh_list', description: 'Read up to 50 recent tasks without taking an execution lease. Default connection scope; explicit store scope includes other connections and historical records. activeTaskIds may contain several tasks; observation never interrupts or recovers them.',
-      schema: z.object({ scope }).strict(), run: input => manager.list(input) },
+    { name: 'dsh_list', description: 'Page retained task summaries without execution leases. Default connection scope; explicit store includes other connections and legacy read-only records. Filter exact parentLabel, latest-attempt statuses and UTC start times. First call captures a stable snapshot; follow pagination.nextRequest unchanged to avoid duplicates/omissions as tasks change. Cursors are connection-local, expire after10minutes and may be evicted (8 snapshots/16MiB cache). Invalid or unavailable cursors fail; a fresh call without cursor sees current state. Snapshot activeTaskIds are not live status; observation never interrupts or recovers tasks.',
+      schema: historySchema, run: input => { normalizeHistory(input); return manager.list(input); } },
     { name: 'dsh_usage', description: 'Read saved usage for this connection, explicit store scope, or one task, without model calls. Sums each stage once; legacy missing receipts stay unknown. Reported token sums, missing-call counts and unknown receipt groups are separate from conservative budget charges. Reasoning/cache fields are components, not additions to totalTokens. Admitted requests without usage do not prove billing. Local coverage only; no account bill or desktop-ledger sync. Observations acquire no execution lease.',
       schema: z.object({ taskId: taskId.optional(), scope }).strict(), run: input => manager.usage(input) },
     { name: 'dsh_wait', description: 'Wait up to 30 seconds for a task and return compact status. Reuse status/result; do not submit a duplicate task.',

@@ -1,12 +1,12 @@
 {
   "name": "deepseek-harness-bridge",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "deepseek-harness-bridge",
-      "version": "3.6.0",
+      "version": "3.7.0",
       "license": "Apache-2.0",
       "dependencies": {
         "@deepseek-ai/dsh-sdk-client": "0.2.1-rc.2",
