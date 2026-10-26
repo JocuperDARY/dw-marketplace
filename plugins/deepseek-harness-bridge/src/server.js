@@ -11,8 +11,10 @@ import { inputPrompt } from './submission-plan.js';
 import { validateNativeSelection } from './planning.js';
 import { checkResultSchema, normalizeEvidenceChecks } from './parent-evidence.js';
 import { recoveryMilestonesSchema, normalizeRecoveryMilestones } from './recovery-progress.js';
+import { payloadSha256Schema, preparePayloadSchema, preparePayload, validatePayloadIdentity } from './payload.js';
+import { rejectionSchema, recordRejection } from './rejection-evidence.js';
 
-export const VERSION = '3.5.0';
+export const VERSION = '3.6.0';
 const taskId = z.string().uuid();
 const controlToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().describe('Opaque capability returned only by initial submit. Required to continue or cancel from another connection. Keep in the parent chat; never include in worker prompts or shared reports.');
 const scope = z.enum(['connection', 'store']).optional().describe('Default connection lists this connection’s owned tasks. Explicit store includes all retained tasks and historical read-only records for recovery; it grants no execution control.');
@@ -29,6 +31,7 @@ const budget = z.object({
 }).strict().optional().describe('Optional user-specified totals across stages and continuations. Each omitted/null total is unspecified, not a default finite allowance. Output includes reasoning. Never invent limits when the user did not supply them; ask if a discretionary cap is needed. Totals are not a currency cap.');
 
 const submissionSchema = z.object({ requestId, prompt, parentLabel: z.string().max(160).optional().describe('Optional display label for the parent chat; not authorization or a secret.'), workspace: z.string().min(1).describe('Absolute existing workspace directory, disjoint from bridge state. Native Windows Shell requires worker-account ownership and no junction ancestry; use dsh_prepare_workspace for a new independent directory.'),
+  payloadSha256: payloadSha256Schema.optional().describe('Optional SHA-256 of the exact UTF-8 user prompt returned by dsh_prepare_payload. Mismatch rejects before state access. This binds only prompt identity, not SDK instructions, contracts, tools or session history, and never grants outbound authorization.'),
   recoveryMilestones: recoveryMilestonesSchema.optional().describe('Budgeted mode only: optional parent-declared workspace JSON artifacts with exact scalar assertions. Unique IDs and at most 32768 UTF-8 bytes. A newly satisfied milestone during a successful ordinary checkpoint can renew text-only recovery once; pre-existing artifacts, prose changes and recovery stages cannot. IDs are consumed once, original totals never reset, and matching artifacts do not prove source authority or semantic acceptance. Omit to retain a single recovery episode.'),
   access: z.enum(['read-only', 'workspace-write']).optional(),
   executionMode: z.enum(['automatic', 'budgeted', 'single-request']).optional().describe('Default automatic with no invented resource caps; supplying budget enables persistent total accounting. Explicit single-request always means one inference-only request, zero tools, no retry or continuation.'),
@@ -47,6 +50,7 @@ const submissionSchema = z.object({ requestId, prompt, parentLabel: z.string().m
 
 function validateSubmissionContracts(input) {
   inputPrompt(input.prompt);
+  validatePayloadIdentity(input.prompt, input.payloadSha256);
   validateNativeSelection(input);
   normalizeRecoveryMilestones(input.recoveryMilestones, input.executionMode ?? (input.budget !== undefined ? 'budgeted' : 'automatic'));
   // Pure contract checks precede connection ownership, credentials and task admission.
@@ -62,6 +66,10 @@ function validateSubmissionContracts(input) {
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
+    { name: 'dsh_prepare_payload', description: 'Prepare an exact labeled user prompt and manifest locally. Classifications and authority/assertion/fact roles are parent declarations. Default selection excludes internal entries; explicit selection never grants outbound permission. No source scans, secret detection, credentials, state access or model calls. Extra SDK/tool/session input is outside this prompt digest.',
+      schema: preparePayloadSchema, run: preparePayload },
+    { name: 'dsh_record_rejection', description: 'Save immutable metadata for a parent-reported rejection before any task receipt. No rejected content, exception text or credentials are accepted. Separate from task history, model usage and generation-quality denominators; this report does not independently prove billing or execution. No task lock, worker, retry or automatic resubmission.',
+      schema: rejectionSchema, run: input => recordRejection(input, { dataDir: manager.options?.dataDir ?? manager.dataDir }), write: true, destructive: false },
     { name: 'dsh_check_result', description: 'Check one pinned complete saved result against parent-declared literal facts, counts, arithmetic, source quotes and execution receipts. Reads bounded workspace files using pinned SHA-256. Returns per-item PASS/FAIL/UNKNOWN; missing, clipped, failed or inconsistent evidence never passes. No model calls, retries, execution locks or state writes. This is deterministic evidence checking only: source authority, natural-language entailment and parent/scientific acceptance remain not_assessed.',
       schema: checkResultSchema, run: input => { normalizeEvidenceChecks(input.checks); return manager.checkResult(input); } },
     { name: 'dsh_prepare_workspace', description: 'Create one NEW independent workspace directory under an existing parent, with the bridge host account as owner. Zero model calls; does not adopt existing directories or change existing ownership/ACLs. Use before native Shell tasks when a Codex-created directory belongs to a different sandbox account. Existing delivered files remain untouched.',

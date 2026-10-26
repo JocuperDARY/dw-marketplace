@@ -5,6 +5,7 @@ import { resolveProfile } from './capabilities.js';
 import { planExecution } from './planning.js';
 import { optionalLimit, deadlineAfter } from './limits.js';
 import { commonImplementationConstraints } from './implementation-constraints.js';
+import { validatePayloadIdentity } from './payload.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const inside = (root, child) => { const p = relative(root, child); return p === '' || (!p.startsWith(`..${sep}`) && p !== '..' && !isAbsolute(p)); };
@@ -44,6 +45,7 @@ export async function resolveWorkspace(value, dataDir) {
 // a standalone preview describes a NEW request and cannot approve a replay.
 export function normalizeSubmission(input, options = {}) {
   const prompt = inputPrompt(input.prompt);
+  validatePayloadIdentity(prompt, input.payloadSha256);
   const id = requestId(input.requestId);
   const planned = planExecution(input, options);
   const access = input.access ?? 'read-only';

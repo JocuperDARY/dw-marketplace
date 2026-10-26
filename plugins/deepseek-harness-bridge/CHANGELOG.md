@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0 — 2026-10-26
+
+- Prepare labeled user prompts and manifests locally; internal entries require explicit selection, which is not transmission authorization. Preserve authority/assertion/fact roles and evidence requirements.
+- Optional prompt SHA-256 binds plan/submit identity before state or credentials are accessed. SDK instructions, contracts, session context and tool results remain outside this digest.
+- Store immutable parent-reported pre-admission rejection metadata separately from task history, usage and generation-quality denominators, without execution leases or model calls. Reports do not independently verify billing or admission.
+
 ## 3.5.0 — 2026-10-26
 
 - New budgeted tasks use progress-v2 recovery eligibility. Parent-declared guarded JSON milestones can renew later text-only recovery after a successful ordinary checkpoint; existing matches, repeated IDs and recovery-only changes cannot.
