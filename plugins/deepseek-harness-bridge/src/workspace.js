@@ -74,7 +74,11 @@ export class WorkspaceFiles {
   }
 
   async readBytes(target, verifyOpened) {
-    const handle = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = await lstat(target);
+    requireValue(before.isFile() && !before.isSymbolicLink() && before.nlink === 1,
+      'PATH_DENIED', 'Only ordinary files with one link are available.');
+    // Nonblocking open also covers a regular-file-to-FIFO race on POSIX.
+    const handle = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
       const info = await handle.stat();
       requireValue(info.isFile() && info.nlink === 1, 'PATH_DENIED', 'Only ordinary files with one link are available.');

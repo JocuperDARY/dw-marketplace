@@ -1,5 +1,7 @@
 # Progress-aware recovery episodes
 
+Milestone artifacts must be ordinary guarded files; special files are rejected before opening, with nonblocking open where supported to cover replacement races. Numeric JSON evidence must round-trip without losing its decimal value; unsafe integers, rounded decimals and underflow cannot earn progress. Baseline and checkpoint observation time counts against the original stage wall-clock ceiling. These observations still cannot cancel an in-flight operating-system filesystem call.
+
 New budgeted tasks use `progress-v2`. One initial tool-free, off-effort recovery is available for confirmed output truncation or an explicitly checked invalid final JSON summary. A later episode is eligible only after a successful ordinary checkpoint stage newly satisfies a parent-declared `recoveryMilestones` entry. Without that optional contract, one shared recovery remains the effective behavior. Existing saved `bounded-v1` or unversioned records retain their original rules; upgrading does not retry them. Single-request never recovers or continues.
 
 Each milestone names a relative workspace JSON artifact and exact scalar assertions. The parent chooses these conditions before dispatch, from the actual acceptance requirements. For example:

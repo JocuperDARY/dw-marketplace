@@ -38,6 +38,29 @@ function matches(value, assertion) {
   return value === assertion.expected;
 }
 
+// Compare decimal JSON tokens with their Number round-trip. Do not award
+// progress when parsing silently rounded/underflowed the supplied value.
+function decimalIdentity(token) {
+  const [, sign, whole, fraction = '', exponent = '0'] = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+  let digits = `${whole}${fraction}`.replace(/^0+/, '');
+  if (!digits) return '0';
+  let power = Number(exponent) - fraction.length;
+  if (!Number.isSafeInteger(power)) return null;
+  const zeros = /0+$/.exec(digits)?.[0].length ?? 0;
+  if (zeros) { digits = digits.slice(0, -zeros); power += zeros; }
+  return `${sign}${digits}e${power}`;
+}
+
+function parseArtifact(text) {
+  let exact = true;
+  const object = JSON.parse(text, (_key, value, context) => {
+    if (typeof value === 'number' && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))
+      || decimalIdentity(context.source) !== decimalIdentity(JSON.stringify(value)))) exact = false;
+    return value;
+  });
+  return exact ? object : null;
+}
+
 // Only parent-declared guarded artifacts are observed. Missing or unparseable
 // evidence cannot grant progress; no worker-reported progress counter is trusted.
 async function readMilestones(record, signal) {
@@ -55,7 +78,7 @@ async function readMilestones(record, signal) {
         const bytes = await files.readEvidence(milestone.path);
         if (bytes.includes(0)) return { known: true };
         let object;
-        try { object = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+        try { object = parseArtifact(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
         catch { return { known: true }; }
         if (!object || typeof object !== 'object' || Array.isArray(object)) return { known: true };
         return { object, sha256: createHash('sha256').update(bytes).digest('hex') };

@@ -4,12 +4,47 @@ import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TaskManager } from '../src/tasks.js';
-import { validateSavedBudget } from '../src/orchestration.js';
+import { validateSavedBudget, runOrchestrated, normalizeBudget } from '../src/orchestration.js';
 import { normalizeRecoveryMilestones, observeMilestones, recoveryEligible, validateProgress } from '../src/recovery-progress.js';
 import { planExecution } from '../src/planning.js';
 import { snapshotPath } from './fixtures/committed-state.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const milestones = [{ id: 'phase-1', path: 'phase1.json', assertions: [{ pointer: '/passed', expected: true }] }];
+
+test('numeric artifacts cannot earn progress through JSON rounding or underflow', async t => {
+  const f = await fixture(t, () => assert.fail('No runner'));
+  assert.throws(() => normalizeRecoveryMilestones([{ id: 'unsafe', path: 'number.json', assertions: [{ pointer: '/n', expected: 9007199254740992 }] }], 'budgeted'), { code: 'INVALID_ARGUMENT' });
+  for (const [token, expected, match] of [['1.00000000000000001', 1, false], ['1e-999', 0, false],
+    ['9007199254740993', Number.MAX_SAFE_INTEGER, false], ['1.00e0', 1, true], ['0.10', 0.1, true]]) {
+    await writeFile(join(f.workspace, 'number.json'), `{"n":${token}}`);
+    const record = { workspace: f.workspace, orchestration: { progressSeen: [], recoveryMilestones: [
+      { id: 'number', path: 'number.json', assertions: [{ pointer: '/n', expected }] }] } };
+    const result = await observeMilestones(record);
+    assert.equal(result.evidence.length, match ? 1 : 0, token);
+  }
+});
+
+test('stage ceiling includes baseline and checkpoint observations without late worker launches', async () => {
+  for (const expireAt of ['baseline', 'checkpoint']) {
+    const record = { planning: { executionMode: 'budgeted' }, maxTokens: 512, maxModelRequests: 2, maxToolCalls: 0,
+      route: { effort: 'low' }, orchestration: { recoveryPolicy: 'progress-v2', recoveryMilestones: milestones,
+        progressSeen: [], stages: [], authorized: normalizeBudget({}), deadlineAt: null, assignment: 'synthetic' } };
+    let reads = 0; let launches = 0;
+    const result = await runOrchestrated({ record, attempt: { number: 1, timeoutMs: 300 }, prompt: 'synthetic',
+      signal: new AbortController().signal, persist: async () => {}, saveCheckpoint: async () => 'checkpoint', savePartial: async () => 'partial',
+      runner: async ({ task }) => { launches++; return reply(task, 'completed', 'done'); },
+      observeProgress: async (_record, options) => {
+        assert.ok(options.timeoutMs <= 300);
+        reads++;
+        if (reads === (expireAt === 'baseline' ? 1 : 2)) await delay(350);
+        return { status: 'observed', known: ['phase-1'], evidence: [] };
+      } });
+    assert.equal(result.terminal, 'aborted');
+    assert.equal(launches, expireAt === 'baseline' ? 0 : 1);
+    assert.equal(record.orchestration.stages[0].charged.modelRequests, launches);
+  }
+});
 function reply(task, state = 'checkpoint', summary = 'progress') {
   return { terminal: 'completed', cleanup: 'confirmed', text: JSON.stringify({ state, summary, nextSteps: state === 'completed' ? '' : 'continue' }), toolCalls: 0,
     budget: { nonce: task.stageBudget.nonce, modelRequests: 1, denied: null,
