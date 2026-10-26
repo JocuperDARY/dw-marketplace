@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.0 — 2026-10-27
+
+- Add persistent worker operations: spawn, message, followup, interrupt, multi-agent wait and list. Bind control to the existing task capability; preserve original workspace, permissions and totals across activities and connections.
+- Retain literal parent instructions separately from model summaries. Explicit revision-checked replacement/retraction, turn scope and frozen-input coverage survive native compaction and stage changes; acceptance remains a parent decision.
+- Use official native inject/steer and a bound worker-to-parent tool for progress, questions and replies. Persist message identity and segmented events, refuse uncertain replay, retain idle messages, and fence old interrupt retries from new activities.
+- Introduce explicit quiescent protocol 3 → 4 migration with exact head backups, publication intent and old-writer fencing. Startup never migrates or steals a lock. Historical task data and evidence remain intact.
+- Settle journal state before releasing activity ownership, retain followups accepted during closing, and complete the worker's closing transaction before shutting down its SDK process. Observation retries for Windows publication ENOENT never replay execution or take a foreign lock.
+- Add actual-SDK offline collaboration, context retention, native recovery, cross-connection interruption and protocol migration regression coverage. Offline fixtures establish mechanisms; real model quality and current desktop activation require separate evidence.
+
 ## 3.7.2 — 2026-10-26
 
 - Deliver conditional implementation/test guidance to standard, reasoning and verification workers independently of native Shell selection, including source-only skills/files. Preserve mechanical/drafting overhead, selected capabilities, explicit effort and limits, and single-request no-retry semantics.

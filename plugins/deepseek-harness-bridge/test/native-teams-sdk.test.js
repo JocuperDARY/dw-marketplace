@@ -10,6 +10,7 @@ import { HarnessClient } from '@deepseek-ai/dsh-sdk-client';
 import { resolveProfile } from '../src/capabilities.js';
 import { createSdkRunner, workerEnvironment } from '../src/sdk-runner.js';
 import { readHeartbeat } from './fixtures/heartbeat.js';
+import { createTaskContext } from '../src/task-context.js';
 
 const modulePath = fileURLToPath(new URL('./fixtures/native-teams-campaign-model.js', import.meta.url));
 const networkImport = new URL('./fixtures/offline-network.js', import.meta.url).href;
@@ -45,6 +46,7 @@ async function setup(t, mode, overrides = {}) {
     maxTokens: null, maxModelRequests: null, maxToolCalls: null, maxRequestBytes: null,
     attempts: [{ number: 1, timeoutMs: 45000 }], ...overrides };
   const requestsPath = join(root, 'requests.json');
+  task.taskContext = createTaskContext({ assignment: 'ROOT_ONLY_PRIVATE_CONTEXT_MARKER: scoped parent constraints.', requestId: 'root-context' });
   const heartbeat = join(root, 'child-heartbeat.txt');
   const teamRoot = join(workspace, '.agent-teams-bridge', task.taskId);
   const teamPath = join(teamRoot, 'offline-team', 'team.json');
@@ -100,6 +102,8 @@ test('real SDK native Teams child reads, reports to captain, archives and exits 
     const receipt = await parsed(h.requestsPath);
     assert.equal(receipt.requests.filter(request => !request.member).length, 4);
     assert.equal(receipt.requests.filter(request => request.member).length, 6);
+    assert.ok(receipt.requests.filter(request => !request.member).every(request => JSON.stringify(request.messages).includes('ROOT_ONLY_PRIVATE_CONTEXT_MARKER')));
+    assert.ok(receipt.requests.filter(request => request.member).every(request => !JSON.stringify(request.messages).includes('ROOT_ONLY_PRIVATE_CONTEXT_MARKER')));
     assert.equal(result.budget.modelRequests, receipt.requests.length);
     assert.equal(result.budget.calls.reduce((sum, call) => sum + call.usage.outputTokens, 0), 100);
     assert.equal(result.toolCalls, 8, 'Count team and file calls exactly once across parent and child.');

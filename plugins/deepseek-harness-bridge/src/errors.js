@@ -27,9 +27,10 @@ const validationMessages = {
 
 for (const field of ['payloadSha256', 'objective', 'segments', 'classification', 'includeIds', 'role', 'text']) validationFields.add(field);
 for (const field of ['cursor', 'startedFrom', 'startedBefore']) validationFields.add(field);
+for (const field of ['agentId', 'communication', 'change', 'targetMessageIds', 'expectedContextRevision', 'replyTo', 'targets', 'afterCursor', 'waitTimeoutMs']) validationFields.add(field);
 
 function safeValidation(validation) {
-  if (!validation || !['schema', 'contract'].includes(validation.phase) || !Array.isArray(validation.issues)) return undefined;
+  if (!validation || !['schema', 'contract', 'policy'].includes(validation.phase) || !Array.isArray(validation.issues)) return undefined;
   return { phase: validation.phase, issues: validation.issues.slice(0, 16).map(issue => {
     const code = Object.hasOwn(validationMessages, issue.code) ? issue.code : 'invalid_value';
     const path = Array.isArray(issue.path) ? issue.path.slice(0, 12).map(part =>

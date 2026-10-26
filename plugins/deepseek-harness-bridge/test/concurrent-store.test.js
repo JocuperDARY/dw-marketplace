@@ -46,16 +46,36 @@ test('protocol guard excludes old hosts and initialization never steals a legacy
   assert.equal(await readFile(join(dataDir, 'owner.lock'), 'utf8'), '{"pid":7}');
   await rm(join(dataDir, 'owner.lock')); await first.initialize();
   const guard = JSON.parse(await readFile(join(dataDir, 'owner.lock'), 'utf8'));
-  assert.equal(guard.protocol, 3); assert.equal(guard.kind, 'bridge-protocol-guard');
+  assert.equal(guard.protocol, 4); assert.equal(guard.kind, 'bridge-protocol-guard');
   await assert.rejects(writeFile(join(dataDir, 'owner.lock'), '', { flag: 'wx' }), { code: 'EEXIST' });
   await first.initialize(); assert.equal((await first.read()).revision, 0);
 });
 
 test('an interrupted protocol initialization is fail closed', async t => {
   const { dataDir } = await fixture(t); const first = new ConcurrentStore({ dataDir, registryWaitMs: 25 }); await mkdir(dataDir);
-  await writeFile(join(dataDir, 'owner.lock'), JSON.stringify({ protocol: 3, kind: 'bridge-protocol-guard', storeId: randomUUID() }));
+  await writeFile(join(dataDir, 'owner.lock'), JSON.stringify({ protocol: 4, kind: 'bridge-protocol-guard', storeId: randomUUID() }));
   await assert.rejects(first.initialize(), { code: 'RECOVERY_REQUIRED' });
   assert.deepEqual(await readdir(dataDir), ['owner.lock']);
+  await assert.rejects(first.read(), { code: 'RECOVERY_REQUIRED' });
+  assert.deepEqual(await readdir(dataDir), ['owner.lock'], 'Observations cannot repair a partial initialization');
+});
+
+test('an observer waits for a concurrent first manifest without reserving or repairing state', async t => {
+  const { dataDir, second } = await fixture(t); let release; let published;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const reached = new Promise(resolve => { published = resolve; });
+  const writer = createAtomicStoreWriter();
+  const first = new ConcurrentStore({ dataDir, writer: async (path, bytes, options) => {
+    await writer(path, bytes, options);
+    if (path.endsWith('owner.lock')) { published(); await barrier; }
+  } });
+  const initializing = first.initialize(); await reached;
+  let observed = false;
+  const observation = second.read().then(value => { observed = true; return value; });
+  try { await delay(50); assert.equal(observed, false); assert.deepEqual(await readdir(dataDir), ['owner.lock']); }
+  finally { release(); }
+  await initializing;
+  const result = await observation; assert.equal(result.records.length, 0); assert.equal(result.leases.length, 0);
 });
 
 test('simultaneous first initialization publishes exactly one protocol and both admissions succeed', async t => {

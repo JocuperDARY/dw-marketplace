@@ -194,10 +194,15 @@ export async function runOrchestrated({ record, attempt, prompt, signal, home, r
     stage.budget = output.budget ?? null;
     // Retain each stage's actual native-use evidence, not just the final stage.
     if (output.capabilities) stage.capabilities = output.capabilities;
+    if (output.contextEvidence) stage.contextEvidence = output.contextEvidence;
     stage.terminal = output.terminal;
     stage.status = 'failed';
     let accountingError;
     try { settle(stage, output); } catch (error) { accountingError = error; }
+    if (record.agent && ['paused', 'interrupted'].includes(output.terminal) && output.cleanup === 'confirmed'
+      && !accountingError && !output.error && !output.budget?.denied) {
+      stage.status = 'paused'; await persist(); return output;
+    }
     if (combined.aborted || output.terminal !== 'completed' || output.cleanup !== 'confirmed' || output.error || output.budget?.denied || accountingError || output.output?.storageTruncated) {
       stage.error = accountingError?.code ?? output.error?.code ?? (combined.aborted ? 'ABORTED' : output.output?.storageTruncated ? 'OUTPUT_STORAGE_TRUNCATED' : 'INCOMPLETE_STAGE');
       // Preserve visible evidence before another process can run. Never expose reasoning blocks.

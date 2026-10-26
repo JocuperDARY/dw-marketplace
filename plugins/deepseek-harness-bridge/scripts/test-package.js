@@ -18,6 +18,7 @@ try {
   const [archive] = JSON.parse(stdout);
   const paths = new Set(archive.files.map(file => file.path));
   for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js',
+    'src/agent-schema.js', 'src/agent-coordinator.js', 'src/agent-journal.js', 'src/task-context.js', 'src/worker-control.js', 'src/worker-context.js', 'src/protocol-upgrade.js', 'src/publication-read.js', 'docs/agent-communication.md',
     'src/history.js', 'docs/history-pagination.md',
     'src/payload.js', 'src/rejection-evidence.js', 'docs/payload-minimization.md',
     'src/recovery-progress.js', 'docs/progress-recovery.md',

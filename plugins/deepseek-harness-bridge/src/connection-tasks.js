@@ -37,6 +37,12 @@ export class ConnectionTasks {
   }
 
   submit(...args) { return this.use('submit', ...args); }
+  spawnAgent(...args) { return this.use('spawnAgent', ...args); }
+  sendMessage(...args) { return this.use('sendMessage', ...args); }
+  followupTask(...args) { return this.use('followupTask', ...args); }
+  interruptAgent(...args) { return this.use('interruptAgent', ...args); }
+  waitAgents(...args) { return this.use('waitAgents', ...args); }
+  listAgents(...args) { return this.use('listAgents', ...args); }
   continue(...args) { return this.use('continue', ...args); }
   status(...args) { return this.use('status', ...args); }
   list(input = {}) {

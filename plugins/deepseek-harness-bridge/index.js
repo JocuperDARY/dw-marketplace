@@ -26,7 +26,7 @@ export async function doctor(env = process.env) {
     const store = new ConcurrentStore({ dataDir: stateDirectory(env) });
     const protocol = await store.protocol();
     const snapshot = await store.read();
-    concurrency = { protocol: protocol?.protocol ?? null, protocolGuardPresent: protocol?.protocol === 3,
+    concurrency = { protocol: protocol?.protocol ?? null, protocolGuardPresent: protocol?.protocol === 4,
       activeTaskIds: snapshot.leases.filter(lease => snapshot.records.some(record => record.taskId === lease.taskId && ['running', 'cancelling'].includes(record.attempts.at(-1).status))).map(lease => lease.taskId),
       retainedTaskLeases: snapshot.leases.length, legacyTasks: snapshot.legacyRecords.length };
   } catch (error) { concurrency = { status: 'unavailable', error: safeError(error) }; }
@@ -42,6 +42,10 @@ export async function doctor(env = process.env) {
 
 export async function main(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--doctor') { process.stdout.write(`${JSON.stringify(await doctor(), null, 2)}\n`); return; }
+  if (args[0] === '--upgrade-store' && args.length <= 2 && (args.length === 1 || args[1] === '--dry-run')) {
+    const { upgradeStore } = await import('./src/protocol-upgrade.js');
+    process.stdout.write(`${JSON.stringify(await upgradeStore({ dataDir: stateDirectory(), dryRun: args[1] === '--dry-run' }), null, 2)}\n`); return;
+  }
   if (args.length) throw new Error('Unsupported arguments');
   const [{ StdioServerTransport }, { ConnectionTasks }, { createSdkRunner, preflight }, { createServer }] = await Promise.all([
     import('@modelcontextprotocol/sdk/server/stdio.js'), import('./src/connection-tasks.js'), import('./src/sdk-runner.js'), import('./src/server.js'),

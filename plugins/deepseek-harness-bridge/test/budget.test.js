@@ -31,6 +31,17 @@ async function gate(t, overrides = {}) {
   return { config, request, arm, receipt, collect };
 }
 
+test('required parent context exceeding an explicit byte cap fails without clipping or provider dispatch', async t => {
+  const g = await gate(t); await g.arm(); let dispatched = 0;
+  const text = 'TASK CONTEXT revision=1\n' + '原始约束'.repeat(300);
+  const request = { ...g.request, messages: [{ role: 'user', source: { kind: 'runtime-context',
+    sections: [{ name: 'bridge:parent-context', text }] }, content: [{ type: 'text', text }] }] };
+  await assert.rejects(g.collect(request, async function* () { dispatched++; }), /CONTEXT_CAPACITY/);
+  assert.equal(dispatched, 0); assert.equal((await g.receipt()).modelRequests, 0);
+  assert.equal((await g.receipt()).denied, 'CONTEXT_CAPACITY');
+  assert.equal(request.messages[0].content[0].text, text);
+});
+
 test('native compaction shares request accounting and explicit limits without opening other routes', async t => {
   const g = await gate(t, { allowNativeCompaction: true, maxModelRequests: 2 });
   await g.arm();
