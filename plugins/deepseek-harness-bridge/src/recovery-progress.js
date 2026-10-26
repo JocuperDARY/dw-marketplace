@@ -52,7 +52,7 @@ async function readMilestones(record, signal) {
     if (seen.has(milestone.id)) continue;
     if (!cache.has(milestone.path)) cache.set(milestone.path, (async () => {
       try {
-        const bytes = await files.readBytes(await files.resolve(milestone.path));
+        const bytes = await files.readEvidence(milestone.path);
         if (bytes.includes(0)) return { known: true };
         let object;
         try { object = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
