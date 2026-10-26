@@ -1,5 +1,7 @@
 # Verification delegation and acceptance
 
+For generating code and tests, including source-only native files tasks without a reviewContract or Shell, also use [implementation quality and parent checks](implementation-quality.md). The implementation guidance covers execution boundaries, axis/gradient counterexamples and exact test accounting; it does not automatically certify source or scientific correctness.
+
 Since 1.2.0 the bridge supports [strict output checks and bounded format recovery](output-recovery.md).
 A reviewContract implies json-object output. JSON syntax/shape-of-root failures
 share recovery eligibility with truncation in budgeted tasks (see [progress policy](progress-recovery.md));
