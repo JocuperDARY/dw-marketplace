@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkSavedResult } from '../src/parent-evidence.js';
+import { WorkspaceFiles } from '../src/workspace.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 async function fixture(t, object, receiptPatch = {}) {
@@ -101,8 +102,10 @@ test('source changes, protected paths and links never become an accepted source 
   const source = await f.source('source.txt', 'private-file-marker');
   await writeFile(join(f.workspace, 'source.txt'), 'changed');
   await writeFile(join(f.workspace, '.env'), 'private-file-marker');
-  await symlink(join(f.workspace, '.env'), join(f.workspace, 'alias.txt'));
-  const paths = ['.env', '../outside.txt', join(f.workspace, '.env'), 'alias.txt'];
+  await mkdir(join(f.workspace, 'source-dir'));
+  await writeFile(join(f.workspace, 'source-dir', 'ordinary.txt'), 'private-file-marker');
+  await symlink(join(f.workspace, 'source-dir'), join(f.workspace, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
+  const paths = ['.env', '../outside.txt', join(f.workspace, '.env'), 'alias/ordinary.txt'];
   const result = await f.run([
     { id: 'changed', kind: 'source-quote', pointer: '/quote', source },
     ...paths.map((path, i) => ({ id: `path-${i}`, kind: 'source-quote', pointer: '/quote', source: { path, sha256: digest('private-file-marker') } })),
@@ -117,6 +120,8 @@ test('source changes, protected paths and links never become an accepted source 
 for (const [name, patch] of [
   ['failed runtime', { status: 'failed', terminal: 'error' }],
   ['unconfirmed cleanup', { cleanup: 'unverified' }],
+  ['pending lease', { leasePending: true }],
+  ['unconfirmed persistence', { durability: 'unconfirmed' }],
   ['model clipping', { output: { modelTruncated: true, storageTruncated: false } }],
   ['unknown clipping', { output: undefined }],
   ['storage clipping', { outputTruncated: true }],
@@ -180,4 +185,37 @@ test('invalid or duplicate check contracts reject before result/file observation
     });
   }
   assert.equal(observations, 0);
+});
+
+test('JSON exponent overflow is rejected before any observation by the installed Zod schema', async () => {
+  const checks = JSON.parse('[{"id":"infinite","kind":"arithmetic","pointer":"/value","operator":"sum","operands":[1],"absoluteTolerance":1e999}]');
+  assert.equal(checks[0].absoluteTolerance, Infinity);
+  await assert.rejects(checkSavedResult(() => assert.fail('must not observe'), { taskId: randomUUID(), attempt: 1, checks }), { code: 'INVALID_ARGUMENT' });
+});
+
+test('source quotes preserve a leading BOM; only newline conventions are normalized', async t => {
+  const f = await fixture(t, { omitted: { startLine: 1, endLine: 1, quote: 'alpha' }, exact: { startLine: 1, endLine: 1, quote: '\uFEFFalpha' } });
+  const source = await f.source('bom.txt', '\uFEFFalpha\r\nbeta');
+  const result = await f.run(['omitted', 'exact'].map(id => ({ id, kind: 'source-quote', pointer: '/'+id, source })));
+  assert.deepEqual(result.items.map(x => x.status), ['FAIL', 'PASS']);
+});
+
+test('evidence read rejects a parent directory swapped for a junction after resolution', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-evidence-race-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, 'workspace'); const outside = join(root, 'outside');
+  await mkdir(workspace); await mkdir(outside); await mkdir(join(workspace, 'parent'));
+  await writeFile(join(workspace, 'parent', 'evidence.json'), '{"inside":true}');
+  await writeFile(join(outside, 'evidence.json'), '{"private":true}');
+  const files = new WorkspaceFiles({ workspace, access: 'read-only' });
+  const read = files.readBytes.bind(files);
+  let swaps = 0;
+  files.readBytes = async (target, verify) => {
+    swaps++;
+    await rename(join(workspace, 'parent'), join(workspace, 'saved-parent'));
+    await symlink(outside, join(workspace, 'parent'), process.platform === 'win32' ? 'junction' : 'dir');
+    return read(target, verify);
+  };
+  await assert.rejects(files.readEvidence('parent/evidence.json'), { code: 'PATH_DENIED' });
+  assert.equal(swaps, 1);
 });

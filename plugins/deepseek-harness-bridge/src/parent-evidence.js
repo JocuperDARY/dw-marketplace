@@ -62,12 +62,12 @@ function artifactReader(workspace) {
     const key = JSON.stringify(source);
     if (!cache.has(key)) cache.set(key, (async () => {
       try {
-        const bytes = await files.readBytes(await files.resolve(source.path));
+        const bytes = await files.readEvidence(source.path);
         const sha256 = createHash('sha256').update(bytes).digest('hex');
         if (sha256 !== source.sha256) return { unavailable: 'SOURCE_CHANGED' };
         if (bytes.includes(0)) return { unavailable: 'SOURCE_NOT_TEXT' };
         let text;
-        try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+        try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
         catch { return { unavailable: 'SOURCE_NOT_TEXT' }; }
         return { text, sha256 };
       } catch { return { unavailable: 'SOURCE_UNAVAILABLE' }; }
@@ -135,6 +135,7 @@ export async function checkSavedResult(callTool, input) {
   }
   let deliverable = result?.json;
   if (!problem && (result.receipt.status !== 'completed' || result.receipt.terminal !== 'completed' || result.receipt.cleanup !== 'confirmed'
+    || result.receipt.leasePending || result.receipt.durability === 'unconfirmed'
     || result.receipt.error || result.truncation.model !== false || result.truncation.storage !== false || result.receipt.output?.kind !== 'complete_text')) problem = 'RESULT_NOT_ACCEPTABLE';
   if (!problem && result.receipt.planning?.executionMode === 'budgeted') {
     try {

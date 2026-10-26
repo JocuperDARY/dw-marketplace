@@ -62,12 +62,24 @@ export class WorkspaceFiles {
     return target;
   }
 
-  async readBytes(target) {
+  async readEvidence(path) {
+    const target = await this.resolve(path);
+    return this.readBytes(target, async handle => {
+      const current = await this.resolve(path);
+      const [opened, linked] = await Promise.all([handle.stat({ bigint: true }), lstat(current, { bigint: true })]);
+      requireValue(current === target && opened.dev === linked.dev && opened.ino === linked.ino
+        && linked.isFile() && !linked.isSymbolicLink() && opened.nlink === 1n && linked.nlink === 1n,
+      'PATH_CHANGED', 'Evidence path or opened file identity changed.');
+    });
+  }
+
+  async readBytes(target, verifyOpened) {
     const handle = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const info = await handle.stat();
       requireValue(info.isFile() && info.nlink === 1, 'PATH_DENIED', 'Only ordinary files with one link are available.');
       requireValue(info.size <= MAX_FILE_BYTES, 'FILE_LIMIT', 'File is larger than 256 KiB.');
+      await verifyOpened?.(handle);
       const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
       let length = 0;
       while (length < buffer.length) {
@@ -76,6 +88,7 @@ export class WorkspaceFiles {
         length += bytesRead;
       }
       requireValue(length <= MAX_FILE_BYTES, 'FILE_LIMIT', 'File grew beyond 256 KiB.');
+      await verifyOpened?.(handle);
       return buffer.subarray(0, length);
     } finally { await handle.close(); }
   }
