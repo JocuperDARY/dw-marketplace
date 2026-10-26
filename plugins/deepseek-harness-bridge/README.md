@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.7.2
+# DeepSeek Harness Bridge 4.0.0
+
+4.0.0 新增持续子智能体接口：`dsh_spawn_agent`、`dsh_send_message`、`dsh_followup_task`、`dsh_interrupt_agent`、`dsh_wait_agents`、`dsh_list_agents`。父级约束独立持久保存，运行中可插话，空闲消息不自动唤醒，问题和结果分别回传，支持任务级中断后续接及持久事件游标。升级到 protocol 4 需要显式迁移并等待旧任务清理完成；旧快照、历史用量及结果保留。详见[持续工作者与通信](docs/agent-communication.md)与[验证范围和限制](docs/verification-4.0.md)。
 
 3.7.2 将代码与测试质量指导覆盖到无 Shell 的源码生成任务：生成的测试仍须遵守设备/RNG/执行边界，按语义轴检查广播、掩码与梯度，独立核对预期值。新增[源码委派与父级验收模板](docs/implementation-quality.md)，区分唯一测试、执行次数、错误记录和定向重跑。原始失败、未执行集成和科学验收边界保留；这些提示与离线反例不证明真实模型质量已提升。
 

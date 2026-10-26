@@ -13,6 +13,8 @@ import { optionalLimit, minimumLimit, deadlineAfter, deadlineTimer } from './lim
 import { ConcurrentStore, atomicWrite } from './concurrent-store.js';
 import { checkSavedResult } from './parent-evidence.js';
 import { HistoryPages, normalizeHistory } from './history.js';
+import { createTaskContext, applyContextMessage, validateTaskContext } from './task-context.js';
+import { AgentCoordinator } from './agent-coordinator.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -41,6 +43,7 @@ function validateSavedRecord(record) {
       : record.planning?.limitsPolicy === 'explicit-v2' || record.attempts.length <= 16,
     'INVALID_STATE', 'Saved attempts exceed the task creation contract.');
     validateSavedBudget(record);
+    if (record.taskContext) validateTaskContext(record.taskContext);
     if (record.reviewContract) normalizeReviewContract(record.reviewContract);
     if (record.reportContract) normalizeReportContract(record.reportContract);
     if (record.lifecycleContract !== undefined) normalizeLifecycleContract(record.lifecycleContract);
@@ -68,6 +71,7 @@ export class TaskManager {
     this.closed = false;
     this.mutations = Promise.resolve();
     this.history = new HistoryPages();
+    this.agents = new AgentCoordinator(this);
   }
 
   async open() {
@@ -106,6 +110,12 @@ export class TaskManager {
   }
 
   checkResult(input) { return checkSavedResult(request => this.result(request.arguments), input); }
+  spawnAgent(...args) { return this.agents.spawn(...args); }
+  sendMessage(input) { return this.agents.message('send', input); }
+  followupTask(input, beforeLaunch) { return this.agents.message('followup', input, beforeLaunch); }
+  interruptAgent(input) { return this.agents.interrupt(input); }
+  waitAgents(input) { return this.agents.wait(input); }
+  listAgents(input) { return this.agents.list(input); }
 
   assertAvailable() {
     requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');
@@ -137,7 +147,8 @@ export class TaskManager {
       const capabilityDigest = profile.digest;
       const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings, limitsPolicy: 'explicit-v2' };
       const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(planned.recoveryMilestones ? { recoveryMilestones: planned.recoveryMilestones } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(planned.reportContract ? { reportContract: planned.reportContract } : {}), ...(planned.lifecycleContract ? { lifecycleContract: planned.lifecycleContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
-      const existing = this.existing(id, fingerprint);
+      const actualFingerprint = input.agentMode ? hash({ fingerprint, agent: { communication: input.communication } }) : fingerprint;
+      const existing = this.existing(id, actualFingerprint);
       if (existing) return existing;
       this.assertAvailable();
       await beforeLaunch();
@@ -145,6 +156,8 @@ export class TaskManager {
         route: { provider: 'deepseek-official', model: 'deepseek-flash', effort }, access, maxTokens, maxToolCalls,
         maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest,
         createdAt: new Date().toISOString(), planning, attempts: [] };
+      record.taskContext = createTaskContext({ assignment: prompt, requestId: record.taskId });
+      if (input.agentMode) record.agent = { communication: input.communication };
       if (input.nativePlugins !== undefined) record.nativePlugins = input.nativePlugins;
       if (input.parentLabel !== undefined) record.parentLabel = input.parentLabel;
       if (planned.reviewContract) record.reviewContract = planned.reviewContract;
@@ -153,7 +166,7 @@ export class TaskManager {
       if (input.outputFormat !== undefined) record.outputFormat = planned.outputFormat;
       if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: deadlineAfter(budget.totalDurationMs, Date.parse(record.createdAt)), stages: [], recoveryPolicy: 'progress-v2',
         ...(planned.recoveryMilestones ? { recoveryMilestones: planned.recoveryMilestones } : {}), progressSeen: [] };
-      return this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false });
+      return this.begin(record, { id, fingerprint: actualFingerprint, prompt, timeoutMs, resume: false });
     });
   }
 
@@ -189,7 +202,16 @@ export class TaskManager {
     });
   }
 
-  async begin(record, { id, fingerprint, prompt, timeoutMs, resume, controlToken, expectedRevision }) {
+  async begin(record, { id, fingerprint, prompt, timeoutMs, resume, controlToken, expectedRevision, skipContext = false }) {
+    if (resume && !skipContext) {
+      if (record.agent) {
+        await this.agents.journal(record).accept('continue', { requestId: id, text: prompt }, { legacyInput: true });
+        record = { ...record, taskContext: await this.agents.journal(record).context() };
+      } else {
+        const context = record.taskContext ?? { version: 1, revision: 1, entries: [], unavailableHistory: true };
+        record = { ...record, taskContext: applyContextMessage(context, { id, text: prompt }, { legacyInput: true }) };
+      }
+    }
     const attempt = { number: record.attempts.length + 1, requestId: id, fingerprint, status: 'running',
       startedAt: new Date().toISOString(), timeoutMs, cleanup: 'pending', terminal: null };
     let admission;
@@ -206,6 +228,12 @@ export class TaskManager {
     }
     record = admission.record;
     const currentAttempt = record.attempts.at(-1);
+    if (record.agent) {
+      const journal = this.agents.journal(record);
+      await journal.initialize(record);
+      await journal.startActivity(`${record.taskId}:${currentAttempt.number}`);
+      record.taskContext = await journal.context();
+    }
     this.records.set(record.taskId, record);
     this.requests.set(id, { taskId: record.taskId, attempt: currentAttempt.number, fingerprint });
     this.ownedTaskIds.add(record.taskId);
@@ -222,6 +250,14 @@ export class TaskManager {
     if (active.polling || active.controller.signal.aborted || this.active.get(active.taskId) !== active) return;
     active.polling = true;
     try {
+      const record = this.records.get(active.taskId);
+      if (record?.agent) {
+        const head = await this.agents.journal(record).read();
+        if (head.interrupt?.activityId === head.activityId) {
+          active.reason ??= 'interrupted';
+          if (!head.runtime) active.controller.abort();
+        }
+      }
       if (await this.store.cancellationRequested(active.taskId)) {
         active.reason ??= 'cancelled';
         active.controller.abort();
@@ -242,14 +278,25 @@ export class TaskManager {
       let output;
       try {
         const home = join(this.tasksDir, record.taskId, 'harness');
-        const runner = args => {
+        const runner = async args => {
           const orchestrated = !!record.orchestration;
           let deliverable = reportPrompt(args.prompt, record.reportContract, orchestrated);
           deliverable = deliveryPrompt(deliverable, record.reviewContract, orchestrated);
           deliverable = lifecyclePrompt(deliverable, record.lifecycleContract, orchestrated);
           const task = clone(args.task);
+          if (record.agent) {
+            const journal = this.agents.journal(record);
+            if ((await journal.read()).availability === 'interrupting') return { terminal: 'interrupted', cleanup: 'confirmed', text: '', toolCalls: 0 };
+            task.taskContext = await journal.context();
+            if (record.agent.communication === 'native') {
+              task.agentRuntime = { agentId: record.taskId, taskDirectory: this.store.taskDirectory(record.taskId), epoch: randomUUID() };
+              await journal.startEpoch(task.agentRuntime.epoch, task.sessionId);
+            }
+          }
           for (const key of ['controlToken', 'controlTokenHash', 'ownerId', 'ownerConnectionId', 'lease', 'leaseNonce']) delete task[key];
-          return this.runner({ ...args, task, prompt: formatPrompt(deliverable, normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract, record.lifecycleContract), orchestrated) });
+          const result = await this.runner({ ...args, task, prompt: formatPrompt(deliverable, normalizeOutputFormat(record.outputFormat, record.reviewContract, record.reportContract, record.lifecycleContract), orchestrated) });
+          if (task.agentRuntime) await this.agents.journal(record).finishEpoch(task.agentRuntime.epoch, result.cleanup);
+          return result;
         };
         output = record.orchestration ? await runOrchestrated({ record, attempt, prompt, signal: active.controller.signal, home, runner,
           persist: () => this.persist(record), saveCheckpoint: async (number, text) => {
@@ -271,10 +318,11 @@ export class TaskManager {
       finished.toolCalls = output.toolCalls ?? null;
       finished.budget = output.budget ?? null;
       if (output.capabilities) finished.capabilities = output.capabilities;
+      if (output.contextEvidence) finished.contextEvidence = output.contextEvidence;
       finished.error = output.error ?? null;
       finished.output = output.output ?? { kind: output.text?.trim() ? (output.terminal === 'completed' ? 'complete_text' : 'partial_text') : 'empty', modelTruncated: output.terminal === 'max-tokens', reasoningObserved: false };
       if (output.recovery) finished.recovery = output.recovery;
-      finished.status = active.reason ?? (['completed', 'paused'].includes(finished.terminal) ? finished.terminal : 'failed');
+      finished.status = active.reason ?? (['completed', 'paused', 'interrupted'].includes(finished.terminal) ? finished.terminal : 'failed');
       if (output.pauseReason) finished.pauseReason = output.pauseReason;
       const bytes = Buffer.from(typeof output.text === 'string' ? output.text : '', 'utf8');
       finished.outputTruncated = output.output?.storageTruncated === true || bytes.length > MAX_RESULT_BYTES;
@@ -293,6 +341,9 @@ export class TaskManager {
       await this.persist({ ...record, attempts: record.attempts.map(value => value === attempt ? finished : value) });
       // Readers see a terminal state only after both complete files are published.
       Object.assign(attempt, finished);
+      if (record.agent) await this.agents.afterActivity(record, finished);
+      // The old journal activity must settle while its execution lease still
+      // fences new owners. A terminal snapshot alone is not the handoff point.
       if (finished.cleanup === 'confirmed') await this.store.release(record.taskId, { cleanup: 'confirmed' });
     } catch (error) {
       active.failure = error;
@@ -312,6 +363,20 @@ export class TaskManager {
       cancelTimer();
       clearInterval(active.pollTimer);
       if (this.active.get(record.taskId) === active) this.active.delete(record.taskId);
+      if (record.agent && !this.closed && !active.failure) {
+        // Only an explicit followup accepted after this interruption settled
+        // may wake it. Input queued before stopping remains stopped.
+        void this.serialize(async () => {
+          try { await this.agents.wake(record.taskId, undefined, undefined,
+            { postInterruptOnly: finished.status === 'interrupted' }); }
+          catch {
+            if (this.closed) return;
+            // Failure evidence is part of the tracked mutation too. close()
+            // must not return while this publication can still touch state.
+            try { await this.agents.journal(record).transaction(async tx => { await tx.emit('wake_deferred', { reason: 'ADMISSION_REQUIRED' }); }); } catch { /* Existing journal/lease evidence remains authoritative. */ }
+          }
+        });
+      }
     }
     return this.summary(record, attempt);
   }
@@ -324,13 +389,23 @@ export class TaskManager {
 
   async record(taskId) { await this.refresh(); return this.cachedRecord(taskId); }
 
+  async agentRecord(taskId) {
+    const { record, generation, lease } = await this.store.readTaskState(taskId);
+    validateSavedRecord(record); this.records.set(taskId, record);
+    this.snapshot ??= { recordRevisions: {}, leases: [] };
+    this.snapshot.recordRevisions[taskId] = generation;
+    this.snapshot.leases = this.snapshot.leases.filter(item => item.taskId !== taskId);
+    if (lease) this.snapshot.leases.push(lease);
+    return record;
+  }
+
   observedSummary(record, attempt) {
     const local = this.localFailures.get(record.taskId);
     if (local?.attempt.number === attempt.number) return { ...this.summary(local.record, local.attempt),
       durability: 'unconfirmed', committedStatus: attempt.status };
     const lease = this.snapshot?.leases?.find(value => value.taskId === record.taskId && value.attempt === attempt.number);
     const leasePending = lease && attempt.cleanup === 'confirmed'
-      && ['completed', 'paused', 'failed', 'cancelled', 'timed_out'].includes(attempt.status);
+      && ['completed', 'paused', 'failed', 'cancelled', 'timed_out', 'interrupted'].includes(attempt.status);
     return { ...this.summary(record, attempt), ...(leasePending ? { leasePending: true } : {}) };
   }
 
@@ -441,7 +516,7 @@ export class TaskManager {
     this.closePromise = (async () => {
       await this.mutations;
       const owned = [...this.active.values()];
-      for (const active of owned) { active.reason ??= 'cancelled'; active.controller.abort(); }
+      for (const active of owned) { active.reason ??= this.records.get(active.taskId)?.agent ? 'interrupted' : 'cancelled'; active.controller.abort(); }
       await Promise.all(owned.map(active => active.promise));
     })();
     return this.closePromise;

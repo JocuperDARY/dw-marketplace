@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { HarnessClient } from '@deepseek-ai/dsh-sdk-client';
 import { resolveProfile } from '../src/capabilities.js';
 import { createSdkRunner, workerEnvironment, prepareRuntime } from '../src/sdk-runner.js';
+import { createTaskContext, applyContextMessage } from '../src/task-context.js';
 
 test('native compaction is preferred and repeatedly replaces real SDK history through the shared meter offline', { timeout: 45000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'native-compaction-'));
@@ -19,6 +20,8 @@ test('native compaction is preferred and repeatedly replaces real SDK history th
     planning: { executionMode: 'automatic' }, route: { provider: 'deepseek-official', model: 'deepseek-flash', effort: 'off' },
     maxTokens: 256, maxModelRequests: null, maxRequestBytes: null, maxToolCalls: null, attempts: [{ number: 1, timeoutMs: null }] };
   const profile = await resolveProfile('native', {}, task);
+  task.taskContext = applyContextMessage(createTaskContext({ assignment: 'Retain the original rules.', requestId: 'initial' }),
+    { id: 'no-retrain', text: 'DO_NOT_RETRAIN; keep {{literal}} and this rule even when the compaction summary omits it.' });
   const modulePath = fileURLToPath(new URL('./fixtures/native-compaction-model.js', import.meta.url));
   profile.modules.push({ path: modulePath, sha256: createHash('sha256').update(await readFile(modulePath)).digest('hex'), tools: [], native: true, config: {} });
   const override = join(root, 'test-context.patch.json');
@@ -45,6 +48,8 @@ test('native compaction is preferred and repeatedly replaces real SDK history th
   assert.equal(result.budget.modelRequests, 5 + compacted.length);
   assert.ok(events.filter(event => event.type === 'compaction/end').length >= 2);
   assert.ok(compacted.every(call => call.reservedOutputTokens === 256 && call.finished));
+  assert.equal(result.contextEvidence.requests.length, 5);
+  assert.ok(result.contextEvidence.requests.every(input => input.contextRevision === 2 && input.instructionIds.includes('no-retrain')));
   const single = await prepareRuntime({ task: { ...task, planning: { executionMode: 'single-request' } }, home: join(root, 'single'), env: {}, resolveCapabilities: async () => profile });
   const patch = JSON.parse(await readFile(single.options.patches[0], 'utf8'));
   assert.equal(patch.find(entry => entry.id === 'compaction-basic').disabled, true);

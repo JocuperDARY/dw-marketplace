@@ -9,6 +9,7 @@ import { STAGE_PROTOCOL } from './orchestration.js';
 import { withinLimit } from './limits.js';
 import { executionGuidance } from './execution-guidance.js';
 import { implementationGuidance } from './implementation-guidance.js';
+import { AgentJournal } from './agent-journal.js';
 
 export const SDK_VERSION = '0.2.1-rc.2';
 export const ROUTE = { provider: 'deepseek-official', model: 'deepseek-flash' };
@@ -34,10 +35,13 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
   requireValue(task.access === 'workspace-write' || profile.access === 'read-only', 'PROFILE_ACCESS', 'This profile requires workspace-write access.');
   const receiptPath = join(home, 'worker-capabilities.json');
   const skillReceiptPath = join(home, 'worker-skills.json');
+  const contextReceiptPath = join(home, 'worker-context.json');
   const budgetPath = join(home, 'worker-budget.json');
   const armedPath = join(home, 'worker-armed.txt');
   const nonce = task.stageBudget?.nonce ?? `${task.taskId}:${task.attempts.at(-1).number}`;
-  const expectedTools = [...(profile.fileTools ? task.access === 'workspace-write' ? ['bridge_list', 'bridge_read', 'bridge_write'] : ['bridge_list', 'bridge_read'] : []), ...profile.tools].sort();
+  const communicationTool = !!task.agentRuntime && task.maxToolCalls !== 0 && task.capabilityProfile !== 'inference-only';
+  const extraTools = [...profile.tools, ...(communicationTool ? ['bridge_send_message'] : [])];
+  const expectedTools = [...(profile.fileTools ? task.access === 'workspace-write' ? ['bridge_list', 'bridge_read', 'bridge_write'] : ['bridge_list', 'bridge_read'] : []), ...extraTools].sort();
   const runtimeEnvironment = workerEnvironment(env);
   // Native session compaction is preferred when no stage protocol is active.
   // A single-request task must never make auxiliary summarization requests.
@@ -55,6 +59,10 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
       ...(nativeCompaction && task.maxTokens != null ? { config: { maxTokens: task.maxTokens } } : {}) },
     { id: 'sandbox-policy', config: { mode: task.access, workspaceRoot: task.workspace } },
     { id: 'tools', config: { mode: 'native', ...(profile.native ? {} : { maxParallelSubCalls: 1 }) } },
+    ...(task.taskContext ? [{ insert: [{ id: 'bridge-context', name: new URL('./worker-context.js', import.meta.url).href,
+      config: { context: task.taskContext, sessionId: task.sessionId, receiptPath: contextReceiptPath, nonce, agent: task.agentRuntime } }] }] : []),
+    ...(task.agentRuntime ? [{ insert: [{ id: 'bridge-control', name: new URL('./worker-control.js', import.meta.url).href,
+      config: { ...task.agentRuntime, sessionId: task.sessionId, communicationTool } }] }] : []),
     { id: 'system-prompt', config: { includeHarnessIdentity: false, includeRuntimeContext: false,
       personaPrefix: SYSTEM_PROMPT + (profile.native ? '\nUse relevant DSH-native skills and plugins actively within the assigned access and scope. Search the native skill registry first, then load a matching skill before applying it. Add supplemental Codex skill material only when no suitable native skill is available. Do not equate installation, registration, loading, use and successful verification. Agent Teams are available when selected; use them if useful, and wait for required members and cleanup before final delivery. Omitted bridge resource limits are not a mandate to spend or to expand the assignment.' : '') + executionGuidance(profile) + implementationGuidance(task.planning?.workload) + (task.stageBudget ? `\n${STAGE_PROTOCOL}` : '') + profile.skills.map(skill => `\n<skill-reference path=${JSON.stringify(skill.path)}>\n${skill.text}\n</skill-reference>`).join('') } },
     { insert: [{ id: 'bridge-budget', name: new URL('./worker-budget.js', import.meta.url).href,
@@ -70,13 +78,13 @@ export async function prepareRuntime({ task, home, env, resolveCapabilities = re
         ...(module.skillReceipt ? { receiptPath: skillReceiptPath, nonce } : {}) } }] })),
     { insert: [{ id: 'bridge-files', name: new URL('./worker-tools.js', import.meta.url).href,
       config: { workspace: task.workspace, access: task.access, maxToolCalls: task.maxToolCalls,
-        fileTools: profile.fileTools, extraTools: profile.tools, backupDir: join(home, 'backups'), receiptPath, nonce } }] },
+        fileTools: profile.fileTools, extraTools, backupDir: join(home, 'backups'), receiptPath, nonce } }] },
   ];
   const patchPath = join(home, 'worker.patch.yml');
   await writeFile(patchPath, JSON.stringify(patch, null, 2), { mode: 0o600 });
   return { options: { profile: 'sdk-minimal', patches: [patchPath], dshHome: home, processCwd: home,
     env: runtimeEnvironment, initializeTimeoutMs: 30000, ...(task.attempts.at(-1).timeoutMs == null ? {} : { requestTimeoutMs: task.attempts.at(-1).timeoutMs }),
-    shutdownTimeoutMs: 1000, disposeEofGraceMs: 3000, disposeGraceMs: 2000 }, receiptPath, skillReceiptPath, budgetPath, armedPath, nonce, expectedTools,
+    shutdownTimeoutMs: 1000, disposeEofGraceMs: 3000, disposeGraceMs: 2000 }, receiptPath, skillReceiptPath, contextReceiptPath, budgetPath, armedPath, nonce, expectedTools,
     native: profile.native ? { ...profile.native, contextStrategy: nativeCompaction ? 'native-compaction' : task.stageBudget ? 'durable-stage-chain' : 'disabled' } : null };
 }
 
@@ -119,6 +127,7 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
     let budget = null;
     let capabilities = null;
     let registeredTools = null;
+    let contextEvidence = null;
     const close = () => (closePromise ??= client ? client.close() : Promise.resolve());
     const abort = () => { close().catch(() => {}); };
     try {
@@ -176,15 +185,43 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
       // wait follows durable delivery. A single consumer must process every delivered
       // frame before closing; a second queue drainer races the pump's in-flight frame.
       await client.request('session/wait', { sessionId: task.sessionId });
+      let controlHead;
+      if (task.agentRuntime) {
+        const journal = new AgentJournal(task.agentRuntime.taskDirectory, task.taskId);
+        await journal.runtime(task.agentRuntime.epoch, tx => { tx.head.runtime.closeRequested = true; });
+        while (true) {
+          signal.throwIfAborted();
+          controlHead = await journal.read();
+          requireValue(controlHead.runtime?.epoch === task.agentRuntime.epoch, 'STALE_EPOCH', 'The current runtime identity changed.');
+          if (['closing', 'stopped', 'failed'].includes(controlHead.runtime.status)) {
+            // A published head is visible before its writer releases the short
+            // transaction lock. Acquire it normally before closing the process,
+            // so shutdown cannot strand the worker's own closing transaction.
+            controlHead = await journal.runtime(task.agentRuntime.epoch, tx => {
+              requireValue(['closing', 'stopped', 'failed'].includes(tx.head.runtime.status),
+                'CONTROL_FAILED', 'The worker close handshake changed; recovery is required.');
+              return tx.head;
+            });
+            requireValue(controlHead.runtime.status !== 'failed', 'CONTROL_FAILED', 'The worker control channel failed; recovery is required.');
+            break;
+          }
+          await delay(25);
+          await client.request('session/wait', { sessionId: task.sessionId });
+        }
+      }
       drainTarget = delivered;
       if (processed < drainTarget && !failure) await drained;
       stopped = true;
       subscription.close();
       await pump;
       if (failure) throw failure;
-      requireValue(terminal !== 'max-tokens', 'OUTPUT_TRUNCATED', 'The provider exhausted its output allowance, which includes reasoning. Visible text is partial; an empty result may contain reasoning only.');
-      requireValue(terminal === 'completed', 'INCOMPLETE_TURN', 'The worker did not produce a completed terminal event.');
-      requireValue(text.trim().length > 0, 'EMPTY_RESULT', 'The completed worker supplied no text result.');
+      if (controlHead?.interrupt) terminal = 'interrupted';
+      else if (controlHead?.questions.some(item => !item.resolved)) terminal = 'paused';
+      else {
+        requireValue(terminal !== 'max-tokens', 'OUTPUT_TRUNCATED', 'The provider exhausted its output allowance, which includes reasoning. Visible text is partial; an empty result may contain reasoning only.');
+        requireValue(terminal === 'completed', 'INCOMPLETE_TURN', 'The worker did not produce a completed terminal event.');
+        requireValue(text.trim().length > 0, 'EMPTY_RESULT', 'The completed worker supplied no text result.');
+      }
     } catch (error) {
       failure ??= error;
       if (terminal === 'completed') terminal = 'error';
@@ -198,7 +235,8 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
         try {
           budget = JSON.parse(await readFile(prepared.budgetPath, 'utf8'));
           requireValue(budget.nonce === prepared.nonce, 'BUDGET_UNCONFIRMED', 'Missing current budget receipt.');
-          if (budget.denied) failure ??= new BridgeError('BUDGET_DENIED', `Worker request gate stopped execution: ${budget.denied}.`);
+          if (budget.denied === 'CONTEXT_CAPACITY') failure = new BridgeError('CONTEXT_CAPACITY', 'Required parent context exceeds the explicit input byte ceiling; no content was shortened.');
+          else if (budget.denied) failure ??= new BridgeError('BUDGET_DENIED', `Worker request gate stopped execution: ${budget.denied}.`);
         } catch { budget = null; failure ??= new BridgeError('BUDGET_UNCONFIRMED', 'Final budget receipt is unavailable; usage is unknown.'); }
         if (prepared.native) {
           try {
@@ -217,12 +255,22 @@ export function createSdkRunner({ env = process.env, clientFactory = options => 
       }
     }
     const key = env.DEEPSEEK_API_KEY;
+    if (prepared && task.taskContext) {
+      try {
+        contextEvidence = JSON.parse(await readFile(prepared.contextReceiptPath, 'utf8'));
+        requireValue(contextEvidence.nonce === prepared.nonce, 'CONTEXT_UNCONFIRMED', 'Parent context receipt does not match this runtime.');
+      } catch {
+        contextEvidence = null;
+        if (terminal === 'completed') failure ??= new BridgeError('CONTEXT_UNCONFIRMED', 'The completed worker has no confirmed parent-context input evidence.');
+      }
+    }
     if (key) text = text.replaceAll(key, '[REDACTED]');
     const storageTruncated = Buffer.byteLength(text) > 1024 * 1024;
     if (storageTruncated) text = text.slice(0, 262144);
     const modelTruncated = terminal === 'max-tokens';
     const output = { kind: text.trim() ? (terminal === 'completed' && !failure ? 'complete_text' : 'partial_text') : reasoningObserved ? 'reasoning_only' : 'empty', modelTruncated, reasoningObserved, visibleCharacters: text.length, storageTruncated };
-    return { text, output, terminal: failure ? (terminal === 'completed' ? 'error' : terminal) : terminal, cleanup, toolCalls, budget, ...(capabilities ? { capabilities } : {}),
+    return { text, output, terminal: failure ? (terminal === 'completed' ? 'error' : terminal) : terminal, cleanup, toolCalls, budget,
+      ...(terminal === 'paused' ? { pauseReason: 'needs_input' } : {}), ...(capabilities ? { capabilities } : {}), ...(contextEvidence ? { contextEvidence } : {}),
       ...(failure ? { error: failure instanceof BridgeError ? safeError(failure) : { code: signal.aborted ? 'ABORTED' : 'SDK_ERROR', message: signal.aborted ? 'Worker was stopped.' : 'Official SDK execution failed; raw provider and process diagnostics are withheld.' } } : {}) };
   };
 }

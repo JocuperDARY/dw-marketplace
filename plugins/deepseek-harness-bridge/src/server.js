@@ -14,8 +14,9 @@ import { recoveryMilestonesSchema, normalizeRecoveryMilestones } from './recover
 import { payloadSha256Schema, preparePayloadSchema, preparePayload, validatePayloadIdentity } from './payload.js';
 import { rejectionSchema, recordRejection } from './rejection-evidence.js';
 import { historySchema, normalizeHistory } from './history.js';
+import { agentMessageSchema, agentInterruptSchema, agentWaitSchema, agentListSchema } from './agent-schema.js';
 
-export const VERSION = '3.7.2';
+export const VERSION = '4.0.0';
 const taskId = z.string().uuid();
 const controlToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().describe('Opaque capability returned only by initial submit. Required to continue or cancel from another connection. Keep in the parent chat; never include in worker prompts or shared reports.');
 const scope = z.enum(['connection', 'store']).optional().describe('Default connection lists this connection’s owned tasks. Explicit store includes all retained tasks and historical read-only records for recovery; it grants no execution control.');
@@ -67,6 +68,19 @@ function validateSubmissionContracts(input) {
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
+    { name: 'dsh_spawn_agent', description: 'Start a persistent delegated worker with a stable agentId. Native messaging keeps instructions and progress across activities; idle is not closed. Scope, workspace, capabilities and original authorization remain fixed. Completion and parent acceptance remain separate. Use dsh_plan on the underlying submission first.',
+      schema: submissionSchema.extend({ communication: z.enum(['native', 'disabled']).optional() }),
+      run: input => { validateSubmissionContracts(input); return manager.spawnAgent(input, preflight); }, write: true, network: true },
+    { name: 'dsh_send_message', description: 'Persist a message for an existing worker. Running workers receive it at the next available native step; idle workers are not woken. accepted/enqueued/included are distinct evidence. Instruction changes require explicit target IDs and a context revision. Message size is 32768 Unicode code points, not UTF-16 units. Cross-connection mutation requires controlToken. No single-request extension.',
+      schema: agentMessageSchema, run: input => manager.sendMessage(input), write: true, network: true },
+    { name: 'dsh_followup_task', description: 'Send a follow-up to the same persistent worker. Steers running work or wakes an idle/interrupted worker after confirmed cleanup. Never resets original totals or changes permissions. An interruption still in progress rejects waking. Use the same requestId only to retrieve the same admission, not to change content.',
+      schema: agentMessageSchema, run: input => manager.followupTask(input, preflight), write: true, network: true },
+    { name: 'dsh_interrupt_agent', description: 'Interrupt this worker activity and its owned runtime, preserving pending messages, partial artifacts, identity and usage. A requested interruption is not confirmed stopping; inspect cleanup and descendants. Does not affect other workers and never steals a lease.',
+      schema: agentInterruptSchema, run: input => manager.interruptAgent(input), write: true },
+    { name: 'dsh_wait_agents', description: 'Wait for updates from up to 32 workers with independent persistent event cursors. Returns messages, questions and result references; timeout never cancels or retries. Read complete results using dsh_result. Events do not automatically wake a closed Codex turn.',
+      schema: agentWaitSchema, run: input => manager.waitAgents(input) },
+    { name: 'dsh_list_agents', description: 'List persistent worker availability, pending communication and context coverage without execution control. Defaults to this connection; store scope is observation only. Running status, final output and parent acceptance remain distinct.',
+      schema: agentListSchema, run: input => manager.listAgents(input) },
     { name: 'dsh_prepare_payload', description: 'Prepare an exact labeled user prompt and manifest locally. Classifications and authority/assertion/fact roles are parent declarations. Default selection excludes internal entries; explicit selection never grants outbound permission. No source scans, secret detection, credentials, state access or model calls. Extra SDK/tool/session input is outside this prompt digest.',
       schema: preparePayloadSchema, run: preparePayload },
     { name: 'dsh_record_rejection', description: 'Save immutable metadata for a parent-reported rejection before any task receipt. No rejected content, exception text or credentials are accepted. Separate from task history, model usage and generation-quality denominators; this report does not independently prove billing or execution. No task lock, worker, retry or automatic resubmission.',

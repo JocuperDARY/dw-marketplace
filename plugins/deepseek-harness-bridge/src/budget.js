@@ -137,7 +137,14 @@ export async function installBudget(ctx, config) {
     // input above, never applied to a stream request after preparation.
     if (!denial && checkpoint && ((options.tools?.length ?? 0) > 0 || !JSON.stringify([options.system, options.messages]).includes('Stage allowance is nearly exhausted.'))) denial = 'CHECKPOINT_REQUIRED';
     const requestBytes = Buffer.byteLength(JSON.stringify({ messages: options.messages, system: options.system, tools: options.tools, toolHistory: options.toolHistory }));
-    if (!denial && !withinLimit(requestBytes, config.maxRequestBytes)) denial = 'REQUEST_SIZE_LIMIT';
+    if (!denial && !withinLimit(requestBytes, config.maxRequestBytes)) {
+      const parentContext = options.messages?.flatMap(message => message.source?.kind === 'runtime-context' ? message.source.sections ?? [] : [])
+        .findLast(section => section.name === 'bridge:parent-context');
+      // Required authority cannot be silently shortened to satisfy an explicit
+      // input cap. This classifies the known byte boundary, not provider tokens.
+      denial = parentContext && !withinLimit(Buffer.byteLength(parentContext.text), config.maxRequestBytes)
+        ? 'CONTEXT_CAPACITY' : 'REQUEST_SIZE_LIMIT';
+    }
     if (denial) {
       if (team) team.release(options.sessionId, prepared);
       receipt.denied = denial;

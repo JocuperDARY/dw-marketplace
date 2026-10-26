@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve, sep, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import { BridgeError, requireValue } from './errors.js';
+import { readPublished } from './publication-read.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
@@ -116,7 +117,7 @@ export class ConcurrentStore {
     return join(this.dataDir, legacy ? 'tasks' : 'tasks-v3', taskId);
   }
 
-  async protocol() {
+  async protocol(waitForCommit = true) {
     let manifest, guard;
     try { manifest = await json(join(this.dataDir, 'protocol.json')); }
     catch (error) {
@@ -124,12 +125,19 @@ export class ConcurrentStore {
       let oldGuard;
       try { oldGuard = await json(join(this.dataDir, 'owner.lock')); }
       catch (lockError) { if (missing(lockError)) return null; throw lockError; }
-      if (oldGuard.protocol !== 3) return null;
+      if (![3, 4].includes(oldGuard.protocol)) return null;
+      if (waitForCommit && oldGuard.protocol === 4 && oldGuard.kind === 'bridge-protocol-guard' && UUID.test(oldGuard.storeId)) {
+        // A concurrent first admission may have published its guard but not the
+        // final manifest. Observe its commit briefly; never repair or replace it.
+        await this.waitForInitialization(oldGuard);
+        return this.protocol(false);
+      }
       throw new BridgeError('RECOVERY_REQUIRED', 'An existing ownership guard has no complete protocol manifest.');
     }
     try { guard = await json(join(this.dataDir, 'owner.lock')); }
     catch { throw new BridgeError('RECOVERY_REQUIRED', 'The concurrent protocol ownership guard is unavailable.'); }
-    invalid(manifest.protocol === 3 && UUID.test(manifest.storeId) && guard.protocol === 3
+    requireValue(manifest.protocol !== 3, 'UPGRADE_REQUIRED', 'Protocol 3 needs an explicit quiescent upgrade before this host can use the store.');
+    invalid(manifest.protocol === 4 && UUID.test(manifest.storeId) && guard.protocol === 4
       && guard.kind === 'bridge-protocol-guard' && guard.storeId === manifest.storeId);
     return manifest;
   }
@@ -140,7 +148,7 @@ export class ConcurrentStore {
     try { guard = await json(join(this.dataDir, 'owner.lock')); }
     catch (error) { if (!missing(error)) throw new BridgeError('UPGRADE_REQUIRED', 'The existing owner lock must be reconciled while old bridge hosts are stopped.'); }
     if (guard) {
-      requireValue(guard.protocol === 3 && guard.kind === 'bridge-protocol-guard' && UUID.test(guard.storeId), 'UPGRADE_REQUIRED', 'An old bridge owns this store; stop and reconcile old hosts before upgrading.');
+      requireValue(guard.protocol === 4 && guard.kind === 'bridge-protocol-guard' && UUID.test(guard.storeId), 'UPGRADE_REQUIRED', 'An old bridge owns this store; stop and reconcile old hosts before upgrading.');
       await this.waitForInitialization(guard); return this;
     }
     // Never repair a partial upgrade implicitly, and never replace an old host's lock.
@@ -148,7 +156,7 @@ export class ConcurrentStore {
       try {
         await lstat(join(this.dataDir, name));
         const concurrentGuard = await json(join(this.dataDir, 'owner.lock')).catch(() => null);
-        if (concurrentGuard?.protocol === 3 && concurrentGuard.kind === 'bridge-protocol-guard') {
+        if (concurrentGuard?.protocol === 4 && concurrentGuard.kind === 'bridge-protocol-guard') {
           await this.waitForInitialization(concurrentGuard); return this;
         }
         throw new BridgeError('RECOVERY_REQUIRED', 'A partial concurrent-store upgrade requires explicit reconciliation.');
@@ -156,19 +164,19 @@ export class ConcurrentStore {
       catch (error) { if (!missing(error)) throw error; }
     }
     const storeId = randomUUID();
-    try { await this.writer(join(this.dataDir, 'owner.lock'), JSON.stringify({ kind: 'bridge-protocol-guard', protocol: 3, storeId }), { immutable: true }); }
+    try { await this.writer(join(this.dataDir, 'owner.lock'), JSON.stringify({ kind: 'bridge-protocol-guard', protocol: 4, storeId }), { immutable: true }); }
     catch (error) {
       if (error.code === 'EEXIST') {
         const concurrentGuard = await json(join(this.dataDir, 'owner.lock'));
-        requireValue(concurrentGuard.protocol === 3 && concurrentGuard.kind === 'bridge-protocol-guard', 'UPGRADE_REQUIRED', 'An old host has acquired ownership; its lock was preserved.');
+        requireValue(concurrentGuard.protocol === 4 && concurrentGuard.kind === 'bridge-protocol-guard', 'UPGRADE_REQUIRED', 'An old host has acquired ownership; its lock was preserved.');
         await this.waitForInitialization(concurrentGuard); return this;
       }
       throw error;
     }
     await directory(join(this.dataDir, 'tasks-v3'), true);
-    await this.writer(join(this.dataDir, 'registry.json'), JSON.stringify({ protocol: 3, storeId, revision: 0, tasks: {}, requests: {} }));
+    await this.writer(join(this.dataDir, 'registry.json'), JSON.stringify({ protocol: 4, storeId, revision: 0, tasks: {}, requests: {} }));
     // The manifest is the final initialization commit. Missing manifest always fails closed.
-    await this.writer(join(this.dataDir, 'protocol.json'), JSON.stringify({ protocol: 3, storeId }));
+    await this.writer(join(this.dataDir, 'protocol.json'), JSON.stringify({ protocol: 4, storeId }));
     return this;
   }
 
@@ -176,7 +184,7 @@ export class ConcurrentStore {
     const started = Date.now();
     while (true) {
       try {
-        const manifest = await this.protocol();
+        const manifest = await this.protocol(false);
         invalid(manifest?.storeId === guard.storeId); await this.registry(); return;
       } catch (error) {
         if (error.code !== 'RECOVERY_REQUIRED' && !missing(error)) throw error;
@@ -190,8 +198,8 @@ export class ConcurrentStore {
     const manifest = await this.protocol();
     if (!manifest) return null;
     await directory(join(this.dataDir, 'tasks-v3'));
-    const registry = await json(join(this.dataDir, 'registry.json'));
-    invalid(registry.protocol === 3 && registry.storeId === manifest.storeId && Number.isSafeInteger(registry.revision)
+    const registry = await readPublished(() => json(join(this.dataDir, 'registry.json')));
+    invalid(registry.protocol === 4 && registry.storeId === manifest.storeId && Number.isSafeInteger(registry.revision)
       && registry.revision >= 0 && plain(registry.tasks) && plain(registry.requests));
     for (const [id, entry] of Object.entries(registry.tasks)) {
       invalid(UUID.test(id) && plain(entry) && HASH.test(entry.controlHash) && UUID.test(entry.creatorId)
@@ -265,6 +273,15 @@ export class ConcurrentStore {
     const record = (await this.legacy()).find(record => record.taskId === taskId);
     requireValue(record, 'TASK_NOT_FOUND', 'No task with that ID exists in this bridge state.');
     return record;
+  }
+
+  async readTaskState(taskId) {
+    this.taskDirectory(taskId);
+    const registry = await this.registry();
+    requireValue(registry?.tasks[taskId], 'TASK_NOT_FOUND', 'No task with that ID exists in this bridge state.');
+    const entry = registry.tasks[taskId];
+    return { record: await this.snapshot(registry, taskId), generation: entry.generation,
+      lease: entry.lease ? { taskId, ...entry.lease } : null };
   }
 
   async transaction(operation) {
@@ -368,7 +385,7 @@ export class ConcurrentStore {
       if (!previous) await directory(taskDir, true);
       else await directory(taskDir);
       const lease = { nonce: randomUUID(), ownerId: this.ownerId, attempt: attempt.number, workspace: record.workspace, access: record.access };
-      try { await this.writer(join(taskDir, 'lease.lock'), JSON.stringify({ protocol: 3, storeId: registry.storeId, taskId: record.taskId, ...lease }), { immutable: true }); }
+      try { await this.writer(join(taskDir, 'lease.lock'), JSON.stringify({ protocol: 4, storeId: registry.storeId, taskId: record.taskId, ...lease }), { immutable: true }); }
       catch (error) { if (error.code === 'EEXIST') throw new BridgeError('TASK_BUSY', 'An execution lease already exists; it was preserved.'); throw error; }
       // A failure from this point retains the lease: admission/spending must not be guessed.
       const snapshot = await this.writeSnapshot(registry, record);
@@ -424,7 +441,7 @@ export class ConcurrentStore {
       await directory(this.taskDirectory(taskId));
       const dir = join(this.taskDirectory(taskId), 'cancel-requests'); await directory(dir, true);
       const path = join(dir, `${entry.lease.nonce}.json`);
-      const request = { protocol: 3, storeId: registry.storeId, taskId, attempt: entry.lease.attempt, leaseNonce: entry.lease.nonce };
+      const request = { protocol: 4, storeId: registry.storeId, taskId, attempt: entry.lease.attempt, leaseNonce: entry.lease.nonce };
       try { await this.writer(path, JSON.stringify(request), { immutable: true }); }
       catch (error) { if (error.code !== 'EEXIST') throw error; invalid(JSON.stringify(await json(path)) === JSON.stringify(request)); }
       return { commit: false, value: { requested: true, attempt: entry.lease.attempt } };
@@ -441,7 +458,7 @@ export class ConcurrentStore {
     let request;
     try { request = await json(join(this.taskDirectory(taskId), 'cancel-requests', `${entry.lease.nonce}.json`)); }
     catch (error) { if (missing(error)) return false; throw error; }
-    invalid(request.protocol === 3 && request.storeId === registry.storeId && request.taskId === taskId
+    invalid(request.protocol === 4 && request.storeId === registry.storeId && request.taskId === taskId
       && request.attempt === entry.lease.attempt && request.leaseNonce === entry.lease.nonce);
     return true;
   }
