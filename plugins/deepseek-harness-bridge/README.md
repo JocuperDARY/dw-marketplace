@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.3.0
+# DeepSeek Harness Bridge 3.4.0
+
+3.4.0 新增 `dsh_check_result` 和 `scripts/check-result.js`：对保存结果的字面值、计数、算术、引用行和执行回执做确定性检查，返回 PASS/FAIL/UNKNOWN；父级语义与科学验收仍独立。见[父级证据检查](docs/parent-evidence.md)。
 
 3.3.0 新增零模型调用的 `dsh_plan`，复用提交 schema 和参数归一化，预览执行方式、额度来源、风险及恢复边界；不创建任务、不读取凭据、不取得执行锁，也不授予外发许可。见[提交前预检](docs/submission-plan.md)。
 
@@ -74,6 +76,7 @@ Codex 的有效 MCP 配置会合并保留的 `.mcp.json` 中 `env_vars` 白名�
 
 | MCP 工具 | 作用 |
 | --- | --- |
+| `dsh_check_result` | 零模型调用核验固定任务/尝试的保存结果及哈希固定的工作区证据；不把机械检查当作父级验收。 |
 | `dsh_prepare_workspace` | 零模型调用创建一个新的独立目录，由 Bridge 工作者账户持有；拒绝接管现有目录或改写其 ACL。Windows 原生 Shell 任务先准备工作区。 |
 | `dsh_plan` | 零调用预览新任务参数、风险及续接/恢复条件；不消耗 requestId，不代表授权或入场成功。 |
 | `dsh_submit` | 提交新任务，立即返回 taskId 与仅首次发放的 controlToken；同 requestId 和同输入不会重复启动。 |
