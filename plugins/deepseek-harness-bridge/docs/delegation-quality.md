@@ -2,7 +2,7 @@
 
 Since 1.2.0 the bridge supports [strict output checks and bounded format recovery](output-recovery.md).
 A reviewContract implies json-object output. JSON syntax/shape-of-root failures
-may share the one recovery allowance with truncation in new budgeted tasks;
+share recovery eligibility with truncation in budgeted tasks (see [progress policy](progress-recovery.md));
 missing cases, wrong rules and semantic errors still do not auto-retry.
 
 Use `verification` for path classification, exception precedence, interacting rules and test expectations. The default is high effort; an omitted output ceiling remains unspecified. This is a conservative starting policy, not evidence that high fixes every error. Literal copying or reformatting can remain mechanical/off. One straightforward rule may justify an explicit low setting with parent checks. Never silently change a user-fixed effort, token cap, request count or deadline; the existing budget contract still applies.

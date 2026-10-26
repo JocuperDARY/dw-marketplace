@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.0 — 2026-10-26
+
+- New budgeted tasks use progress-v2 recovery eligibility. Parent-declared guarded JSON milestones can renew later text-only recovery after a successful ordinary checkpoint; existing matches, repeated IDs and recovery-only changes cannot.
+- Persist progress identities and evidence hashes across restart/continuation. Preserve caller totals, original partials, safe cleanup/accounting gates and single-request no-retry. Existing bounded-v1 records keep their policy; omitted milestones retain one recovery episode.
+- Bound milestone observation and preserve unknown baseline/error evidence. Matching a declared artifact is deterministic evidence only, never source-authority, semantic or scientific acceptance.
+
 ## 3.4.0 — 2026-10-26
 
 - Add read-only `dsh_check_result` and a CLI for parent-owned literal/count/arithmetic/source-quote/execution-receipt checks over one pinned, fully retrieved result. Return PASS/FAIL/UNKNOWN; no semantic acceptance or retry.

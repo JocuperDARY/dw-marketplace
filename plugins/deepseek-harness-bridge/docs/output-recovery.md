@@ -71,7 +71,7 @@ and fields. Format-valid and structure-complete answers can still be wrong;
 to authoritative inputs, check all required fields, and record semantic decisions
 separately. Never classify escaped tool-display strings by visual slash count.
 
-## One shared recovery allowance
+## Shared recovery eligibility
 
 For new budgeted tasks, when at least three requests and 768 output tokens remain,
 stage allocation holds back one request and up to 2048 output tokens, bounded by
@@ -82,7 +82,7 @@ remaining authorization. Tiny budgets, elapsed deadlines and repeated failure ca
 still leave no recovery. Time and token ceilings are never raised.
 
 Confirmed max-tokens and an explicitly requested invalid completed JSON summary
-share at most ONE off, one-request, zero-tool recovery over the task lifetime.
+share one initial off, one-request, zero-tool recovery. New progress-v2 records may earn another episode only through newly verified parent-declared milestones after ordinary work; see [progress recovery](progress-recovery.md). Omitted milestones and saved bounded-v1 records retain at most one lifetime episode.
 Cleanup and accounting must be confirmed; cancellation, denied calls, storage
 clipping, transport, persistence and semantic errors do not trigger recovery.
 Missing review items with otherwise valid JSON do not trigger it either.
@@ -93,9 +93,9 @@ the filename does not imply that every stored artifact was truncated. Regenerate
 from original supplied facts and bounded visible evidence in a fresh session;
 never replay tools or claim access to hidden reasoning. Insufficient evidence
 becomes an honest checkpoint. Recovery uses the same format and coverage checks;
-failure, no remaining budget or a second defect is exposed without another
+failure, no remaining budget or another defect without renewed eligibility is exposed without another
 automatic repair. `recovery` identifies reason, outcome and original artifact;
-`orchestration.recoveries` counts the shared allowance, while truncationRecoveries
+`orchestration.recoveries` counts actual recovery stages, while truncationRecoveries
 still counts just truncation recovery stages.
 
 Existing saved tasks keep their original allocation policy and fingerprints.

@@ -4,6 +4,7 @@ import { normalizeOutputFormat, normalizeReviewContract } from './delivery.js';
 import { normalizeReportContract } from './report.js';
 import { normalizeLifecycleContract } from './lifecycle.js';
 import { optionalLimit } from './limits.js';
+import { normalizeRecoveryMilestones } from './recovery-progress.js';
 
 const EFFORT = { mechanical: 'off', drafting: 'off', standard: 'low', reasoning: 'high', verification: 'high' };
 const HEADROOM = { off: 4096, low: 8192, high: 16384, max: 32768 };
@@ -41,11 +42,12 @@ export function planExecution(input, { legacy = false, compatibilityV1 = false }
   if (single) requireValue(input.budget === undefined && maxModelRequests === 1 && maxToolCalls === 0 && capabilityProfile === 'inference-only' && (input.access ?? 'read-only') === 'read-only',
     'INVALID_ARGUMENT', 'single-request permits exactly one read-only inference request, no tools, no budget object and no continuation.');
   const budget = normalizeBudget(input.budget ?? (executionMode === 'budgeted' ? {} : undefined), maxModelRequests);
+  const recoveryMilestones = normalizeRecoveryMilestones(input.recoveryMilestones, executionMode);
   const warnings = [];
   if (single && effort !== 'off') warnings.push('single-request reasoning shares the output allowance and may leave no visible answer, even at low effort. This mode cannot recover or retry; explicit effort and caps are preserved. Use drafting/off for bounded prose from supplied facts, or authorize a total budget when recovery is needed.');
   if (budget && ((budget.totalModelRequests != null && budget.totalModelRequests < 3) || (budget.totalOutputTokens != null && budget.totalOutputTokens < 768))) warnings.push('This explicit total may not fund separate work, checkpoint and recovery. Recovery never increases the limit.');
   if (verifying && workload === 'mechanical') warnings.push('Rule verification is not mechanical extraction. Prefer workload: verification for path classification, exceptions and test expectations; the explicit workload is preserved.');
   if (verifying && ['off', 'low'].includes(effort)) warnings.push('Rule verification normally uses high effort. The explicit low/off setting is preserved; independently verify every case and required check before adoption.');
   if (maxTokens != null && ((effort === 'high' && maxTokens < 8192) || (effort === 'max' && maxTokens < 16384))) warnings.push('The explicit output cap leaves limited room for reasoning and visible text. Consider a lower effort or a larger cap within the authorized total.');
-  return { executionMode, workload, effort, maxTokens, maxModelRequests, maxToolCalls, capabilityProfile, budget, warnings, reviewContract, reportContract, lifecycleContract, outputFormat };
+  return { executionMode, workload, effort, maxTokens, maxModelRequests, maxToolCalls, capabilityProfile, budget, warnings, reviewContract, reportContract, lifecycleContract, outputFormat, recoveryMilestones };
 }

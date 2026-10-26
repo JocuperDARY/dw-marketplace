@@ -134,7 +134,7 @@ export class TaskManager {
       const capabilityProfile = profile.id;
       const capabilityDigest = profile.digest;
       const planning = { executionMode: planned.executionMode, workload: planned.workload, warnings: planned.warnings, limitsPolicy: 'explicit-v2' };
-      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(planned.reportContract ? { reportContract: planned.reportContract } : {}), ...(planned.lifecycleContract ? { lifecycleContract: planned.lifecycleContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
+      const fingerprint = hash({ prompt, workspace, access, effort, timeoutMs, maxTokens, maxToolCalls, maxModelRequests, maxRequestBytes, capabilityProfile, capabilityDigest, ...(budget ? { budget } : {}), ...(planned.recoveryMilestones ? { recoveryMilestones: planned.recoveryMilestones } : {}), ...(!legacy ? { executionMode: planned.executionMode, workload: planned.workload } : {}), ...(planned.reviewContract ? { reviewContract: planned.reviewContract } : {}), ...(planned.reportContract ? { reportContract: planned.reportContract } : {}), ...(planned.lifecycleContract ? { lifecycleContract: planned.lifecycleContract } : {}), ...(input.outputFormat !== undefined ? { outputFormat: planned.outputFormat } : {}) });
       const existing = this.existing(id, fingerprint);
       if (existing) return existing;
       this.assertAvailable();
@@ -149,7 +149,8 @@ export class TaskManager {
       if (planned.reportContract) record.reportContract = planned.reportContract;
       if (planned.lifecycleContract) record.lifecycleContract = planned.lifecycleContract;
       if (input.outputFormat !== undefined) record.outputFormat = planned.outputFormat;
-      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: deadlineAfter(budget.totalDurationMs, Date.parse(record.createdAt)), stages: [], recoveryPolicy: 'bounded-v1' };
+      if (budget) record.orchestration = { authorized: budget, assignment: prompt, deadlineAt: deadlineAfter(budget.totalDurationMs, Date.parse(record.createdAt)), stages: [], recoveryPolicy: 'progress-v2',
+        ...(planned.recoveryMilestones ? { recoveryMilestones: planned.recoveryMilestones } : {}), progressSeen: [] };
       return this.begin(record, { id, fingerprint, prompt, timeoutMs, resume: false });
     });
   }

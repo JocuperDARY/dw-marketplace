@@ -88,8 +88,7 @@ and `empty`. Only reasoning presence is returned, never reasoning content.
 and legacy `outputTruncated` describe storage clipping. `resultAvailable` and
 `nextOffset: null` describe storage/pagination, not successful completion.
 
-A new budgeted task may use ONE automatic text-only recovery over its entire
-lifetime, shared between max-tokens and explicitly checked invalid final JSON,
+A new budgeted task gets one initial text-only recovery, shared between max-tokens and explicitly checked invalid final JSON. Further progress-v2 episodes require newly verified parent-declared milestones (see [progress recovery](progress-recovery.md)),
 after confirmed cleanup and valid accounting. Visible
 partial text and metadata are first saved in `partial-N.json`. They are untrusted
 evidence, not a validated checkpoint. Recovery uses a fresh session, `off`, one
@@ -101,7 +100,7 @@ evidence. Insufficient evidence must become a checkpoint with explicit unknowns.
 
 Recovery spends the same remaining request/output/time authorization. A valid
 checkpoint can resume ordinary stages; completed recovery returns its receipt.
-Continuation and restart do not grant a second recovery. Further truncation,
+Continuation and restart alone do not renew recovery. Saved bounded-v1 and omitted-milestone tasks retain one episode. Without new eligible progress, further truncation,
 malformed output, exhausted budget or process failure retains non-success and
 partial evidence. Transport errors, denied calls, cancel/shutdown, unconfirmed
 cleanup/accounting and persistence failures never auto-retry. Upgrades never
