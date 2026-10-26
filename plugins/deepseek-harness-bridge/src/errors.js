@@ -2,6 +2,10 @@
 // Never expose rejected values, unknown property names, or Zod's raw messages.
 const validationFields = new Set(('requestId prompt parentLabel controlToken scope workspace stageRuntimeSupport access executionMode workload outputFormat reviewContract reportContract lifecycleContract statuses cases allowedStatuses slotReusable basis effort timeoutMs budget totalModelRequests totalOutputTokens totalToolCalls totalDurationMs maxTokens maxToolCalls maxModelRequests maxRequestBytes nativePlugins capabilityProfile taskId attempt offset limit caseIds ruleIds checkIds facts id kind value unit source recoveryMilestones assertions checks pointer expected operator operands absoluteTolerance path sha256 receipt identity exitCodePointer reason').split(' '));
 const validationMessages = {
+  payload_identity_mismatch: 'payloadSha256 must match the exact UTF-8 prompt; prepare and authorize changed content separately.',
+  payload_size_limit: 'The serialized preparation input and rendered prompt must each fit 65536 UTF-8 bytes.',
+  duplicate_payload_id: 'Segment IDs must be unique and cannot use the reserved ID objective.',
+  objective_required: 'The objective must be selected; internal objectives require explicit selection.',
   invalid_type: 'Use the type specified by the advertised schema.',
   invalid_value: 'Use one of the advertised values.',
   invalid_union: 'Value does not match any advertised alternative.',
@@ -20,6 +24,8 @@ const validationMessages = {
   budgeted_required: 'Recovery milestones require budgeted mode; single-request never retries.',
   native_profile_required: 'Omit nativePlugins unless capabilityProfile is native; an empty array is still a supplied field.',
 };
+
+for (const field of ['payloadSha256', 'objective', 'segments', 'classification', 'includeIds', 'role', 'text']) validationFields.add(field);
 
 function safeValidation(validation) {
   if (!validation || !['schema', 'contract'].includes(validation.phase) || !Array.isArray(validation.issues)) return undefined;

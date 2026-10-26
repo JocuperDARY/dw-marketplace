@@ -1,4 +1,6 @@
-# DeepSeek Harness Bridge 3.5.0
+# DeepSeek Harness Bridge 3.6.0
+
+3.6.0 新增 `dsh_prepare_payload`：根据父级声明的类别生成最小提示词，默认排除 internal 内容，保留权威规则、待审核断言与事实的区别。`payloadSha256` 绑定用户提示词，内容变化在提交前报错；它不覆盖 SDK/工具/历史附加输入，也不授予外发许可。`dsh_record_rejection` 单独保存父级报告的准入前拒绝元数据，不计入任务用量或模型质量。见[载荷与拒绝证据](docs/payload-minimization.md)。
 
 3.5.0 的新预算任务支持[进展驱动恢复](docs/progress-recovery.md)：父级可预先声明工作区 JSON 里程碑，普通阶段新达成条件后才重新开放后续文本恢复；不重置总预算，不把进度措辞变化当作证据。单请求禁止重试、历史恢复策略和原始失败记录继续保留。
 

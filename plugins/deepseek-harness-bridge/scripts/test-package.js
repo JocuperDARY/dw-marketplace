@@ -18,6 +18,7 @@ try {
   const [archive] = JSON.parse(stdout);
   const paths = new Set(archive.files.map(file => file.path));
   for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js',
+    'src/payload.js', 'src/rejection-evidence.js', 'docs/payload-minimization.md',
     'src/recovery-progress.js', 'docs/progress-recovery.md',
     'src/parent-evidence.js', 'src/readonly-client.js', 'scripts/check-result.js', 'docs/parent-evidence.md',
     'scripts/Invoke-BridgeProcess.ps1', 'src/runtime-support.js', 'src/execution-guidance.js', 'docs/execution-efficiency.md',

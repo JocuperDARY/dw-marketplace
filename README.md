@@ -8,7 +8,9 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
-| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 3.5.0 | Codex MCP：可靠分页、逐项验收与原生执行 |
+| [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 3.6.0 | Codex MCP：可靠分页、逐项验收与原生执行 |
+
+**deepseek-harness-bridge 3.6.0**：Local payload minimization and separate parent-reported pre-admission rejection evidence; no implied outbound authorization.
 
 **deepseek-harness-bridge 3.5.0**：新增进展驱动的文本恢复，凭预先声明的文件里程碑开放后续恢复，原始总预算与单请求边界保持。
 
