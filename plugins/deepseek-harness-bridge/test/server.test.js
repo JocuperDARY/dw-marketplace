@@ -20,7 +20,7 @@ test('workspace runtime support schema is optional boolean and invalid values ne
   await server.connect(serverSide);
   await client.connect(clientSide);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
   const schema = tools.find(tool => tool.name === 'dsh_prepare_workspace').inputSchema;
   const validate = new Ajv({ strict: false }).compile(schema);
   for (const flag of [undefined, true, false]) {
@@ -121,7 +121,7 @@ test('multiple production connections discover tools without reserving task owne
     clients.push(client);
     await client.connect(new StdioClientTransport({ command: process.execPath,
       args: [fileURLToPath(new URL('../index.js', import.meta.url))], env, stderr: 'pipe' }));
-    assert.equal((await client.listTools()).tools.length, 12);
+    assert.equal((await client.listTools()).tools.length, 13);
     const result = await client.callTool({ name: 'dsh_doctor', arguments: {} });
     assert.equal(JSON.parse(result.content[0].text).validation.modelCalls, 0);
   }
@@ -140,7 +140,7 @@ test('MCP preserves omitted limits and enforces an explicit one-request contract
   await server.connect(serverSide);
   await client.connect(clientSide);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
   const prepareTool = tools.find(tool => tool.name === 'dsh_prepare_workspace');
   assert.equal(prepareTool.annotations.readOnlyHint, false);
   assert.equal(prepareTool.annotations.openWorldHint, false);

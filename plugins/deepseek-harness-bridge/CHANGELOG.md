@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.4.0 — 2026-10-26
+
+- Add read-only `dsh_check_result` and a CLI for parent-owned literal/count/arithmetic/source-quote/execution-receipt checks over one pinned, fully retrieved result. Return PASS/FAIL/UNKNOWN; no semantic acceptance or retry.
+- Missing, clipped, failed or conflicting evidence remains unknown. Source artifacts use workspace boundaries, byte limits and pinned SHA-256. A matching citation or receipt does not prove authority or entailment.
+- Cover historical quote-line, unsupported-prerequisite and definition-versus-execution counterexamples, numeric intermediate overflow, immutable task state and real MCP/CLI observation with offline fixtures.
+
 ## 3.3.0 — 2026-10-26
 
 - Add read-only `dsh_plan` with the same submission schema and normalization. Preview mode, effort, optional limits and their input origins, warnings, capability metadata and recovery/continuation constraints before spending.

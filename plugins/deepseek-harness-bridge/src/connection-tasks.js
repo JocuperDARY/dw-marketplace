@@ -42,6 +42,7 @@ export class ConnectionTasks {
   usage(...args) { return this.use('usage', ...args); }
   wait(...args) { return this.use('wait', ...args); }
   result(...args) { return this.use('result', ...args); }
+  checkResult(...args) { return this.use('checkResult', ...args); }
   cancel(...args) { return this.use('cancel', ...args); }
 
   close() {

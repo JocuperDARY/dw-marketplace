@@ -11,6 +11,7 @@ import { assessLifecycle, lifecyclePrompt, normalizeLifecycleContract } from './
 import { summarizeUsage } from './usage.js';
 import { optionalLimit, minimumLimit, deadlineAfter, deadlineTimer } from './limits.js';
 import { ConcurrentStore, atomicWrite } from './concurrent-store.js';
+import { checkSavedResult } from './parent-evidence.js';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -101,6 +102,8 @@ export class TaskManager {
     this.assertAvailable();
     return previewSubmission(input, { dataDir: this.dataDir, resolveCapabilities: this.resolveCapabilities });
   }
+
+  checkResult(input) { return checkSavedResult(request => this.result(request.arguments), input); }
 
   assertAvailable() {
     requireValue(!this.closed, 'CLOSED', 'The bridge is closing.');

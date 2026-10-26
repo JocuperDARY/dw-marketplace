@@ -9,8 +9,9 @@ import { lifecycleContractSchema, normalizeLifecycleContract } from './lifecycle
 import { prepareNativeWorkspace } from './native-workspace.js';
 import { inputPrompt } from './submission-plan.js';
 import { validateNativeSelection } from './planning.js';
+import { checkResultSchema, normalizeEvidenceChecks } from './parent-evidence.js';
 
-export const VERSION = '3.3.0';
+export const VERSION = '3.4.0';
 const taskId = z.string().uuid();
 const controlToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().describe('Opaque capability returned only by initial submit. Required to continue or cancel from another connection. Keep in the parent chat; never include in worker prompts or shared reports.');
 const scope = z.enum(['connection', 'store']).optional().describe('Default connection lists this connection’s owned tasks. Explicit store includes all retained tasks and historical read-only records for recovery; it grants no execution control.');
@@ -58,6 +59,8 @@ function validateSubmissionContracts(input) {
 
 export function createServer({ manager, doctor, preflight = () => {} }) {
   const definitions = [
+    { name: 'dsh_check_result', description: 'Check one pinned complete saved result against parent-declared literal facts, counts, arithmetic, source quotes and execution receipts. Reads bounded workspace files using pinned SHA-256. Returns per-item PASS/FAIL/UNKNOWN; missing, clipped, failed or inconsistent evidence never passes. No model calls, retries, execution locks or state writes. This is deterministic evidence checking only: source authority, natural-language entailment and parent/scientific acceptance remain not_assessed.',
+      schema: checkResultSchema, run: input => { normalizeEvidenceChecks(input.checks); return manager.checkResult(input); } },
     { name: 'dsh_prepare_workspace', description: 'Create one NEW independent workspace directory under an existing parent, with the bridge host account as owner. Zero model calls; does not adopt existing directories or change existing ownership/ACLs. Use before native Shell tasks when a Codex-created directory belongs to a different sandbox account. Existing delivered files remain untouched.',
       schema: z.object({ workspace: z.string().min(1).describe('Absolute path of a new, absent directory under an existing parent; must be disjoint from bridge state.'), stageRuntimeSupport: z.boolean().optional().describe('Opt in to staging the packaged Windows process launcher and current bridge Node path/version into the NEW workspace. Default false leaves it empty. Does not execute or probe tools; child/native Shell execution remains unverified.') }).strict(),
       run: input => prepareNativeWorkspace({ ...input, dataDir: manager.options?.dataDir ?? manager.dataDir }), write: true, destructive: false, idempotent: false },

@@ -202,7 +202,7 @@ test('real MCP schema rejects 50000 before manager.result; defaults, max, metada
   const text = JSON.stringify({ value: '界😀'.repeat(15000) });
   const f = await apiFixture(t, text);
   const tools = (await f.client.listTools()).tools;
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
   const tool = tools.find(tool => tool.name === 'dsh_result');
   assert.equal(tool.inputSchema.properties.limit.maximum, 32000);
   assert.match(tool.description, /32000 UTF-16.*default 16000/);

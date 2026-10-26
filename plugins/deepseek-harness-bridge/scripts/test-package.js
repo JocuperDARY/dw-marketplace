@@ -18,6 +18,7 @@ try {
   const [archive] = JSON.parse(stdout);
   const paths = new Set(archive.files.map(file => file.path));
   for (const path of ['plugin.json', 'mcp.json', '.mcp.json', '.codex-plugin/plugin.json', 'launch.js',
+    'src/parent-evidence.js', 'src/readonly-client.js', 'scripts/check-result.js', 'docs/parent-evidence.md',
     'scripts/Invoke-BridgeProcess.ps1', 'src/runtime-support.js', 'src/execution-guidance.js', 'docs/execution-efficiency.md',
     'src/submission-plan.js', 'src/implementation-constraints.js', 'docs/submission-plan.md', 'scripts/read-result.js', 'src/result-reader.js', 'docs/result-retrieval.md']) {
     assert.ok(paths.has(path), `Actual npm archive is missing ${path}`);
