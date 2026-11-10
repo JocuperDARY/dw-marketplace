@@ -37,10 +37,14 @@ function normalizeProjectPath(filePath) {
 }
 
 const PROFILES = {
-  fast:     { model: 'gpt-5.4-mini', mode: 'strict'  },
-  balanced: { model: 'gpt-5.4',      mode: 'workspace' },
-  max:      { model: 'gpt-5.5',      mode: 'full'    },
+  fast:     { model: 'gpt-6.1-terra', mode: 'strict',    effort: 'low' },
+  balanced: { model: 'gpt-6.1-sol',   mode: 'workspace', effort: 'medium' },
+  max:      { model: 'gpt-6-astra',   mode: 'full',      effort: 'high' },
 };
+
+const DEFAULT_MODEL = 'gpt-6.1-sol';
+const DEFAULT_EFFORT = 'medium';
+const EFFORTS = new Set(['low', 'medium', 'high']);
 
 const SANDBOX_BY_MODE = {
   strict: 'read-only',
@@ -69,7 +73,7 @@ const TOOL_DEF = {
       },
       model: {
         type: 'string',
-        description: 'OpenAI model. Default: gpt-5.5. Mutually exclusive with profile.',
+        description: 'Explicit model ID. Default: gpt-6.1-sol, also on resume. The caller must verify that an explicit ID is permitted and supported by its Codex provider. Mutually exclusive with profile.',
       },
       mode: {
         type: 'string',
@@ -109,7 +113,7 @@ const TOOL_DEF = {
       effort: {
         type: 'string',
         enum: ['low', 'medium', 'high'],
-        description: 'Reasoning effort. Default: codex config default',
+        description: 'Reasoning effort. Default: medium, or the selected profile effort. An explicit effort overrides the profile effort. Provider support must be checked by the caller.',
       },
       ephemeral: {
         type: 'boolean',
@@ -138,7 +142,7 @@ const TOOL_DEF = {
       profile: {
         type: 'string',
         enum: ['fast', 'balanced', 'max'],
-        description: 'Preset model+mode combo. Mutually exclusive with model/mode.',
+        description: 'Preset model, effort and sandbox: fast = gpt-6.1-terra/low/read-only; balanced = gpt-6.1-sol/medium/workspace-write; max = gpt-6-astra/high/danger-full-access (bypasses approvals and sandbox). Use max only with authorization for that permission mode. Mutually exclusive with model/mode.',
       },
     },
     required: ['prompt'],
@@ -243,10 +247,39 @@ function resolveProjectFilePath(filePath, cwd) {
 }
 
 function codexSandboxArgs(mode) {
-  const sandbox = SANDBOX_BY_MODE[mode || 'workspace'];
-  if (!sandbox) throw new Error(`Invalid mode: ${mode}`);
+  const selectedMode = mode === undefined ? 'workspace' : mode;
+  if (typeof selectedMode !== 'string' || !Object.hasOwn(SANDBOX_BY_MODE, selectedMode)) {
+    throw new Error(`Invalid mode: ${mode}`);
+  }
+  const sandbox = SANDBOX_BY_MODE[selectedMode];
   if (sandbox === 'danger-full-access') return ['--dangerously-bypass-approvals-and-sandbox'];
   return ['--sandbox', sandbox];
+}
+
+function selectInvocation({ model, mode, effort, profile }) {
+  if (profile !== undefined) {
+    if (typeof profile !== 'string' || !Object.hasOwn(PROFILES, profile)) {
+      throw new Error(`Invalid profile: ${profile}`);
+    }
+    if (model !== undefined || mode !== undefined) {
+      throw new Error('profile is mutually exclusive with model and mode');
+    }
+  }
+  if (model !== undefined && (typeof model !== 'string' || !model.trim())) {
+    throw new Error('model must be a non-empty string');
+  }
+  if (effort !== undefined && !EFFORTS.has(effort)) {
+    throw new Error(`Invalid effort: ${effort}`);
+  }
+  const preset = profile === undefined ? undefined : PROFILES[profile];
+  const selectedMode = preset?.mode ?? (mode === undefined ? 'workspace' : mode);
+  codexSandboxArgs(selectedMode);
+  return {
+    model: model === undefined ? (preset?.model ?? DEFAULT_MODEL) : model.trim(),
+    mode: selectedMode,
+    effort: effort ?? preset?.effort ?? DEFAULT_EFFORT,
+    modelSelection: preset ? 'profile' : model === undefined ? 'bridge_default' : 'explicit_request',
+  };
 }
 
 function extractSessionId(stderr, stdout) {
@@ -328,8 +361,15 @@ function buildToolResponse(result, { preserveRawText = false } = {}) {
   if (result.structuredContent) {
     response.structuredContent = result.structuredContent;
   }
+  for (const field of ['modelSelection', 'requestedModel', 'requestedEffort', 'actualModel', 'actualEffort']) {
+    if (result[field] !== undefined) {
+      response._meta ??= {};
+      response._meta[`gpt-bridge/${field}`] = result[field];
+    }
+  }
   if (result.sessionId) {
     response._meta = {
+      ...response._meta,
       'gpt-bridge/sessionId': result.sessionId,
       'gpt-bridge/continueWith': { sessionId: result.sessionId },
     };
@@ -337,7 +377,23 @@ function buildToolResponse(result, { preserveRawText = false } = {}) {
   return response;
 }
 
-async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext, ephemeral }) {
+async function runCodex({ prompt, model, mode, files, images, outputSchema, outputFile, systemPrompt, cwd, timeout, effort, sessionId, autoContext, ephemeral, profile }) {
+  let selection;
+  try {
+    selection = selectInvocation({ model, mode, effort, profile });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+  ({ model, mode, effort } = selection);
+  // CLI arguments identify the request, not the model actually used by a provider.
+  const modelMetadata = {
+    model: 'unknown',
+    modelSelection: selection.modelSelection,
+    requestedModel: model,
+    requestedEffort: effort,
+    actualModel: 'unknown',
+    actualEffort: 'unknown',
+  };
   const effectiveCwd = cwd || process.cwd();
   const sandboxArgs = codexSandboxArgs(mode);
 
@@ -534,7 +590,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
         resolve({
           success: true,
           result: resultText,
-          model: model || 'gpt-5.5',
+          ...modelMetadata,
           sessionId: detectedSessionId,
           structuredContent,
         });
@@ -562,7 +618,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 }
 
 const server = new Server(
-  { name: 'gpt-bridge', version: '2.0.0' },
+  { name: 'gpt-bridge', version: '2.0.1' },
   { capabilities: { tools: {} } }
 );
 
@@ -579,28 +635,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (!args.prompt || typeof args.prompt !== 'string') {
     return { content: [{ type: 'text', text: 'prompt is required' }], isError: true };
   }
-  if (args.mode && !SANDBOX_BY_MODE[args.mode]) {
-    return { content: [{ type: 'text', text: `Invalid mode: ${args.mode}` }], isError: true };
-  }
-
-  // Profile conflicts with model/mode
-  if (args.profile && (args.model || args.mode)) {
-    return { content: [{ type: 'text', text: 'profile is mutually exclusive with model and mode' }], isError: true };
-  }
-
-  // Resolve profile
-  let model = args.model;
-  let mode = args.mode;
-  if (args.profile) {
-    const p = PROFILES[args.profile];
-    model = p.model;
-    mode = p.mode;
-  }
-
   const result = await runCodex({
     prompt: args.prompt,
-    model,
-    mode,
+    model: args.model,
+    mode: args.mode,
+    profile: args.profile,
     files: args.files,
     images: args.images,
     outputSchema: args.outputSchema,
