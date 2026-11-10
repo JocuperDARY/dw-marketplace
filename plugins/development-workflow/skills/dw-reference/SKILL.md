@@ -22,6 +22,9 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 文档/注释 | 适用结构、链接或示例检查与 diff 复核；简单措辞可仅做 diff 复核 | [总纲路由](../development-workflow/SKILL.md#阶段路由模型) |
 | 只读审查 | 可定位发现、证据、影响与残余风险 | [验证](../dw-verification/SKILL.md) |
 | 任务交接 | 当前状态、已有授权、未完成事项、恢复来源与首项动作 | [交接](../dw-handoff/SKILL.md) |
+| 团队协作 | 责任范围、依赖、回传渠道与可核验结果；规模按实际需要 | [协作](../dw-collaboration/references/ordinary-collaboration.md) |
+| 进度汇报 | 已知状态、结果依据、实际限制与下一步 | [表述](../dw-writing/SKILL.md#让进度和决定可追溯) |
+| 只读监控台 | 来源与新鲜度、查询无副作用、失败与未知状态、适用的页面和数据检查 | [工具规范](../dw-tooling/references/readonly-dashboard.md)、[验证](../dw-verification/SKILL.md#观测与协作工具的验证) |
 
 风险升高时，按受影响的安全、数据、依赖、硬件、生产或恢复需求扩展检查。外部环境未运行的部分保持未运行或未验证；替代检查只支持其实际覆盖范围。
 
@@ -38,7 +41,9 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 本地基准、热点、实现选型及优化反模式 | [dw-optimization](../dw-optimization/SKILL.md) |
 | 必要文档、提交准备和普通任务收尾 | [dw-wrapup](../dw-wrapup/SKILL.md) |
 | 协作及资源异常处置的所有权、身份与恢复要求 | [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md) |
-| 用户说明、任务名称和代号 | [dw-writing](../dw-writing/SKILL.md) |
+| 团队职责、依赖、消息与普通宿主能力适配 | [ordinary-collaboration](../dw-collaboration/references/ordinary-collaboration.md) |
+| 只读监控台的数据、接口与服务维护 | [readonly-dashboard](../dw-tooling/references/readonly-dashboard.md) |
+| 用户说明、进度与决定、任务名称和代号 | [dw-writing](../dw-writing/SKILL.md) |
 
 ## 完成前简查
 

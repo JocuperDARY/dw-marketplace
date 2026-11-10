@@ -1,6 +1,6 @@
 ---
 name: dw-collaboration
-description: Use when a task may need multiple agents, model/effort routing, interactive or assignment-only collaboration, or strict ownership and resource lifecycle controls.
+description: Use when designing or running agent collaboration, defining roles, dependencies, communication and scheduling, selecting model/effort by live capabilities, or managing task-owned resources.
 ---
 
 # Multi-agent collaboration
@@ -12,6 +12,18 @@ Select intelligence and collaboration topology separately. Classify task type, d
 Use the live tool declarations to choose an available operation. Its first useful call supplies runtime evidence; an extra empty probe is only useful when a required capability is genuinely uncertain. Configuration remains declared evidence.
 
 Delegate only when permitted and useful. A bounded task needs an objective, inputs, file ownership, expected result, relevant limits, and a return channel. Record its result and remaining uncertainty in the existing task record. Ordinary reviews and text edits can use the host's native task tools.
+
+For role design, dependency planning, messages, recovery and advisory consultation, read
+[ordinary collaboration](references/ordinary-collaboration.md). Apply the shared
+[authorization and evidence rules](../development-workflow/SKILL.md#授权资源与内部前置条件):
+planning is not an automatic approval stop, resource contention is a scheduling
+problem, and retries retain actual costs and the remaining budget. A request to
+design a team is not permission to launch it.
+
+Keep the roster proportional to independent work and review needs. One person may
+cover coordination, implementation or integration; arrange independent review
+when the risk or project requires it. Do not require a fixed number of roles,
+rounds, model names, dashboards or persistent task records for every task.
 
 ## Optional managed resource protocol
 
@@ -57,6 +69,7 @@ Before a managed `COMPLETE`, require root acceptance, review, independent verifi
 Read only the reference needed:
 
 - Routing, probes, host fallbacks: [runtime-adapters.md](references/runtime-adapters.md)
+- Ordinary roles, communication and capability mapping: [ordinary-collaboration.md](references/ordinary-collaboration.md)
 - Run/child/resource transitions: [state-machines.md](references/state-machines.md)
 - Process, storage, progress, retry: [resource-lifecycle.md](references/resource-lifecycle.md)
 - Task tracker, loop exit, queue, work levels: [resource-control.md](references/resource-control.md)

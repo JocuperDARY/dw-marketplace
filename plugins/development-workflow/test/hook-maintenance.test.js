@@ -36,6 +36,55 @@ test('routing preserves explicit actions after explanatory or negated clauses', 
   assert.strictEqual(route('请分派两个子 agent 分别审查两个模块'), 'collaboration');
   assert.strictEqual(route('请盘点当前可用工具和 MCP 能力'), 'tooling');
 });
+test('progress requests route to reporting without treating script repairs as reports', () => {
+  for (const prompt of ['请汇报当前任务进度和剩余工作', '给我一份进度汇报', '现在进展如何？',
+    'Report current progress and blockers', 'Could you give me a status update on this task?']) {
+    const result = router.routePrompt(prompt);
+    assert.strictEqual(result && result.id, 'progress', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-writing']);
+  }
+  assert.strictEqual(route('请修复进度汇报脚本'), 'repair');
+});
+
+test('read-only dashboard work and team design use their maintained skill owners', () => {
+  for (const prompt of ['请搭建只读监控台', '实现一个只读 dashboard', '修改只读监控台的布局',
+    'Review this read-only monitoring dashboard', 'Build a read-only dashboard']) {
+    const result = router.routePrompt(prompt);
+    assert.strictEqual(result && result.id, 'dashboard', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-tooling', 'dw-verification']);
+  }
+  for (const prompt of ['设计多智能体协作分工', '整理团队角色和任务依赖',
+    'Please design roles for this multi-agent team']) {
+    assert.strictEqual(route(prompt), 'collaboration', prompt);
+  }
+});
+
+test('new routing ignores quoted, negated and explanatory requests', () => {
+  for (const prompt of ['不要汇报当前进度', '不要搭建只读监控台', 'Do not build a read-only dashboard',
+    '请解释进度汇报的含义', '解释什么是只读监控台', '多智能体是什么',
+    '"Build a read-only dashboard"', '> 请搭建只读监控台', '> Please design roles for this multi-agent team',
+    '读取 multi-agent-captain、transparent-progress 和 readonly-dashboard 三个 skill']) {
+    assert.strictEqual(route(prompt), null, prompt);
+  }
+  assert.strictEqual(route('> 请搭建只读监控台\n请汇报当前任务进度'), 'progress');
+  assert.strictEqual(route('$dw-writing 请搭建只读监控台'), 'explicit');
+});
+
+test('new routes match actionable clauses after context without routing quoted or negated clauses', () => {
+  const requests = [
+    ['日志已经看过了；请汇报当前任务进度', 'progress'],
+    ['The logs are attached; please report current progress and blockers', 'progress'],
+    ['数据源已确定；请搭建只读监控台', 'dashboard'],
+    ['Use the existing API; build a read-only dashboard', 'dashboard'],
+    ['需求如下；请设计多智能体协作分工', 'collaboration'],
+    ['Context is available; please design roles for this multi-agent team', 'collaboration'],
+    ['日志已经看过了；不要汇报当前任务进度', null],
+    ['数据源已确定\n> 请搭建只读监控台', null],
+    ['需求如下；"请设计多智能体协作分工"', null],
+  ];
+  for (const [prompt, expected] of requests) assert.strictEqual(route(prompt), expected, prompt);
+});
+
 test('all fourteen explicit skill targets precede heuristic routing', () => {
   const directories = fs.readdirSync(path.join(__dirname, '..', 'skills')).filter(name => fs.existsSync(path.join(__dirname, '..', 'skills', name, 'SKILL.md')));
   assert.strictEqual(directories.length, 14);
