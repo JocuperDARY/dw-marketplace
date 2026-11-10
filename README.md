@@ -6,7 +6,7 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.6.0 | 按任务风险调整计划、实现、验证、资源管理与交接治理，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.7.0 | 按任务风险调整计划、实现、验证、协作、进度说明与观测，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
 
@@ -51,6 +51,8 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 **deepseek-harness-bridge 0.2.0（历史）**：引入可选总预算与检查点编排，续接与重启不重置预算。[原版设计](./plugins/deepseek-harness-bridge/docs/budget-orchestration.md)保留供兼容性参考；新任务使用上方 1.0.0 契约。
 
 **deepseek-harness-bridge 0.1.3**：修复多条 Codex MCP 连接争用任务状态锁导致的握手失败。工具发现不再占锁；任务完成并确认清理后释放所有权，后续连接可取回结果或续接原会话，异常清理仍保留锁。支持指定现有 Node、Windows DPAPI 凭据和有界 Flash 委派；详见[安装与使用](./plugins/deepseek-harness-bridge/README.md)。离线验证、实际 Codex 加载和付费 Flash 执行分别记录。
+
+**5.7.0 协作、进度与监控规范整合**：保持现有 14 个 Skill，按职责吸收团队组织、可追溯汇报和只读监控的通用做法。[总纲](./plugins/development-workflow/skills/development-workflow/SKILL.md#授权资源与内部前置条件)统一授权、资源等待与证据复用；[协作](./plugins/development-workflow/skills/dw-collaboration/references/ordinary-collaboration.md)维护角色、依赖、通信和可选宿主适配；[表述](./plugins/development-workflow/skills/dw-writing/SKILL.md#让进度和决定可追溯)维护进度与决定；[工具](./plugins/development-workflow/skills/dw-tooling/references/readonly-dashboard.md)维护只读监控台。新增对应提示路由和引用资源的发布检查，不引入固定团队人数、反复审批、普遍哈希或新的运行服务。
 
 **5.6.0 Windows 进程监管**：[安装与退出语义](./plugins/development-workflow/skills/dw-collaboration/references/process-supervisor.md)说明如何为 stdio MCP 或有界命令接入实际启动监管。专属 Job 在创建时绑定，连接关闭、父进程退出、命令结束和显式超时均触发有界清理；监管器崩溃时由内核回收后代。空闲时等待内核事件，不扫描或按名称结束系统进程。此入口需要显式接入服务器的 command/args，安装插件本身不会接管已有进程。
 
@@ -98,7 +100,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.6.0 版本
+3. 将插件更新到当前的 5.7.0 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 

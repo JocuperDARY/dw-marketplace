@@ -95,6 +95,9 @@ function checkSkillStructure({ pluginRoot = DEFAULT_ROOT, routes = ROUTES, skill
       if (!inside(root, resolved)) add('LINK_OUTSIDE_PLUGIN', file, target);
       else if (!fs.existsSync(resolved)) add('LINK_MISSING', file, target);
       else if (!inside(root, fs.realpathSync(resolved))) add('LINK_OUTSIDE_PLUGIN', file, target);
+      // A valid source link can still break after installation if its target is
+      // omitted. Check tracked asset paths, excluding npm's automatic root files.
+      else if (files.includes(relative(resolved))) requirePackaged(relative(resolved));
     }
   }
   const hub = 'skills/development-workflow/SKILL.md';

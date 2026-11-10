@@ -24,9 +24,19 @@ const ROUTES = [
     context: 'Use `development-workflow:dw-writing` to make the wording clear while preserving facts, evidence, and the requested scope.',
   },
   {
+    id: 'progress', skills: ['dw-writing'],
+    pattern: /^(?:(?:汇报|报告)\s*(?:一下|当前|目前|本次|项目|任务|的|\s)*(?:进度|进展|状态)|(?:给我|提供)\s*(?:一份|一个)?\s*进度汇报|现在进展如何|目前做到哪里)|^(?:report\s+(?:(?:the|current|task|project)\s+)*(?:progress|status)|(?:give\s+me|provide)\s+(?:a\s+)?(?:status|progress)\s+update)\b/im,
+    context: 'Use `development-workflow:dw-writing` to report observed progress, evidence, limits and the next action. Respect the requested scope and verbosity; a status request does not authorize new work.',
+  },
+  {
     id: 'collaboration', skills: ['dw-collaboration'],
-    pattern: /(?:请|帮我|需要)?\s*(?:分派|委派|派出|安排|使用|启动)\s*(?:(?:\d+|[一二两三四五多几])\s*个?\s*)?(?:子\s*agents?|agents?|子代理|多智能体)|\b(?:delegate|assign|spawn)\s+(?:(?:\w+)\s+){0,3}(?:agents?|subagents?)\b/i,
-    context: 'Use `development-workflow:dw-collaboration` for the authorized delegation; use the host tools for ordinary assignments and enable persistent resource management only when needed.',
+    pattern: /(?:请|帮我|需要)?\s*(?:分派|委派|派出|安排|使用|启动)\s*(?:(?:\d+|[一二两三四五多几])\s*个?\s*)?(?:子\s*agents?|agents?|子代理|多智能体)|\b(?:delegate|assign|spawn)\s+(?:(?:\w+)\s+){0,3}(?:agents?|subagents?)\b|^(?:设计|规划|整理)\s*(?:多智能体|多代理|团队)\s*(?:协作|分工|角色|通信|任务依赖)|^design\s+(?:roles|communication|a\s+plan)\s+for\s+(?:(?:this|the|a)\s+)?multi[ -]agent\s+team\b/im,
+    context: 'Use `development-workflow:dw-collaboration` for team roles, dependencies and communication. Preserve planning-only requests; delegate only within existing permission. Use native host tools and enable persistent resource management only when needed.',
+  },
+  {
+    id: 'dashboard', skills: ['dw-tooling', 'dw-verification'],
+    pattern: /^(?:搭建|构建|创建|实现|修改|审查|检查)\s*(?:一个|这个|现有的|现有)?\s*只读\s*(?:监控台|仪表盘|dashboard)|^(?:build|create|implement|update|review|check)\s+(?:(?:a|the|this|our)\s+)?read[ -]only\s+(?:monitoring\s+)?dashboard\b/im,
+    context: 'Use `development-workflow:dw-tooling` and its read-only dashboard reference for data sources, freshness and read-only behavior, then `development-workflow:dw-verification` for applicable checks. Keep review-only requests read-only and reuse existing deployment authorization.',
   },
   {
     id: 'tooling', skills: ['dw-tooling'],
@@ -120,7 +130,7 @@ function isDefinitionQuestion(prompt) {
   return new RegExp(`^(?:${patterns.join('|')})$`, 'i').test(text);
 }
 function actionableText(prompt) {
-  const unquoted = prompt.replace(/```[\s\S]*?```|`[^`]*`|"[^"\n]*"|“[^”]*”|‘[^’]*’|(?<!\w)'[^'\n]*'(?!\w)/g, quoted => {
+  const unquoted = prompt.replace(/^\s*>[^\n]*$/gm, '').replace(/```[\s\S]*?```|`[^`]*`|"[^"\n]*"|“[^”]*”|‘[^’]*’|(?<!\w)'[^'\n]*'(?!\w)/g, quoted => {
     // Inline code commonly marks the skill name in an actual invocation. Keep
     // only a known identifier; quoted commands and fenced examples remain inert.
     if (!quoted.startsWith('`') || quoted.startsWith('```')) return ' ';

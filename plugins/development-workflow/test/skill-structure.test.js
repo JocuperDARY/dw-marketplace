@@ -65,6 +65,14 @@ const cases = [
     assert(issues.some(issue => issue.code === 'ASSET_NOT_PACKAGED' && issue.file === 'skills/dw-writing/SKILL.md'));
     assert(issues.some(issue => issue.code === 'ASSET_NOT_PACKAGED' && issue.file === 'hooks/session-start.js'));
   }],
+  ['requires a linked skill reference to be included in the package', ({ put, options }) => {
+    put('skills/dw-writing/SKILL.md', '---\nname: dw-writing\ndescription: Use when writing.\n---\n[Guide](references/progress.md)\n');
+    put('skills/dw-writing/references/progress.md', 'Report observed progress.\n');
+    put('package.json', { files: ['skills/development-workflow/', 'skills/dw-writing/SKILL.md', 'hooks/', 'rules/', 'test/'] });
+    assert(checkSkillStructure(options).issues.some(issue => issue.code === 'ASSET_NOT_PACKAGED' && issue.file === 'skills/dw-writing/references/progress.md'));
+    put('package.json', { files: ['skills/', 'hooks/', 'rules/', 'test/'] });
+    assert.strictEqual(checkSkillStructure(options).ok, true);
+  }],
   ['detects stale names, missing navigation and missing registered hooks', ({ put, options, root }) => {
     put('skills/dw-writing/SKILL.md', '---\nname: wrong-name\ndescription: Use when writing.\n---\n');
     put('skills/development-workflow/SKILL.md', '---\nname: development-workflow\ndescription: Use when coordinating work.\n---\n');
