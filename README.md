@@ -7,8 +7,10 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 | 插件 | 版本 | 说明 |
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.7.0 | 按任务风险调整计划、实现、验证、协作、进度说明与观测，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
-| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**gpt-bridge 2.0.1**：默认新请求和续接显式请求 `gpt-6.1-sol / medium`，替换旧模型预设；请求参数与实际模型分开记录，无法确认的实际值保持 `unknown`。修正无效预设/参数的处理，保留结构化输出与原有权限模式。验证采用替身 CLI 与本地 MCP 协议，真实安装和模型支持验证仍暂缓。
 
 **deepseek-harness-bridge 4.0.0**：增加持续子智能体的创建、通信、问答、并行等待和中断恢复，原始约束随多轮与压缩保留。协议 4 显式迁移并隔离旧写入端；通信与内容验收分开。见[持续子智能体](./plugins/deepseek-harness-bridge/docs/agent-communication.md)。
 
@@ -93,6 +95,24 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 claude mcp add gpt-bridge -- node \
   ~/.claude/plugins/cache/dw-marketplace/gpt-bridge/*/plugins/gpt-bridge/index.js
 ```
+
+### gpt-bridge 模型与权限
+
+省略 `model` 和 `profile` 时，bridge 显式发送 `gpt-6.1-sol` 与 `medium`，权限默认为 `workspace-write`；续接也使用这组默认值。显式 `model` 会去除首尾空格后传递，调用方负责核对该模型的使用授权及当前 Codex/provider 支持；显式 `effort` 可覆盖默认值或预设档位。bridge 保留 `low`、`medium`、`high` 三档，不探测或自动回退到其他模型。
+
+启用前需确认目标 Codex CLI/provider 支持所选配对。若其不支持默认值，在每次调用（包括续接）中显式传入已获授权且受支持的 `model` 与 `effort`；例如目标接口确实支持时使用 `model: "gpt-6.1-terra", effort: "low"`。无法确认支持范围时保留安装暂缓状态。不受支持的调用会返回错误并保留所捕获的具体错误信息，不改用宿主默认模型或尝试其他模型。本版本没有经过真实用户环境的兼容验收。
+
+| profile | 请求模型 | 默认 effort | 权限模式 |
+|---|---|---|---|
+| fast | gpt-6.1-terra | low | read-only |
+| balanced | gpt-6.1-sol | medium | workspace-write |
+| max | gpt-6-astra | high | danger-full-access，绕过审批与沙箱 |
+
+`profile` 与 `model`/`mode` 互斥。预设保留历史权限含义，使用 `max` 需已有对应权限授权；单独指定模型不会增加权限。例如，使用 Astra 并保留工作区权限可传 `model: "gpt-6-astra", effort: "high", mode: "workspace"`。自动调用仍须遵守调用方当前的允许模型与实际接口能力限制，显式模型参数不是绕过该限制的许可。
+
+工具成功结果的 `_meta` 包含 `gpt-bridge/modelSelection`（`bridge_default`、`profile` 或 `explicit_request`）、`requestedModel`、`requestedEffort`、`actualModel` 和 `actualEffort`，后四项使用同一 `gpt-bridge/` 前缀。当前 CLI 解析只确认请求参数，实际模型和档位均为 `unknown`；导出的 `runCodex` 也返回这些字段，旧 `model` 字段为 `unknown`。模型生成的文字、启动横幅和退出成功均不能替代 provider 身份证据。结构化 JSON 正文保持原样。
+
+在 `plugins/gpt-bridge` 内执行 `npm test` 可运行替身 CLI、参数构造与 MCP 协议回归，不发起真实模型调用。
 
 ## 从旧版迁移
 
