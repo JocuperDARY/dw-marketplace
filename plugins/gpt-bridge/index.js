@@ -598,7 +598,9 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
         const jsonErrors = extractJsonlErrors(progressEvents);
         const stderrClean = stderr
           .split('\n')
-          .filter(l => !l.includes('Tracing initialized') && !l.includes('OpenAI Codex') && !l.includes('---') && !l.includes('workdir:') && !l.includes('model:') && !l.includes('provider:') && !l.includes('approval:') && !l.includes('sandbox:') && !l.includes('reasoning') && !l.includes('session id:'))
+          // Match known preamble fields at the start of a line; error messages may
+          // mention model/provider/reasoning in the middle and must remain visible.
+          .filter(l => !/^\s*(?:Tracing initialized\b|OpenAI Codex\b|-{3,}\s*$|(?:workdir|model|provider|approval|sandbox|reasoning(?: effort| summaries)?|session id)\s*:)/i.test(l))
           .join('\n').trim();
         const combinedError = [stderrClean, ...jsonErrors].filter(Boolean).join('; ');
         if (timedOut) {

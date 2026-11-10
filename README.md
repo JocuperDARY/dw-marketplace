@@ -100,6 +100,8 @@ claude mcp add gpt-bridge -- node \
 
 省略 `model` 和 `profile` 时，bridge 显式发送 `gpt-6.1-sol` 与 `medium`，权限默认为 `workspace-write`；续接也使用这组默认值。显式 `model` 会去除首尾空格后传递，调用方负责核对该模型的使用授权及当前 Codex/provider 支持；显式 `effort` 可覆盖默认值或预设档位。bridge 保留 `low`、`medium`、`high` 三档，不探测或自动回退到其他模型。
 
+启用前需确认目标 Codex CLI/provider 支持所选配对。若其不支持默认值，在每次调用（包括续接）中显式传入已获授权且受支持的 `model` 与 `effort`；例如目标接口确实支持时使用 `model: "gpt-6.1-terra", effort: "low"`。无法确认支持范围时保留安装暂缓状态。不受支持的调用会返回错误并保留所捕获的具体错误信息，不改用宿主默认模型或尝试其他模型。本版本没有经过真实用户环境的兼容验收。
+
 | profile | 请求模型 | 默认 effort | 权限模式 |
 |---|---|---|---|
 | fast | gpt-6.1-terra | low | read-only |

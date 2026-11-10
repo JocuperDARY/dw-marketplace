@@ -87,6 +87,13 @@ process.stdin.on('end', () => {
     console.error('fake failure');
     process.exit(3);
   }
+  if (behavior === 'unsupported') {
+    fs.appendFileSync(${JSON.stringify(join(dir, 'attempts.txt'))}, 'attempt\\n');
+    console.error('OpenAI Codex test');
+    console.error('reasoning effort: medium');
+    console.error('Unsupported model: requested model or reasoning effort');
+    process.exit(2);
+  }
   if (behavior === 'json-error') {
     console.log(JSON.stringify({ type: 'error', message: 'jsonl schema failure' }));
     console.log(JSON.stringify({ type: 'turn.failed', error: { message: 'jsonl turn failure' } }));
@@ -179,6 +186,12 @@ for (const [profile, model, effort, sandbox] of [
     assert(!result.isError, result.content[0].text);
     const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
     assert.deepStrictEqual(argv.slice(1, 1 + sandbox.length), sandbox);
+    const permissionOptions = argv.flatMap((arg, index) => {
+      if (arg === '--sandbox' || arg === '-s') return [arg, argv[index + 1]];
+      if (arg.startsWith('--sandbox=') || arg === '--dangerously-bypass-approvals-and-sandbox') return [arg];
+      return [];
+    });
+    assert.deepStrictEqual(permissionOptions, sandbox, 'unexpected or repeated permission option');
     assert.strictEqual(argv[argv.indexOf('-m') + 1], model);
     assert.strictEqual(argv[argv.indexOf('-c') + 1], `model_reasoning_effort=${effort}`);
     assert.strictEqual(result._meta['gpt-bridge/modelSelection'], 'profile');
@@ -204,6 +217,7 @@ test('invalid selection arguments fail before direct or MCP Codex launch', async
     { effort: '' }, { effort: 'unsupported' }, { effort: 5 },
     { profile: '' }, { profile: '__proto__' }, { profile: 'constructor' },
     { profile: 'fast', model: '' }, { profile: 'fast', mode: '' },
+    { profile: 'fast', model: 'gpt-6.1-sol' }, { profile: 'fast', mode: 'workspace' },
   ];
   for (const args of invalid) {
     const cwd = makeDir();
@@ -215,6 +229,16 @@ test('invalid selection arguments fail before direct or MCP Codex launch', async
     assert.strictEqual(mcp.isError, true, JSON.stringify(args));
     assert.throws(() => readFileSync(join(cwd, 'argv.json')));
   }
+});
+
+test('unsupported provider selection returns its error without a model fallback', async () => {
+  const cwd = makeDir();
+  process.env.CODEX_PATH = makeFakeCodex(cwd, 'unsupported');
+  const result = await runCodex({ prompt: 'Reject unsupported selection.', cwd, timeout: 5 });
+  assert.strictEqual(result.success, false);
+  assert.match(result.error, /Unsupported model: requested model or reasoning effort/);
+  assert.doesNotMatch(result.error, /OpenAI Codex test|reasoning effort: medium/);
+  assert.deepStrictEqual(readFileSync(join(cwd, 'attempts.txt'), 'utf8').trim().split('\n'), ['attempt']);
 });
 
 test('model metadata is available without a session and preserves structured JSON', () => {
