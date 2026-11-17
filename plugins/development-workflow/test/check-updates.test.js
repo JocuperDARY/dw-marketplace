@@ -15,11 +15,12 @@ const test = (name, fn) => tests.push({ name, fn });
 const secret = 'fixture-secret-must-never-appear';
 
 function audit(overrides = {}, args = []) {
+  const fixturePlatform = overrides.platform || 'win32';
   const home = fs.mkdtempSync(path.join(root, 'home-'));
   const bin = path.join(home, 'bin');
   fs.mkdirSync(bin);
   for (const name of ['npm', 'python', 'claude', 'codex', 'codegraph', 'openspec']) {
-    fs.writeFileSync(path.join(bin, `${name}${process.platform === 'win32' ? '.cmd' : ''}`), 'fixture only');
+    fs.writeFileSync(path.join(bin, `${name}${fixturePlatform === 'win32' ? '.cmd' : ''}`), 'fixture only');
   }
   fs.mkdirSync(path.join(home, '.claude'));
   fs.writeFileSync(path.join(home, '.claude/settings.json'), '{}');
@@ -31,7 +32,12 @@ function audit(overrides = {}, args = []) {
   fs.writeFileSync(preloader, `
     const path = require('path');
     const fixture = ${JSON.stringify(overrides)};
+    // Only this isolated test child simulates the dispatch platform. All
+    // external commands below are fakes; production keeps its POSIX HOLD.
+    Object.defineProperty(process, 'platform', { value: ${JSON.stringify(fixturePlatform)} });
     require('os').homedir = () => ${JSON.stringify(home)};
+    let spawnCalls = 0;
+    process.on('exit', () => require('fs').writeFileSync(${JSON.stringify(path.join(home, 'spawn-count.json'))}, JSON.stringify(spawnCalls)));
     const fakeCommand = (command, args) => {
       const name = path.basename(command).replace(/\\.(cmd|exe)$/i, '');
       const target = name === 'cmd' ? path.basename(args[3]).replace(/\\.cmd$/i, '') : name;
@@ -51,6 +57,7 @@ function audit(overrides = {}, args = []) {
       return result;
     };
     require('child_process').spawnSync = (command, args, options) => {
+      spawnCalls += 1;
       if (args.some(value => String(value).endsWith('bounded-command-windows.ps1'))) {
         const request = JSON.parse(options.input);
         const native = fakeCommand(request.executable, request.args);
@@ -69,7 +76,8 @@ function audit(overrides = {}, args = []) {
   assert.strictEqual(result.status, 0, result.stderr);
   const files = fs.existsSync(reportDirectory) && fs.statSync(reportDirectory).isDirectory() ? fs.readdirSync(reportDirectory) : [];
   const report = files.length ? JSON.parse(fs.readFileSync(path.join(reportDirectory, files[0]), 'utf8')) : null;
-  return { result, report, home, files };
+  const spawnCalls = JSON.parse(fs.readFileSync(path.join(home, 'spawn-count.json'), 'utf8'));
+  return { result, report, home, files, spawnCalls };
 }
 
 test('CLI timeout is a warning in rows and summary, never a version', () => {
@@ -111,6 +119,60 @@ test('registry version fields are validated before reaching output', () => {
   assert.strictEqual(report.items.find(item => item.Category === 'Remote' && item.Component === '@openai/codex').Status, 'WARN');
   assert(!result.stdout.includes(secret));
   assert(!JSON.stringify(report).includes(secret));
+});
+
+test('npm outdated requires valid current and a strictly newer latest version', () => {
+  for (const [current, latest, status] of [
+    ['1.0.0', '2.0.0', 'UPDATE'],
+    ['2.0.0', '1.0.0', 'OK'],
+    ['2.0.0', '2.0.0', 'OK'],
+    [undefined, '2.0.0', 'WARN'],
+    ['invalid', '2.0.0', 'WARN'],
+    ['1.0.0', 'invalid', 'WARN'],
+  ]) {
+    const { report, spawnCalls } = audit({ remote: { status: 1, stdout: JSON.stringify({ '@openai/codex': { current, latest } }) } });
+    assert(spawnCalls > 0, 'parsing assertions must reach the fake command backend');
+    const row = report.items.find(item => item.Category === 'Remote' && item.Component === '@openai/codex');
+    assert.strictEqual(row.Status, status, JSON.stringify({ current, latest, row }));
+    assert.strictEqual(report.summary.has_update, status === 'UPDATE');
+  }
+});
+
+test('POSIX policy holds without invoking an external command', () => {
+  const { report, spawnCalls } = audit({ platform: 'linux' });
+  assert.strictEqual(spawnCalls, 0);
+  const row = report.items.find(item => item.Component === 'npm outdated');
+  assert.strictEqual(row.Status, 'WARN');
+  assert(row.Detail.startsWith('HOLD: owned descendant cleanup is unverified'));
+  assert(!report.items.some(item => item.Status === 'UPDATE'));
+});
+
+test('present malformed registry package entries warn instead of implying no update', () => {
+  for (const item of [null, false, 0, '', true, 1, '1.0.0', [], ['1.0.0'], {}]) {
+    const { report } = audit({ remote: { status: 1, stdout: JSON.stringify({ '@openai/codex': item }) } });
+    const row = report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex');
+    assert.strictEqual(row.Status, 'WARN', JSON.stringify({ item, row }));
+    assert.strictEqual(report.summary.has_update, false);
+  }
+  const { report } = audit({ remote: { status: 0, stdout: '{}' } });
+  assert.strictEqual(report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex').Status, 'OK');
+});
+
+test('registry current and latest require strings without nested value coercion', () => {
+  for (const [current, latest] of [
+    [['1.0.0'], ['2.0.0']],
+    [['1.0.0'], '2.0.0'],
+    ['1.0.0', ['2.0.0']],
+    [1.2, '2.0.0'],
+    ['1.0.0', 2.2],
+    [{ version: '1.0.0' }, '2.0.0'],
+    ['1.0.0', { version: '2.0.0' }],
+  ]) {
+    const { report } = audit({ remote: { status: 1, stdout: JSON.stringify({ '@openai/codex': { current, latest } }) } });
+    const row = report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex');
+    assert.strictEqual(row.Status, 'WARN', JSON.stringify({ current, latest, row }));
+    assert.strictEqual(report.summary.has_update, false);
+  }
 });
 
 test('MCP configuration comes from supported configuration inventory without live claims', () => {

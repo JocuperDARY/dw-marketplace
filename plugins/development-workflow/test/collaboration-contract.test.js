@@ -243,7 +243,7 @@ const routeLanes = [
 ];
 // Synthetic host policy only; these mappings never call a model or a provider.
 const trustedLanePolicyResolver = ({ lane }) => ({
-  canonicalModel: ({ 'lane-light': 'gpt-6-luna', 'lane-standard': 'gpt-6.1-sol',
+  canonicalModel: ({ 'lane-light': 'gpt-6.1-terra', 'lane-standard': 'gpt-6.1-sol',
     'lane-engineering': 'gpt-6.1-sol', 'lane-professional': 'gpt-6.1-sol',
     'lane-assurance': 'gpt-6-astra' })[lane.lane_id] || lane.lane_id,
   supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -268,7 +268,7 @@ const lowRiskRoute = api.selectRoute(routeLanes, lowRiskAxes, routeMatrix, route
 for (const model of ['gpt-5.5', ' GPT-5.6-legacy ', 'gpt-6-sol', 'gpt-6-sol-fallback']) {
   const lane = { ...routeLanes[0], lane_id: model };
   assert.strictEqual(api.selectRoute([lane], lowRiskAxes, routeMatrix, routePolicy({
-    trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6-luna', supportedEfforts: ['low'] }),
+    trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['low'] }),
   })).status, 'HOLD_ROUTE_UNAVAILABLE', 'a forbidden literal cannot be rescued by alias mapping');
   assert.strictEqual(api.selectRoute([routeLanes[0]], lowRiskAxes, routeMatrix, routePolicy({
     trustedLanePolicyResolver: () => ({ canonicalModel: model, supportedEfforts: ['low'] }),
@@ -277,16 +277,17 @@ for (const model of ['gpt-5.5', ' GPT-5.6-legacy ', 'gpt-6-sol', 'gpt-6-sol-fall
 for (const resolver of [undefined, () => true, () => { throw new Error('synthetic refusal'); },
   () => Promise.reject(new Error('synthetic asynchronous refusal')),
   () => ({ canonicalModel: 'unknown-alias', supportedEfforts: ['low'] }),
-  () => ({ canonicalModel: 'gpt-6-luna', supportedEfforts: ['high'] }),
-  () => ({ canonicalModel: 'gpt-6-luna', supportedEfforts: ['unspecified'] })]) {
+  () => ({ canonicalModel: ' GPT-6-LUNA ', supportedEfforts: ['low'] }),
+  () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['high'] }),
+  () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['unspecified'] })]) {
   assert.strictEqual(api.selectRoute([routeLanes[0]], lowRiskAxes, routeMatrix,
     routePolicy({ trustedLanePolicyResolver: resolver })).status, 'HOLD_ROUTE_UNAVAILABLE');
 }
 const forbiddenFallback = { ...routeLanes[1], lane_id: 'gpt-5.6', capability_class: 'light', supported_efforts: ['low'] };
 assert.deepStrictEqual(api.selectRoute([routeLanes[0], forbiddenFallback], lowRiskAxes, routeMatrix,
-  routePolicy({ trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6-luna', supportedEfforts: ['low'] }) })).fallbacks, []);
+  routePolicy({ trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['low'] }) })).fallbacks, []);
 assert.strictEqual(lowRiskRoute.status, 'SELECTED');
-assert.strictEqual(lowRiskRoute.selected_model, 'gpt-6-luna');
+assert.strictEqual(lowRiskRoute.selected_model, 'gpt-6.1-terra');
 assert.strictEqual(lowRiskRoute.selected_effort, 'low');
 assert.strictEqual(Object.hasOwn(lowRiskRoute, 'actual_model'), false, 'route selection must never invent actual model metadata');
 assert.strictEqual(
@@ -543,7 +544,7 @@ authorizedPlan.topology = 'single';
 authorizedPlan.capability_matrix_ref = { artifact_id: routeMatrix.artifact_id, content_sha256: routeMatrix.content_sha256 };
 authorizedPlan.phases[0].phase_kind = 'diagnosis';
 authorizedPlan.phases[0].route = {
-  requested_model: 'unspecified', requested_effort: 'unspecified', selected_model: 'gpt-6-luna', selected_effort: 'low',
+  requested_model: 'unspecified', requested_effort: 'unspecified', selected_model: 'gpt-6.1-terra', selected_effort: 'low',
   selection_evidence: 'available-light', allowed_fallbacks: [],
 };
 const authorizedPlanOptions = bindPlanAuthorization(authorizedPlan);

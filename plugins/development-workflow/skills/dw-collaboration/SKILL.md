@@ -25,6 +25,8 @@ cover coordination, implementation or integration; arrange independent review
 when the risk or project requires it. Do not require a fixed number of roles,
 rounds, model names, dashboards or persistent task records for every task.
 
+For incremental work, use the [work-package guidance](../dw-planning/references/method-integration.md#增量工作包): share exact interface decisions and evidence locations, then verify the returned change against its acceptance criteria. Related failures may share a cause; establish independence before splitting them. A narrower fix review checks the original findings and new risks in the fix, with review depth determined by the remaining uncertainty.
+
 ## Optional managed resource protocol
 
 For a Windows stdio MCP server or session-owned command, the opt-in [process supervisor](references/process-supervisor.md) supplies actual atomic Job Object ownership, transport/parent exit handling and bounded teardown. Build once and explicitly route the chosen command through its executable. Keep quiet connected sessions alive; never replace ownership with idle-time or process-name heuristics. This narrow launch path does not implement the full manager adapter or adopt pre-existing processes.

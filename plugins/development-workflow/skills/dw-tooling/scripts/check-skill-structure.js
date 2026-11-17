@@ -5,6 +5,19 @@ const fs = require('fs');
 const path = require('path');
 const { ROUTES, SKILL_IDS } = require('../../../hooks/skill-router.js');
 const DEFAULT_ROOT = path.resolve(__dirname, '../../..');
+const COVERAGE_CATALOG = 'skills/dw-tooling/references/automation-coverage.json';
+// Include native and other source languages when new implementations are added.
+// Data, documentation and compiled binaries are not production source files.
+const SOURCE_EXTENSION = /\.(?:[cm]?js|jsx|[cm]?ts|tsx|ps1|psm1|cs|fs|fsx|py|sh|bash|c|cc|cpp|cxx|h|hpp|hxx|java|go|rs|rb|pl|php|swift|kt|kts|dart)$/i;
+
+function isProductionSource(file) {
+  return /^(?:hooks\/|skills\/[^/]+\/scripts\/).+/.test(file) && SOURCE_EXTENSION.test(file);
+}
+
+function isCanonicalRelativePath(value) {
+  return typeof value === 'string' && value.length > 0 && !/[\\:\0]/.test(value)
+    && !value.startsWith('/') && value.split('/').every(part => part && part !== '.' && part !== '..');
+}
 
 function inside(root, target) {
   const relative = path.relative(root, target);
@@ -132,7 +145,7 @@ function checkSkillStructure({ pluginRoot = DEFAULT_ROOT, routes = ROUTES, skill
   }
   const all = manifest && manifest.suites && manifest.suites.all;
   if (!all || !Array.isArray(all.tests)) add('ALL_SUITE_MISSING', 'test/test-manifest.json', 'An explicit complete suite is required');
-  const registeredTests = new Set((all && Array.isArray(all.tests) ? all.tests : []).flatMap(test => test.args || []).filter(arg => typeof arg === 'string' && arg.endsWith('.test.js')));
+  const registeredTests = new Set((all && Array.isArray(all.tests) ? all.tests : []).flatMap(test => test && Array.isArray(test.args) ? test.args : []).filter(arg => typeof arg === 'string' && arg.endsWith('.test.js')));
   const testFiles = files.filter(file => /^test\/[^/]+\.test\.js$/.test(file));
   for (const file of testFiles) {
     if (!registeredTests.has(file)) add('TEST_NOT_REGISTERED', file, 'Missing from the all suite');
@@ -142,11 +155,53 @@ function checkSkillStructure({ pluginRoot = DEFAULT_ROOT, routes = ROUTES, skill
     if (!testFiles.includes(file)) add('REGISTERED_TEST_MISSING', 'test/test-manifest.json', file);
   }
   const scripts = files.filter(file => /^(?:hooks\/|skills\/[^/]+\/scripts\/).+\.(?:js|ps1)$/.test(file));
-  scripts.forEach(requirePackaged);
+  const runtimeSources = files.filter(isProductionSource).sort();
+  runtimeSources.forEach(requirePackaged);
+  requirePackaged(COVERAGE_CATALOG);
+  const coverage = json(COVERAGE_CATALOG);
+  const validCatalog = coverage && typeof coverage === 'object' && !Array.isArray(coverage)
+    && coverage.schemaVersion === 1 && Array.isArray(coverage.entries);
+  if (!validCatalog) add('COVERAGE_CATALOG_INVALID', COVERAGE_CATALOG, 'Expected schemaVersion 1 and an entries array');
+  const covered = new Set();
+  const enforcementModes = new Set(['advisory', 'validation', 'opt-in-runtime']);
+  for (const [index, entry] of (validCatalog ? coverage.entries : []).entries()) {
+    const label = `entries[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: expected an object`);
+      continue;
+    }
+    if (!isCanonicalRelativePath(entry.path)) {
+      add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: expected a canonical relative source path`);
+    } else {
+      if (covered.has(entry.path)) add('COVERAGE_SOURCE_DUPLICATE', COVERAGE_CATALOG, entry.path);
+      covered.add(entry.path);
+      if (!runtimeSources.includes(entry.path)) add('COVERAGE_SOURCE_MISSING', COVERAGE_CATALOG, entry.path);
+    }
+    if (typeof entry.owner !== 'string' || !skills.includes(entry.owner) || !registered.includes(entry.owner)) {
+      add('COVERAGE_OWNER_MISSING', COVERAGE_CATALOG, `${label}: owner must name a shipped, registered skill`);
+    }
+    if (!enforcementModes.has(entry.enforcement)) add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: unknown enforcement`);
+    if (typeof entry.limits !== 'string' || !entry.limits.trim()) add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: limits are required`);
+    if (!Array.isArray(entry.tests) || entry.tests.length === 0) {
+      add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: at least one registered test is required`);
+      continue;
+    }
+    for (const test of entry.tests) {
+      if (!isCanonicalRelativePath(test)) {
+        add('COVERAGE_ENTRY_INVALID', COVERAGE_CATALOG, `${label}: invalid test path`);
+        continue;
+      }
+      if (!testFiles.includes(test)) add('COVERAGE_TEST_MISSING', COVERAGE_CATALOG, `${label}: ${test}`);
+      if (!registeredTests.has(test)) add('COVERAGE_TEST_NOT_REGISTERED', COVERAGE_CATALOG, `${label}: ${test}`);
+    }
+  }
+  for (const file of runtimeSources) {
+    if (!covered.has(file)) add('SOURCE_NOT_CATALOGED', file, 'Missing implementation/owner/test mapping');
+  }
   return {
     ok: issues.length === 0,
-    scope: 'Read-only metadata, links, declared package assets, routing targets and test registration; not runtime or host acceptance',
-    skills, scripts, testFiles, issues,
+    scope: 'Read-only metadata, links, declared package assets, routing targets, source coverage and test registration; not executed test coverage, runtime or host acceptance',
+    skills, scripts, runtimeSources, testFiles, issues,
   };
 }
 
@@ -158,7 +213,7 @@ if (require.main === module) {
     const result = checkSkillStructure();
     if (process.argv.includes('--json')) console.log(JSON.stringify(result, null, 2));
     else {
-      console.log(`${result.ok ? 'PASS' : 'FAIL'}: ${result.skills.length} skills, ${result.scripts.length} scripts, ${result.testFiles.length} test files`);
+      console.log(`${result.ok ? 'PASS' : 'FAIL'}: ${result.skills.length} skills, ${result.scripts.length} scripts, ${result.runtimeSources.length} runtime sources, ${result.testFiles.length} test files`);
       result.issues.forEach(issue => console.log(`${issue.code}: ${issue.file}: ${issue.detail}`));
       console.log(result.scope);
     }

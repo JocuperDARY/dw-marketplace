@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.7.0 | 按任务风险调整计划、实现、验证、协作、进度说明与观测，含 Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.8.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.8.0**：吸收 grill-me/grilling 与本地 Superpowers 的方案追问、反例测试、因果调试及技术评审方法，按现有 Skill 职责维护。新增[自动化覆盖清单](./plugins/development-workflow/skills/dw-tooling/references/automation-coverage.md)，明确规则、库实现、执行入口和真实验证的区别；结构检查覆盖原生源码与测试映射。保留普通流程的已有授权和检查复用，真实宿主安装与验证继续暂缓。
 
 **gpt-bridge 2.0.1**：默认新请求和续接显式请求 `gpt-6.1-sol / medium`，替换旧模型预设；请求参数与实际模型分开记录，无法确认的实际值保持 `unknown`。修正无效预设/参数的处理，保留结构化输出与原有权限模式。验证采用替身 CLI 与本地 MCP 协议，真实安装和模型支持验证仍暂缓。
 

@@ -156,10 +156,13 @@ function checkRemote(deps) {
     if (!data || data.error) return;
   }
   for (const pkg of packages) {
+    const hasItem = Object.prototype.hasOwnProperty.call(data, pkg);
     const item = data[pkg];
-    const latest = item && safeVersion(item.latest);
-    if (latest) add('Remote', pkg, 'UPDATE', `installed ${safeVersion(item.current) || 'unknown'}; latest ${latest}`);
-    else if (item) add('Remote', pkg, 'WARN', 'registry package version invalid');
+    const validItem = hasItem && item !== null && typeof item === 'object' && !Array.isArray(item);
+    const current = validItem && typeof item.current === 'string' && safeVersion(item.current);
+    const latest = validItem && typeof item.latest === 'string' && safeVersion(item.latest);
+    if (current && latest) add('Remote', pkg, compareVersion(current, latest) < 0 ? 'UPDATE' : 'OK', `installed ${current}; latest ${latest}`);
+    else if (hasItem) add('Remote', pkg, 'WARN', 'registry package entry or version invalid');
     else if (uncertain) add('Remote', pkg, 'INFO', 'registry response uncertain; package status unavailable');
     else if (npmVersion(deps, pkg)) add('Remote', pkg, 'OK', `installed v${npmVersion(deps, pkg)}; not listed as outdated`);
     else add('Remote', pkg, 'MISSING', 'not installed globally');

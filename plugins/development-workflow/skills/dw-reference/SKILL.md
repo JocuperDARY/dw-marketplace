@@ -43,6 +43,7 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 协作及资源异常处置的所有权、身份与恢复要求 | [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md) |
 | 团队职责、依赖、消息与普通宿主能力适配 | [ordinary-collaboration](../dw-collaboration/references/ordinary-collaboration.md) |
 | 只读监控台的数据、接口与服务维护 | [readonly-dashboard](../dw-tooling/references/readonly-dashboard.md) |
+| 方案追问、反例测试、增量工作包与外部方法取舍 | [method-integration](../dw-planning/references/method-integration.md) |
 | 用户说明、进度与决定、任务名称和代号 | [dw-writing](../dw-writing/SKILL.md) |
 
 ## 完成前简查

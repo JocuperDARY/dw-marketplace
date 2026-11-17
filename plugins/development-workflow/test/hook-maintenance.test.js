@@ -210,6 +210,17 @@ for (const linkedRoot of ['rules', 'rules-store', 'rules-archive']) {
   });
 }
 
+test('design challenge requests route to bounded planning without treating examples as commands', () => {
+  for (const prompt of ['请质询这个方案', '背景已经给出。压力测试这份设计', 'Grill me about this plan', 'Stress-test my design', 'Challenge this decision']) {
+    const result = router.routePrompt(prompt);
+    assert(result && result.id === 'design-challenge', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-planning']);
+  }
+  for (const prompt of ['不要质询这个方案', 'Explain stress-test my design', '> Grill me about this plan', '翻译“质询这个方案”']) {
+    assert.strictEqual(router.routePrompt(prompt), null, prompt);
+  }
+});
+
 let failures = 0;
 try {
   for (const { name, fn } of tests) {

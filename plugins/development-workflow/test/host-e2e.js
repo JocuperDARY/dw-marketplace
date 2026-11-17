@@ -21,6 +21,18 @@ function isUtc(value) {
   date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3])); date.setUTCHours(Number(match[4]), Number(match[5]), Number(match[6]), 0);
   return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
 }
+function compareUtc(left, right) {
+  // Inputs have passed isUtc. Fixed-width UTC seconds sort chronologically;
+  // compare the entire decimal fraction as digits, preserving submillisecond
+  // precision and treating omitted/trailing zero digits as equal.
+  const leftSeconds = left.slice(0, 19); const rightSeconds = right.slice(0, 19);
+  if (leftSeconds !== rightSeconds) return leftSeconds < rightSeconds ? -1 : 1;
+  const leftFraction = left[19] === '.' ? left.slice(20, -1) : '';
+  const rightFraction = right[19] === '.' ? right.slice(20, -1) : '';
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const a = leftFraction.padEnd(width, '0'); const b = rightFraction.padEnd(width, '0');
+  return a === b ? 0 : a < b ? -1 : 1;
+}
 function canonicalize(value) {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value);
@@ -82,10 +94,14 @@ function validateProbe(probe, receipt, policy, now) {
   validateEvent(probe.cleanup, { name: 'cleanup', role: 'root', link: probe.collect.evidence_id }, probe.nonce);
   const events = [probe.request, probe.ack, probe.collect, probe.independent_message, probe.liveness, probe.cleanup];
   if (new Set(events.map((event) => event.evidence_id)).size !== events.length) fail('PROBE_EVIDENCE_ID_DUPLICATE');
-  if (!events.every((event, index) => index === 0 || Date.parse(event.observed_at) >= Date.parse(events[index - 1].observed_at))) fail('PROBE_TIME_NOT_MONOTONIC');
-  if (!isUtc(probe.observed_at) || !isUtc(probe.expires_at) || Date.parse(probe.observed_at) > Date.parse(now) || Date.parse(probe.expires_at) <= Date.parse(now) || probe.expires_at !== policy.expiry_by_host[receipt.host].expires_on) fail('PROBE_EXPIRED');
+  if (!events.every((event, index) => index === 0 || compareUtc(event.observed_at, events[index - 1].observed_at) >= 0)) fail('PROBE_TIME_NOT_MONOTONIC');
+  if (!isUtc(probe.observed_at) || !isUtc(probe.expires_at) || compareUtc(probe.observed_at, now) > 0 || compareUtc(probe.expires_at, now) <= 0 || compareUtc(probe.expires_at, policy.expiry_by_host[receipt.host].expires_on) !== 0) fail('PROBE_EXPIRED');
+  // A monotonic sequence may still describe events after its own observation.
+  // Every event must already exist when the probe is observed and validated.
+  if (events.some((event) => compareUtc(event.observed_at, probe.observed_at) > 0 || compareUtc(event.observed_at, now) > 0)) fail('PROBE_EVENT_OUTSIDE_WINDOW');
   if (!exactKeys(probe.verifier, ['actor_id', 'evidence_refs']) || typeof probe.verifier.actor_id !== 'string' || !probe.verifier.actor_id || !strings(probe.verifier.evidence_refs) || [probe.producer.actor_id, probe.producer.adapter_id, probe.request.producer_id, probe.ack.producer_id, probe.collect.producer_id, probe.independent_message.producer_id, probe.liveness.producer_id, probe.cleanup.producer_id].includes(probe.verifier.actor_id)) fail('PROBE_VERIFIER_NOT_INDEPENDENT');
   const routeMetadata = validateRouteMetadata(probe.route_metadata, receipt);
+  if (routeMetadata && (compareUtc(probe.route_metadata.observed_at, probe.observed_at) > 0 || compareUtc(probe.route_metadata.observed_at, now) > 0)) fail('ROUTE_METADATA_OUTSIDE_WINDOW');
   if (receipt.route_attestation === 'VERIFIED' && !routeMetadata) fail('ROUTE_METADATA_REQUIRED');
   if (receipt.route_attestation === 'UNVERIFIED' && (routeMetadata || receipt.actual_model !== 'unknown' || receipt.actual_effort !== 'unknown')) fail('ROUTE_ATTESTATION_INVALID');
 }

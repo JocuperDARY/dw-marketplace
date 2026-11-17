@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "scope": "Inventory of production source under hooks/ and skills/*/scripts/. Test references identify registered checks, not evidence that they ran or that every behavior is covered. Enforcement describes the implementation boundary; it does not activate an adapter or establish host acceptance.",
+  "entries": [
+    {
+      "path": "hooks/rules-migrate.js",
+      "owner": "development-workflow",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/hook-maintenance.test.js"],
+      "limits": "Explicit rules migration utility; backups and boundary checks do not authorize migration or establish host installation."
+    },
+    {
+      "path": "hooks/session-rules.js",
+      "owner": "development-workflow",
+      "enforcement": "advisory",
+      "tests": ["test/hook-maintenance.test.js"],
+      "limits": "Bounded rule discovery and context assembly; instructions do not enforce subsequent agent actions."
+    },
+    {
+      "path": "hooks/session-start.js",
+      "owner": "development-workflow",
+      "enforcement": "advisory",
+      "tests": ["test/hooks.test.js", "test/hook-maintenance.test.js"],
+      "limits": "Emits session and repository context when the host invokes the hook; no task execution or host-installation guarantee."
+    },
+    {
+      "path": "hooks/skill-router.js",
+      "owner": "development-workflow",
+      "enforcement": "advisory",
+      "tests": ["test/hook-maintenance.test.js", "test/runtime-v5.test.js"],
+      "limits": "Suggests registered skills from prompt signals; routing text is not an execution gate."
+    },
+    {
+      "path": "hooks/task-utils.js",
+      "owner": "development-workflow",
+      "enforcement": "advisory",
+      "tests": ["test/hooks.test.js"],
+      "limits": "Shared hook context and output helpers; no independent runtime supervision."
+    },
+    {
+      "path": "hooks/tool-inventory.js",
+      "owner": "dw-tooling",
+      "enforcement": "advisory",
+      "tests": ["test/hook-maintenance.test.js"],
+      "limits": "Discovers local tool metadata within scan bounds; inventory is not tool availability or successful invocation evidence."
+    },
+    {
+      "path": "skills/check-updates/scripts/bounded-command-windows.ps1",
+      "owner": "check-updates",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/check-updates.test.js"],
+      "limits": "Windows command-lifetime helper used by the update checker; only owns its launched process tree, not general host tasks."
+    },
+    {
+      "path": "skills/check-updates/scripts/check-updates.js",
+      "owner": "check-updates",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/check-updates.test.js"],
+      "limits": "Reports update information when invoked; does not install updates or verify all host integrations."
+    },
+    {
+      "path": "skills/check-updates/scripts/check-updates.ps1",
+      "owner": "check-updates",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/hooks.test.js"],
+      "limits": "PowerShell entry point for the update checker; wrapper checks do not prove live registry/network availability."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/build-process-supervisor.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/process-supervisor.test.js"],
+      "limits": "Explicit Windows C# build helper; source inclusion or test registration does not prove a built binary or active supervisor."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/canonical-json.js",
+      "owner": "dw-collaboration",
+      "enforcement": "validation",
+      "tests": ["test/collaboration-receipt.test.js", "test/resource-control.test.js"],
+      "limits": "Canonical snapshots and digests validate represented data; they do not prove the truth of runtime observations."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/contracts.js",
+      "owner": "dw-collaboration",
+      "enforcement": "validation",
+      "tests": ["test/collaboration-contract.test.js", "test/resource-control.test.js"],
+      "limits": "Validates collaboration artifact structure and cross-field contracts; accepted artifacts do not activate a platform adapter."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/failure-loop-guard.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/failure-loop-guard-hardening.test.js", "test/resource-control.test.js"],
+      "limits": "Checks retry and failure-loop state for callers using this library; cannot gate bypassing callers or host-wide work."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/identity-support-v2.js",
+      "owner": "dw-collaboration",
+      "enforcement": "validation",
+      "tests": ["test/identity-support-v2.test.js"],
+      "limits": "Validates identity and support claims; validation alone does not observe an operating-system process or establish cleanup authority."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/recovery-store.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/recovery-store.test.js"],
+      "limits": "Recovery persistence for explicit callers; stored records do not establish external side effects or universal crash recovery."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/resource-aware-queue.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/resource-aware-queue.test.js"],
+      "limits": "Library-level admission and state checks only; no automatic host task interception or completed production adapter implied."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/state-machines.js",
+      "owner": "dw-collaboration",
+      "enforcement": "validation",
+      "tests": ["test/collaboration-state.test.js", "test/identity-support-v2.test.js"],
+      "limits": "Checks modeled transitions; a valid transition is not evidence that an external action occurred."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/task-resource-manager.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/task-resource-manager.test.js", "test/collaboration-safety.test.js"],
+      "limits": "Finite manager API requires caller-supplied adapter, identity and authorization; synthetic tests do not establish a deployed production adapter."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/task-resource-tracker.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/resource-control.test.js", "test/identity-support-v2.test.js"],
+      "limits": "Tracks registered resources and close evidence for explicit callers; unregistered resources and unsupported hosts remain outside its scope."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/process-supervisor/DwProcessSupervisor.cs",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/process-supervisor.test.js"],
+      "limits": "Windows Job Object supervisor for explicitly launched children; registration does not prove compilation, installation, active use or non-Windows support."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/validate-artifact.js",
+      "owner": "dw-collaboration",
+      "enforcement": "validation",
+      "tests": ["test/collaboration-contract.test.js", "test/collaboration-state.test.js"],
+      "limits": "CLI artifact validation only; a successful contract check does not execute a plan or certify runtime outcomes."
+    },
+    {
+      "path": "skills/dw-tooling/scripts/check-skill-structure.js",
+      "owner": "dw-tooling",
+      "enforcement": "validation",
+      "tests": ["test/skill-structure.test.js"],
+      "limits": "Read-only source, package-declaration, link and registration checks; no behavioral coverage measurement, native compilation or host acceptance."
+    }
+  ]
+}
