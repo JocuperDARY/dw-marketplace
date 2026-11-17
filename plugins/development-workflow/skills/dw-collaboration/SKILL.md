@@ -29,7 +29,7 @@ For incremental work, use the [work-package guidance](../dw-planning/references/
 
 ## Optional managed resource protocol
 
-For a Windows stdio MCP server or session-owned command, the opt-in [process supervisor](references/process-supervisor.md) supplies actual atomic Job Object ownership, transport/parent exit handling and bounded teardown. Build once and explicitly route the chosen command through its executable. Keep quiet connected sessions alive; never replace ownership with idle-time or process-name heuristics. This narrow launch path does not implement the full manager adapter or adopt pre-existing processes.
+For a Windows stdio MCP server or session-owned command, the opt-in [process supervisor](references/process-supervisor.md) supplies atomic Job Object ownership, transport/parent exit handling and bounded teardown. Its managed command backend also powers the [Windows command adapter](references/windows-command-adapter.md) and the test runner. Choose the direct backend for ordinary bounded commands and the manager adapter for tasks needing persisted resource records. Build explicitly; keep quiet connected stdio sessions alive and use the command's declared deadline. Neither path adopts pre-existing processes.
 
 The detailed plan, ledger, probe and schema requirements below apply when explicitly using the executable resource manager or implementing its protocol. Choose this mode for work that actually requires persisted process identity, resource recovery, or a verifiable lifecycle. Its API requirements remain mandatory for that mode.
 
@@ -64,13 +64,14 @@ For executable task-resource tracking, repeated-failure loop exit, work levels, 
 
 Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and confirm that the operation is covered by current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
 
-The package supplies the manager, tracker, store and validators, plus synthetic test adapters. It does not ship a production Windows, Linux, Claude Code, Codex or Grok OS adapter. Real observation, bounded action timeout, graceful shutdown, exact termination, path isolation and absence verification require a separately implemented trusted host adapter. A manager test passing does not prove those host capabilities.
+The package supplies the manager, tracker, store and validators, plus a Windows command adapter and synthetic protocol fixtures. The command adapter binds observations and actions to retained native process/Job handles, enforces a finite deadline and output cap, and supports commands without temporary-root management. Linux, temporary-storage adapters, host agent messaging and installed Claude/Codex/Grok integration remain separate work. Read the adapter's supported inputs and failure states before use; local fixture results do not establish installed-host acceptance.
 
 Before a managed `COMPLETE`, require root acceptance, review, independent verification for every required phase as defined by the executable protocol, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Continue later Git or external operations under the user's existing authorization; completing a managed task adds no permissions.
 
 Read only the reference needed:
 
 - Routing, probes, host fallbacks: [runtime-adapters.md](references/runtime-adapters.md)
+- Windows command execution, trust and limits: [windows-command-adapter.md](references/windows-command-adapter.md)
 - Ordinary roles, communication and capability mapping: [ordinary-collaboration.md](references/ordinary-collaboration.md)
 - Run/child/resource transitions: [state-machines.md](references/state-machines.md)
 - Process, storage, progress, retry: [resource-lifecycle.md](references/resource-lifecycle.md)

@@ -6,11 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.8.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 进程监管器、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.9.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
 
-**development-workflow 5.8.0**：吸收 grill-me/grilling 与本地 Superpowers 的方案追问、反例测试、因果调试及技术评审方法，按现有 Skill 职责维护。新增[自动化覆盖清单](./plugins/development-workflow/skills/dw-tooling/references/automation-coverage.md)，明确规则、库实现、执行入口和真实验证的区别；结构检查覆盖原生源码与测试映射。保留普通流程的已有授权和检查复用，真实宿主安装与验证继续暂缓。
+**development-workflow 5.9.0**：新增 [Windows 命令资源适配器](./plugins/development-workflow/skills/dw-collaboration/references/windows-command-adapter.md)，将真实启动、观察、停止和释放接入 TaskResourceManager。通用测试入口复用同一 Job 后端，约束正常退出后的残留子进程、超时和输出超限。维护生命周期路由与[自动化覆盖清单](./plugins/development-workflow/skills/dw-tooling/references/automation-coverage.md)，保留输出不完整、回收未知和启动失败的独立状态。其他平台明确降级，真实宿主安装与验证继续暂缓。
 
 **gpt-bridge 2.0.1**：默认新请求和续接显式请求 `gpt-6.1-sol / medium`，替换旧模型预设；请求参数与实际模型分开记录，无法确认的实际值保持 `unknown`。修正无效预设/参数的处理，保留结构化输出与原有权限模式。验证采用替身 CLI 与本地 MCP 协议，真实安装和模型支持验证仍暂缓。
 
@@ -199,7 +199,7 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 
 `IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构和相关静态检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要对应功能的运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。
 
-`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付；其完整协议仍没有通用 Windows/Linux 或 Claude/Codex/Grok 的生产平台 adapter。5.6.0 的 Windows stdio 监管器是单独的窄入口，具有真实隔离进程测试；它不提供完整 manager 的恢复、存储和队列适配。manager 的 fake adapter 测试与监管器的实际进程测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
+`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付。5.9.0 的 Windows 命令 adapter 将真实启动、观察、停止和释放接入 manager；通用测试入口直接复用同一受管命令后端。临时目录、重连接、队列自动派发、Linux 和 Claude/Codex/Grok 的实际宿主接线仍需独立实现或验证。合成协议测试与实际 Windows 命令测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
 
 更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。Windows 监管器的验收覆盖本地隔离 fixture；原生 Linux、Grok Build、真实 Claude/Codex 插件加载和用户配置切换另行验收。
 

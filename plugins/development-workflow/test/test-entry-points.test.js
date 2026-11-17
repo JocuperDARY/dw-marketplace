@@ -23,7 +23,10 @@ function npmEnvironment(env) {
 }
 
 function runNpm(script, env = process.env) {
-  return childProcess.spawnSync(process.execPath, [npmCli, 'run', script], {
+  // These nested checks intentionally exercise portable logic on other hosts.
+  const args = [npmCli, 'run', script];
+  if (process.platform !== 'win32') args.push('--', '--portable-direct');
+  return childProcess.spawnSync(process.execPath, args, {
     cwd: pluginRoot,
     env: npmEnvironment(env),
     encoding: 'utf8',

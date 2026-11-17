@@ -1,9 +1,14 @@
-# Windows stdio process supervisor
+# Windows process supervisor
 
 This opt-in launcher implements actual process ownership at startup. Use it for
 stdio MCP servers or foreground commands whose descendants belong to that one
 session. It follows the [resource lifecycle](resource-lifecycle.md) ownership and
 graceful-stop principles, without requiring the full TaskResourceManager protocol.
+
+The sections below describe the byte-stream `stdio` and `command` modes. The
+separate `managed` mode uses private control messages and a bounded output channel
+for the [Windows command adapter and test runner](windows-command-adapter.md).
+Do not substitute managed mode into an MCP stdio configuration.
 
 ## Build once, launch directly
 
@@ -123,7 +128,8 @@ A host that retains both a live parent and open session pipes after abandoning a
 task has not provided a reliable shutdown signal. That case needs a host release
 hook or an explicit lifetime policy. This launcher does not invent a universal
 hang detector, kill active requests after idle time, or retrofit old orphan trees.
-The full manager's adapter, recovery-store and scheduler contracts remain separate.
+The managed command adapter maps this kernel ownership to the full manager's
+identity and release contracts; recovery and scheduling still have separate limits.
 
 ## Verification
 

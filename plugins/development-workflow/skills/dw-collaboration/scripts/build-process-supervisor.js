@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const source = path.join(__dirname, 'process-supervisor', 'DwProcessSupervisor.cs');
+const sources = [source, path.join(__dirname, 'process-supervisor', 'DwProcessSupervisor.Managed.cs')];
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 
 // Building is explicit. SessionStart and MCP launches never compile or install files.
@@ -15,7 +16,7 @@ function buildSupervisor(outputDirectory) {
   if (typeof outputDirectory !== 'string' || !path.isAbsolute(outputDirectory)) {
     throw new Error('An absolute --output-dir is required');
   }
-  const sourceSha256 = sha256(fs.readFileSync(source));
+  const sourceSha256 = sha256(Buffer.concat(sources.map(file => fs.readFileSync(file))));
   fs.mkdirSync(outputDirectory, { recursive: true });
   const directory = fs.realpathSync(outputDirectory);
   const executable = path.join(directory, `dw-process-supervisor-${sourceSha256.slice(0, 20)}.exe`);
@@ -45,7 +46,7 @@ function buildSupervisor(outputDirectory) {
     // A concurrent completed build may have appeared between discovery and locking.
     if (fs.existsSync(executable) || fs.existsSync(manifest)) return readExisting();
     const result = spawnSync(compiler, ['/nologo', '/optimize+', '/target:winexe', '/platform:anycpu',
-      `/out:${temporary}`, source], { encoding: 'utf8', timeout: 30000, maxBuffer: 65536, windowsHide: true });
+      '/reference:System.Web.Extensions.dll', `/out:${temporary}`, ...sources], { encoding: 'utf8', timeout: 30000, maxBuffer: 65536, windowsHide: true });
     if (result.error || result.status !== 0) {
       throw new Error(`Supervisor compilation failed: ${result.error?.code || result.stdout || result.stderr}`);
     }
