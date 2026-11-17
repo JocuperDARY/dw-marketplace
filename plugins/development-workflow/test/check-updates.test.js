@@ -147,6 +147,34 @@ test('POSIX policy holds without invoking an external command', () => {
   assert(!report.items.some(item => item.Status === 'UPDATE'));
 });
 
+test('present malformed registry package entries warn instead of implying no update', () => {
+  for (const item of [null, false, 0, '', true, 1, '1.0.0', [], ['1.0.0'], {}]) {
+    const { report } = audit({ remote: { status: 1, stdout: JSON.stringify({ '@openai/codex': item }) } });
+    const row = report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex');
+    assert.strictEqual(row.Status, 'WARN', JSON.stringify({ item, row }));
+    assert.strictEqual(report.summary.has_update, false);
+  }
+  const { report } = audit({ remote: { status: 0, stdout: '{}' } });
+  assert.strictEqual(report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex').Status, 'OK');
+});
+
+test('registry current and latest require strings without nested value coercion', () => {
+  for (const [current, latest] of [
+    [['1.0.0'], ['2.0.0']],
+    [['1.0.0'], '2.0.0'],
+    ['1.0.0', ['2.0.0']],
+    [1.2, '2.0.0'],
+    ['1.0.0', 2.2],
+    [{ version: '1.0.0' }, '2.0.0'],
+    ['1.0.0', { version: '2.0.0' }],
+  ]) {
+    const { report } = audit({ remote: { status: 1, stdout: JSON.stringify({ '@openai/codex': { current, latest } }) } });
+    const row = report.items.find(entry => entry.Category === 'Remote' && entry.Component === '@openai/codex');
+    assert.strictEqual(row.Status, 'WARN', JSON.stringify({ current, latest, row }));
+    assert.strictEqual(report.summary.has_update, false);
+  }
+});
+
 test('MCP configuration comes from supported configuration inventory without live claims', () => {
   const { report } = audit();
   const row = report.items.find(item => item.Category === 'MCP' && item.Component === 'codegraph');

@@ -93,6 +93,39 @@ try {
     else expectCode(validate, 'ROUTE_METADATA_OUTSIDE_WINDOW');
   }
 
+  const preciseCases = [
+    { name: 'submillisecond future event', code: 'PROBE_EVENT_OUTSIDE_WINDOW', mutate: (probe) => { probe.cleanup.observed_at = '2026-08-29T00:15:00.0000001Z'; } },
+    { name: 'submillisecond future route', code: 'ROUTE_METADATA_OUTSIDE_WINDOW', route: '2026-08-29T00:15:00.0000001Z' },
+    { name: 'submillisecond future probe', code: 'PROBE_EXPIRED', mutate: (probe) => { probe.observed_at = '2026-08-29T01:00:00.0000001Z'; } },
+    { name: 'submillisecond nonmonotonic events', code: 'PROBE_TIME_NOT_MONOTONIC', mutate: (probe) => {
+      probe.collect.observed_at = '2026-08-29T00:12:00.0000002Z'; probe.independent_message.observed_at = '2026-08-29T00:12:00.0000001Z';
+    } },
+    { name: 'submillisecond future expiry', expiry: '2026-08-29T01:00:00.0000001Z' },
+    { name: 'expiry equal to now with trailing zeros', expiry: '2026-08-29T01:00:00.0000000Z', code: 'PROBE_EXPIRED' },
+    { name: 'expiry before submillisecond now', expiry: NOW, now: '2026-08-29T01:00:00.0000001Z', code: 'PROBE_EXPIRED' },
+    { name: 'equal expiry with different precision', mutate: (probe) => { probe.expires_at = '2026-08-29T02:00:00.0000000Z'; } },
+    { name: 'equal event and probe with different precision', mutate: (probe) => { probe.cleanup.observed_at = '2026-08-29T00:15:00.0000Z'; } },
+    { name: 'equal probe and now with different precision', mutate: (probe) => { probe.observed_at = '2026-08-29T01:00:00.000000Z'; } },
+    { name: 'equal adjacent events with different precision', mutate: (probe) => {
+      probe.collect.observed_at = '2026-08-29T00:12:00.1000Z'; probe.independent_message.observed_at = '2026-08-29T00:12:00.1Z';
+    } },
+    { name: 'equal route and probe with different precision', route: '2026-08-29T00:15:00.000000Z' },
+  ];
+  for (const testCase of preciseCases) {
+    const preciseRoot = makeRoot(); const probe = makeProbe('codex', testCase.expiry); const receipts = clone(verifiedReceipts);
+    if (testCase.mutate) testCase.mutate(probe);
+    if (testCase.route) {
+      receipts.codex.route_attestation = 'VERIFIED'; receipts.codex.actual_model = 'fixture-model'; receipts.codex.actual_effort = 'fixture-effort'; seal(receipts.codex);
+      probe.route_metadata = seal({ evidence_id: 'route-precision', actual_model: 'fixture-model', actual_effort: 'fixture-effort',
+        source_kind: 'host_runtime_metadata', observed_at: testCase.route, evidence_refs: ['route-fixture-precision'], source_sha256: '0'.repeat(64) }, 'source_sha256');
+    }
+    for (const name of ['request', 'ack', 'collect', 'independent_message', 'liveness', 'cleanup']) seal(probe[name], 'source_sha256');
+    seal(probe); writeSet(preciseRoot, makePolicy(['codex'], testCase.expiry), receipts, { codex: probe });
+    const validate = () => api.validateEvidenceRoot(preciseRoot, { now: testCase.now || NOW, trustedHostAttestor: () => true });
+    if (testCase.code) expectCode(validate, testCase.code);
+    else assert.deepStrictEqual(validate(), { VERIFIED: 1, UNVERIFIED: 2, FAILED: 0, total: 3 }, testCase.name);
+  }
+
   const missingProbeRoot = makeRoot(); writeSet(missingProbeRoot, makePolicy(['codex']), verifiedReceipts);
   expectCode(() => api.validateEvidenceRoot(missingProbeRoot, { now: NOW }), 'PROBE_EVIDENCE_MISSING');
 
