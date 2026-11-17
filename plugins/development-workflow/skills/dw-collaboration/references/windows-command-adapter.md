@@ -49,7 +49,7 @@ The adapter authenticates its capability and native response records, then check
 
 Each host admits at most its configured `maxCommands` (1..256) and 4,096 adapter action requests, including repeated reads. These bounds limit retained protocol evidence; exhausting a bound rejects further admission and preserves HOLD instead of silently widening it. Choose observation intervals that fit the task's finite duration and keep capacity for closing resources. Command deadlines remain enforced by the native backend.
 
-Use the host's start/observe/stop/wait/close operations and inspect their returned states. Release native sessions after manager closure. `dispose()` is bounded cleanup for abandoned or unsuccessful work; it must retain a manager HOLD rather than manufacture a successful release.
+Use the host's prepare/start/observe/stop/wait/close operations and inspect their returned states. Release native sessions after manager closure. `dispose()` is bounded cleanup for abandoned or unsuccessful work; it must retain a manager HOLD rather than manufacture a successful release.
 
 From the plugin root, this example accepts the caller's existing authorization and private directories. `cleanupAuthorityRef` in that authorization identifies the caller's authority record; constructing an arbitrary reference does not grant permission.
 
@@ -96,13 +96,17 @@ async function runManaged({ binaryDirectory, dataRoot, cwd, executable, args,
 
 The returned command result still needs its own exit-code, `error`, output and cleanup checks. A host `CLOSED` result means manager and native session closure succeeded; it does not convert a nonzero or timed-out command into success. Keep `dataRoot` unique to the run and preserve a HOLD record for later reconciliation.
 
-A launch failure has three possible native facts: never created, created and reclaimed, or unknown. The current manager keeps an incomplete start on HOLD when no valid spawn identity was bound. That conservative result is not a resource leak claim, and must not be changed into a fake successful start to make `close()` pass.
+A launch failure has three possible native facts: never created, created and reclaimed, or unknown. A native decoder receipt can establish the first two only when the private protocol binding matches and the supervisor controller has closed. The adapter authenticates that receipt; the manager then closes the declared resources through `RESOURCE_NOT_ACQUIRED` history without inventing a process identity or successful spawn. A missing, altered or incomplete receipt remains HOLD. Business executable paths must be absolute `.exe` paths; a missing executable reaches the native launcher so that the native observer can establish whether creation occurred.
 
 ## Queue and recovery boundary
 
-ResourceAwareQueue still returns scheduling decisions; it does not launch this host automatically. After a selected task fails to start, its owner must put the task into `beginDrain(taskId, 'failed')`. A task continues consuming capacity until its exact tracker close result is accepted. Do not treat the manager's public `CLOSED` summary as a queue close token or refund capacity merely because spawn threw. If a batch stops before other selected tasks launch, account for every selected task and its preclaimed resources.
+The resource queue remains a scheduling component. `ResourceQueueDispatcher` connects it to a prepared command host: `prepareCommand(command)` returns an immutable command/scope/resource binding, `startPrepared(commandId)` performs the one admitted launch, and `closeCommand(commandId)` closes only that command. `cancelPrepared(commandId)` applies only before dispatch. Prepared resources are declared and formally reserved without a process identity; capacity reserved for a selected task remains charged through dispatch and draining until its exact scope close token is consumed.
 
-Automatic queue-to-manager dispatch, proven no-start capacity release, persistent reattachment, temporary-storage management and non-Windows process adapters remain separate extensions. Recovery records help reconcile state; they do not revive an old native handle or grant new cleanup authority.
+Use `queueAuthority()` for queue claims and token consumption. Its branded, frozen facade does not expose the mutable tracker. Every token remains bound to task, owner, run, generation, scope and resource IDs. The Windows host's consumer additionally requires its own verified native session release; obtaining the compatible `host.manager` property and calling its `closeCommand` does not bypass that consumer gate. `closeCommand` leaves the manager root open for later queued work. Final `close()` closes admission and the root; `dispose()` preserves HOLD when only emergency cleanup is known.
+
+A partial batch records each selected task independently. A failed launch does not refund capacity, reset command/action limits or authorize retry. Known commands that never reached the adapter may close through a manager-owned no-dispatch proof; an interrupted launch with no terminal proof stays HOLD. Repeated close calls reuse the formal close result, and repeated dispatch of one command ID is rejected. Native no-start, scope-close and consumed-token history are persisted under the existing single-writer runtime chain. `TaskResourceTracker.fromHistory` accepts those events only from a complete history whose head is authenticated by the host; its replay is evidence recovery, not reattachment to an old native handle.
+
+Persistent native reattachment and temporary-storage management remain separate extensions. The Windows host still accepts only V1 commands with `temporaryRoot: null`; capability probes and bounded limits retain their existing meaning.
 
 ## Test and platform evidence
 

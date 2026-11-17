@@ -6,6 +6,8 @@ Treat Claude Code, Codex, Grok Build, or any other host name as a discovery hint
 
 For finite Windows commands, the shipped [command adapter](windows-command-adapter.md) connects TaskResourceManager to the native Job supervisor. Its process observations and bounded command lifecycle are a narrower capability than the host-agent receipts described below. It does not establish agent messaging, model dispatch, temporary-storage support or installed-host acceptance. Ordinary commands and tests can use the shared backend without adopting this full host protocol.
 
+The [command dispatcher](resource-command-dispatcher.md) connects prepared manager commands to queue admission and verified scope closure. The separately selected [POSIX backend](posix-command-backend.md) manages an owned process group for ordinary commands and tests; it is not a POSIX TaskResourceManager adapter or a Windows Job equivalent. Its offline tests do not establish native Linux/macOS acceptance.
+
 ## Evidence ladder
 
 ```text

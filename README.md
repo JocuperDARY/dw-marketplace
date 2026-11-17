@@ -6,11 +6,13 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.9.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.10.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
 
-**development-workflow 5.9.0**：新增 [Windows 命令资源适配器](./plugins/development-workflow/skills/dw-collaboration/references/windows-command-adapter.md)，将真实启动、观察、停止和释放接入 TaskResourceManager。通用测试入口复用同一 Job 后端，约束正常退出后的残留子进程、超时和输出超限。维护生命周期路由与[自动化覆盖清单](./plugins/development-workflow/skills/dw-tooling/references/automation-coverage.md)，保留输出不完整、回收未知和启动失败的独立状态。其他平台明确降级，真实宿主安装与验证继续暂缓。
+**development-workflow 5.10.0**：补齐[命令队列执行](./plugins/development-workflow/skills/dw-collaboration/references/resource-command-dispatcher.md)，先登记待创建资源，再按容量启动；只有正式关闭得到确认后才归还容量。可证实的未启动与未知启动分别处理。新增显式选择的 [POSIX 进程组后端](./plugins/development-workflow/skills/dw-collaboration/references/posix-command-backend.md)，供测试与更新检查使用；其边界是同组进程，原生平台验收仍未运行。维护生命周期路由、测试与文档，真实宿主安装和验证继续暂缓。
+
+**5.9.0 Windows 命令资源**：新增 [Windows 命令资源适配器](./plugins/development-workflow/skills/dw-collaboration/references/windows-command-adapter.md)，将真实启动、观察、停止和释放接入 TaskResourceManager。通用测试入口复用同一 Job 后端，约束正常退出后的残留子进程、超时和输出超限，并区分执行结果、输出完整性和回收证据。
 
 **gpt-bridge 2.0.1**：默认新请求和续接显式请求 `gpt-6.1-sol / medium`，替换旧模型预设；请求参数与实际模型分开记录，无法确认的实际值保持 `unknown`。修正无效预设/参数的处理，保留结构化输出与原有权限模式。验证采用替身 CLI 与本地 MCP 协议，真实安装和模型支持验证仍暂缓。
 
@@ -122,7 +124,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.9.0 版本
+3. 将插件更新到当前的 5.10.0 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -199,9 +201,9 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 
 `IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构和相关静态检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要对应功能的运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。
 
-`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付。5.9.0 提供面向生产调用的 Windows 命令 adapter，将真实启动、观察、停止和释放接入 manager；通用测试入口直接复用同一受管命令后端。临时目录、重连接、队列自动派发、Linux 和 Claude/Codex/Grok 的实际宿主接线仍需独立实现或验证。合成协议测试与实际 Windows 命令测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
+`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付。面向生产调用的 Windows 命令 adapter 提供真实启动、观察、停止和释放；命令 dispatcher 将这些操作与队列容量衔接，通用测试入口直接复用受管命令后端。临时目录、重连接和 Claude/Codex/Grok 的实际宿主接线仍需独立实现或验证。合成协议、Windows 命令与 POSIX 原生结果分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
 
-更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。Windows 监管器的验收覆盖本地隔离 fixture；原生 Linux、Grok Build、真实 Claude/Codex 插件加载和用户配置切换另行验收。
+更新检查工具的 Windows Job Object 后端只约束自己启动的检查命令及 Job 内后代。POSIX 进程组后端需要显式选项和 Python 解释器路径；没有启用时，外部命令继续 HOLD，本地文件审计仍可运行。进程组不等于 Windows Job：改变会话或进程组、通过外部服务创建的后代不在其保证范围内。无法确认回收时保留 unknown。Windows 验收覆盖本地隔离 fixture；POSIX 离线契约检查不代替原生 Linux/macOS 验收。Grok Build、真实 Claude/Codex 加载和用户配置切换另行验收。
 
 ## 许可
 

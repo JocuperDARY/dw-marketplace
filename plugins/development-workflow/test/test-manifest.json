@@ -22,7 +22,9 @@
         { "name": "Windows command backend", "command": "node", "args": ["test/windows-command-backend.test.js"], "timeoutMs": 120000 },
         { "name": "Windows command adapter", "command": "node", "args": ["test/windows-command-adapter.test.js"], "timeoutMs": 120000 },
         { "name": "collaboration safety", "command": "node", "args": ["test/collaboration-safety.test.js"] },
-        { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] }
+        { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
+        { "name": "resource command dispatcher", "command": "node", "args": ["test/resource-command-dispatcher.test.js"], "timeoutMs": 120000 },
+        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 }
       ]
     },
     "process": {
@@ -30,7 +32,9 @@
         { "name": "Windows stdio supervisor", "command": "node", "args": ["test/process-supervisor.test.js"], "timeoutMs": 120000 },
         { "name": "Windows managed supervisor", "command": "node", "args": ["test/process-supervisor-managed.test.js"], "timeoutMs": 120000 },
         { "name": "Windows command backend", "command": "node", "args": ["test/windows-command-backend.test.js"], "timeoutMs": 120000 },
-        { "name": "Windows command adapter", "command": "node", "args": ["test/windows-command-adapter.test.js"], "timeoutMs": 120000 }
+        { "name": "Windows command adapter", "command": "node", "args": ["test/windows-command-adapter.test.js"], "timeoutMs": 120000 },
+        { "name": "resource command dispatcher", "command": "node", "args": ["test/resource-command-dispatcher.test.js"], "timeoutMs": 120000 },
+        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 }
       ]
     },
     "platform:windows": {
@@ -80,7 +84,9 @@
         { "name": "collaboration safety", "command": "node", "args": ["test/collaboration-safety.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
         { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 900000 },
-        { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"], "timeoutMs": 360000 }
+        { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"], "timeoutMs": 360000 },
+        { "name": "resource command dispatcher", "command": "node", "args": ["test/resource-command-dispatcher.test.js"], "timeoutMs": 120000 },
+        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 }
       ]
     }
   }

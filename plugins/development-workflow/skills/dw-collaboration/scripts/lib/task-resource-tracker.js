@@ -104,6 +104,8 @@ const HISTORY_KINDS = new Set([
   'SCOPE_CLOSE_REQUESTED',
   'SCOPE_CLOSE_EVALUATED',
   'TASK_SCOPE_CLAIMED',
+  'TASK_SCOPE_RESERVED',
+  'RESOURCE_NOT_ACQUIRED',
   'TASK_CLOSE_CONSUMED',
 ]);
 const DEFAULT_LIMITS = Object.freeze({
@@ -116,6 +118,8 @@ const DEFAULT_LIMITS = Object.freeze({
   maxStateBytes: 4 * 1024 * 1024,
 });
 const SHA256 = /^[0-9a-f]{64}$/;
+const QUEUE_AUTHORITIES = new WeakSet();
+function isTaskResourceQueueAuthority(value) { return QUEUE_AUTHORITIES.has(value); }
 
 class ResourceTrackerError extends Error {
   constructor(code, message = code) {
@@ -354,6 +358,10 @@ class ResourceScope {
     return this.#operations.observe(this.scopeId, resourceId, observation);
   }
 
+  confirmNotAcquired(resourceId, observation) {
+    return this.#operations.confirmNotAcquired(this.scopeId, resourceId, observation);
+  }
+
   confirmRelease(resourceId, observation) {
     return this.#operations.confirmRelease(this.scopeId, resourceId, observation);
   }
@@ -438,6 +446,7 @@ class TaskResourceTracker {
       confirmRetention: (scopeId, resourceId, observation) => (
         this.#confirmRetention(scopeId, resourceId, observation)
       ),
+      confirmNotAcquired: (scopeId, resourceId, observation) => this.#confirmNotAcquired(scopeId, resourceId, observation),
       close: (scopeId, reason) => this.#closeScope(scopeId, reason),
       getResource: (scopeId, resourceId) => this.#getResource(scopeId, resourceId),
       snapshot: (scopeId) => this.#scopeSnapshot(scopeId),
@@ -508,6 +517,88 @@ class TaskResourceTracker {
       this.#restoreCheckpoint(checkpoint);
       throw error;
     }
+  }
+
+  queueAuthority(consumeGate = () => true, afterConsume = () => true) {
+    const authority = Object.freeze({
+      hasOpenScope: binding => this.hasOpenScope(binding),
+      claimTaskScope: (taskId, binding, resourceIds) =>
+        this.claimPreparedTaskScope(taskId, binding, resourceIds)
+          || this.claimTaskScope(taskId, binding, resourceIds),
+      consumeTaskCloseResult: (taskId, result, binding, resourceIds) => {
+        let allowed = false;
+        try { allowed = consumeGate(detached({ taskId, closeResult: result, binding, resourceIds })) === true; }
+        catch (_) { return false; }
+        if (!allowed || !this.consumeTaskCloseResult(taskId, result, binding, resourceIds)) return false;
+        try { return afterConsume() === true; } catch (_) { return false; }
+      },
+    });
+    QUEUE_AUTHORITIES.add(authority);
+    return authority;
+  }
+
+  claimPreparedTaskScope(taskId, binding = {}, resourceIds = []) {
+    if (typeof taskId !== 'string' || taskId.trim() === '' || !this.hasOpenScope(binding)
+      || !Array.isArray(resourceIds) || resourceIds.length === 0
+      || resourceIds.some(id => typeof id !== 'string' || id.trim() === '')
+      || new Set(resourceIds).size !== resourceIds.length) return false;
+    const safeResourceIds = Array.from(resourceIds).sort();
+    const claim = detached({ taskId, binding, resourceIds: safeResourceIds });
+    const existing = this.#taskClaims.get(taskId);
+    if (existing) return this.#scopeClaims.get(binding.scopeId) === taskId && sameValue(existing, claim);
+    if (this.#scopeClaims.has(binding.scopeId)) return false;
+    for (const id of safeResourceIds) {
+      const record = this.#resources.get(id);
+      if (!record || record.scopeId !== binding.scopeId || record.ownerId !== binding.ownerId
+        || record.generation !== binding.generation || record.state !== 'DECLARED'
+        || record.identity !== null || record.bindSignature !== null || record.releaseConfirmed) return false;
+    }
+    this.#assertInputSize(claim);
+    this.#requireHistoryCapacity([{ kind: 'TASK_SCOPE_RESERVED', payload: claim }]);
+    const checkpoint = this.#checkpoint();
+    try {
+      this.#taskClaims.set(taskId, claim);
+      this.#scopeClaims.set(binding.scopeId, taskId);
+      this.#touch();
+      this.#assertStateWithinLimit();
+      this.#record('TASK_SCOPE_RESERVED', claim);
+      return true;
+    } catch (error) { this.#restoreCheckpoint(checkpoint); throw error; }
+  }
+
+  #confirmNotAcquired(scopeId, resourceId, observation) {
+    const record = this.#requireOwnedResource(scopeId, resourceId);
+    this.#requireScopeMutable(scopeId);
+    const proof = detached(observation);
+    this.#assertInputSize(proof);
+    if (!proof || proof.type !== 'TaskResourceNotAcquired1'
+      || proof.generation !== this.generation || proof.scopeId !== scopeId
+      || !['not_dispatched', 'never_created', 'created_reclaimed'].includes(proof.startState)
+      || proof.cleanup !== 'verified_absent' || proof.supervisorClosed !== true
+      || typeof proof.commandId !== 'string' || !proof.commandId
+      || !Array.isArray(proof.resourceIds) || !proof.resourceIds.includes(resourceId)
+      || record.state !== 'DECLARED' || record.identity !== null
+      || record.bindSignature !== null || record.boundGeneration !== null || record.releaseConfirmed) {
+      throw new ResourceTrackerError('NOT_ACQUIRED_PROOF_INVALID');
+    }
+    requireEvidenceRefs(proof.evidenceRefs);
+    if (!resolverAccepts(this.#trustedObservationResolver, {
+      purpose: 'resource_not_acquired', ownerId: this.ownerId, runId: this.runId,
+      generation: this.generation, resource: cloneRecord(record), observation: proof,
+    })) throw new ResourceTrackerError('NOT_ACQUIRED_TRUST_NOT_PROVEN');
+    const payload = { scopeId, resourceId, observation: proof };
+    this.#requireHistoryCapacity([{ kind: 'RESOURCE_NOT_ACQUIRED', payload }]);
+    const checkpoint = this.#checkpoint();
+    try {
+      record.releaseConfirmed = true;
+      record.state = 'RELEASED';
+      record.decision = detached({ action: 'NOT_ACQUIRED', reasons: [proof.startState] });
+      record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...proof.evidenceRefs]));
+      this.#touch();
+      this.#assertStateWithinLimit();
+      this.#record('RESOURCE_NOT_ACQUIRED', payload);
+      return cloneRecord(record);
+    } catch (error) { this.#restoreCheckpoint(checkpoint); throw error; }
   }
 
   #taskClaimResourcesAreActive(binding, resourceIds) {
@@ -673,6 +764,7 @@ class TaskResourceTracker {
   #bind(scopeId, resourceId, observation = {}) {
     const record = this.#requireOwnedResource(scopeId, resourceId);
     this.#requireScopeMutable(scopeId);
+    if (record.releaseConfirmed || record.state === 'RELEASED') throw new ResourceTrackerError('RESOURCE_ALREADY_RELEASED');
     const boundIdentityRequiresV2 = record.identity !== null
       && hasExplicitV2IdentityMarker(record.identity);
     let normalizedObservation;
@@ -1482,6 +1574,32 @@ class TaskResourceTracker {
         if (!sameValue(result, payload.result)) throw new ResourceTrackerError('HISTORY_INVALID');
         break;
       }
+      case 'TASK_SCOPE_RESERVED': {
+        if (!this.claimPreparedTaskScope(payload.taskId, payload.binding, payload.resourceIds)) {
+          throw new ResourceTrackerError('HISTORY_INVALID');
+        }
+        break;
+      }
+      case 'RESOURCE_NOT_ACQUIRED': {
+        const record = this.#requireOwnedResource(payload.scopeId, payload.resourceId);
+        if (record.state !== 'DECLARED' || record.identity !== null || record.bindSignature !== null
+          || record.boundGeneration !== null || record.releaseConfirmed
+          || payload.observation.type !== 'TaskResourceNotAcquired1'
+          || payload.observation.generation !== this.generation
+          || payload.observation.scopeId !== payload.scopeId
+          || !payload.observation.resourceIds.includes(payload.resourceId)
+          || !['not_dispatched', 'never_created', 'created_reclaimed'].includes(payload.observation.startState)
+          || payload.observation.cleanup !== 'verified_absent' || payload.observation.supervisorClosed !== true) {
+          throw new ResourceTrackerError('HISTORY_INVALID');
+        }
+        requireEvidenceRefs(payload.observation.evidenceRefs);
+        record.releaseConfirmed = true;
+        record.state = 'RELEASED';
+        record.decision = detached({ action: 'NOT_ACQUIRED', reasons: [payload.observation.startState] });
+        record.evidenceRefs = Array.from(new Set([...record.evidenceRefs, ...payload.observation.evidenceRefs]));
+        this.#touch();
+        break;
+      }
       case 'TASK_SCOPE_CLAIMED': {
         if (!this.claimTaskScope(payload.taskId, payload.binding, payload.resourceIds)) {
           throw new ResourceTrackerError('HISTORY_INVALID');
@@ -1657,6 +1775,7 @@ class TaskResourceTracker {
 }
 
 module.exports = {
+  isTaskResourceQueueAuthority,
   ResourceScope,
   ResourceTrackerError,
   TaskResourceTracker,

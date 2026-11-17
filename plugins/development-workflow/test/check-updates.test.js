@@ -33,7 +33,7 @@ function audit(overrides = {}, args = []) {
     const path = require('path');
     const fixture = ${JSON.stringify(overrides)};
     // Only this isolated test child simulates the dispatch platform. All
-    // external commands below are fakes; production keeps its POSIX HOLD.
+    // external commands below are fakes; no native POSIX backend runs.
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(fixturePlatform)} });
     require('os').homedir = () => ${JSON.stringify(home)};
     let spawnCalls = 0;
@@ -48,6 +48,7 @@ function audit(overrides = {}, args = []) {
         result.stdout = JSON.stringify({ dependencies: { '@openai/codex': { version: '1.0.0' } } });
       } else if (target === 'python') {
         if (fixture.pipTimeout) return { ...result, status: null, error: { code: 'ETIMEDOUT' } };
+        if (fixture.pipMissing) return { ...result, status: 1 };
         result.stdout = 'Version: 1.0.0';
       } else {
         if (fixture.cliTimeout === target) return { ...result, status: null, error: { code: 'ETIMEDOUT' } };
@@ -55,6 +56,24 @@ function audit(overrides = {}, args = []) {
         if (fixture.cliFailure === target) result.status = 7;
       }
       return result;
+    };
+    const originalLoad = require('module')._load;
+    require('module')._load = function(name, ...rest) {
+      if (name.endsWith('/lib/posix-command-backend')) return {
+        preparePosixCommandBackend: options => {
+          if (fixture.prepareFailure) throw new Error('fixture preparation failure');
+          return {pythonPath:options.pythonPath, supervisorPath:'/fixture-supervisor'};
+        },
+        runPosixCommand: async request => {
+          spawnCalls += 1;
+          if (!path.isAbsolute(request.executable)) throw new Error('executable must be resolved');
+          const native = fakeCommand(request.executable, request.args);
+          return {status:native.status, stdout:native.stdout, stderr:native.stderr, cleanup:'verified_absent',
+            terminal:{cleanup:'verified_absent'}, supervisorClosed:true, outputComplete:true, reason:'child_exit',
+            error:native.error, ...(fixture.posixResult || {})};
+        },
+      };
+      return originalLoad.call(this, name, ...rest);
     };
     require('child_process').spawnSync = (command, args, options) => {
       spawnCalls += 1;
@@ -67,13 +86,13 @@ function audit(overrides = {}, args = []) {
     };
   `);
   const reportDirectory = overrides.reportDirectory || path.join(home, 'reports');
-  const result = childProcess.spawnSync(process.execPath, ['--require', preloader, checker, '--report-directory', reportDirectory, ...args], {
+  const result = childProcess.spawnSync(process.execPath, ['--require', preloader, checker, '--report-directory', reportDirectory, ...(overrides.posix ? ['--posix-process-group', '--python-path', path.join(bin, 'python')] : []), ...args], {
     cwd: pluginRoot,
     env: { ...process.env, HOME: home, USERPROFILE: home, PATH: bin, npm_config_cache: path.join(home, 'npm-cache') },
     encoding: 'utf8', timeout: 20000, windowsHide: true,
   });
   assert.ifError(result.error);
-  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.status, overrides.expectedExit || 0, result.stderr);
   const files = fs.existsSync(reportDirectory) && fs.statSync(reportDirectory).isDirectory() ? fs.readdirSync(reportDirectory) : [];
   const report = files.length ? JSON.parse(fs.readFileSync(path.join(reportDirectory, files[0]), 'utf8')) : null;
   const spawnCalls = JSON.parse(fs.readFileSync(path.join(home, 'spawn-count.json'), 'utf8'));
@@ -135,6 +154,43 @@ test('npm outdated requires valid current and a strictly newer latest version', 
     const row = report.items.find(item => item.Category === 'Remote' && item.Component === '@openai/codex');
     assert.strictEqual(row.Status, status, JSON.stringify({ current, latest, row }));
     assert.strictEqual(report.summary.has_update, status === 'UPDATE');
+  }
+});
+
+test('explicit POSIX backend completes awaited mock calls with bounded evidence', () => {
+  for (const platform of ['linux','darwin']) {
+    const {report, spawnCalls} = audit({platform, posix:true});
+    assert.strictEqual(spawnCalls,7);
+    assert.strictEqual(report.items.find(item=>item.Component==='Codex CLI').Status,'OK');
+    assert.strictEqual(report.summary.command_backend,'posix-process-group');
+    assert.strictEqual(report.summary.escaped_descendants,'unverified');
+  }
+});
+test('POSIX preparation and terminal failures prevent subsequent command dispatch', () => {
+  const prepared = audit({platform:'linux', posix:true, prepareFailure:true});
+  assert.strictEqual(prepared.spawnCalls,0);
+  for (const posixResult of [{cleanup:'unknown'},{terminal:null},{supervisorClosed:false},{outputComplete:false},
+    {reason:'timeout_elapsed'},{status:null},{error:{code:'fixture'}}]) {
+    const {report,spawnCalls} = audit({platform:'linux',posix:true,posixResult});
+    assert.strictEqual(spawnCalls,1,JSON.stringify(posixResult));
+    assert.strictEqual(report.items.find(item=>item.Component==='Codex CLI').Status,'WARN');
+    assert(!report.items.some(item=>item.Status==='UPDATE'));
+  }
+});
+test('ordinary POSIX nonzero exits preserve later checks and npm outdated semantics', () => {
+  const {report,spawnCalls} = audit({platform:'linux',posix:true,pipMissing:true,cliFailure:'claude',
+    remote:{status:1,stdout:JSON.stringify({'@openai/codex':{current:'1.0.0',latest:'2.0.0'}})}});
+  assert.strictEqual(spawnCalls,7);
+  assert.strictEqual(report.items.find(item=>item.Component==='Codex CLI').Status,'OK');
+  assert.strictEqual(report.items.find(item=>item.Category==='Remote' && item.Component==='@openai/codex').Status,'UPDATE');
+  assert(!report.items.some(item=>item.Detail?.includes('later commands not run')));
+});
+
+test('invalid POSIX CLI combinations are rejected before external dispatch', () => {
+  for (const [platform,args] of [['win32',['--posix-process-group','--python-path','/python']],
+    ['linux',['--posix-process-group']], ['linux',['--python-path','/python']], ['linux',['--portable-direct']]]) {
+    const {spawnCalls,result} = audit({platform,expectedExit:2},args);
+    assert.strictEqual(spawnCalls,0);assert.match(result.stderr,/COMMAND_BACKEND_OPTIONS/);
   }
 });
 

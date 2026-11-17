@@ -7,8 +7,12 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { discoverMcpConfigurations, enabledPluginIds, pluginInstallPaths } = require('../../../hooks/tool-inventory');
 
+async function main() {
 const argv = process.argv.slice(2);
 const options = {
+  posixProcessGroup: argv.includes('--posix-process-group'),
+  portableDirect: argv.includes('--portable-direct'),
+  pythonPath: null,
   noRemote: argv.includes('--no-remote'),
   noReport: argv.includes('--no-report'),
   projectPath: process.cwd(),
@@ -16,11 +20,23 @@ const options = {
   reportDirectory: path.join(os.homedir(), '.claude', 'scripts'),
 };
 for (let i = 0; i < argv.length; i += 1) {
+  if (argv[i] === '--python-path' && argv[i + 1] && !argv[i + 1].startsWith('--')) options.pythonPath = argv[++i];
   if (argv[i] === '--project-path' && argv[i + 1]) options.projectPath = path.resolve(argv[++i]);
   if (argv[i] === '--command-timeout-sec' && argv[i + 1]) options.timeoutSec = Math.max(1, Math.min(600, Number(argv[++i]) || 20));
   if (argv[i] === '--report-directory' && argv[i + 1]) options.reportDirectory = path.resolve(argv[++i]);
 }
 
+let posixBackend, posixPrepared, backendHold = null;
+if (options.portableDirect || options.pythonPath && !options.posixProcessGroup || options.posixProcessGroup && (process.platform === 'win32' || !options.pythonPath)) {
+  console.error('COMMAND_BACKEND_OPTIONS: use --posix-process-group with --python-path on POSIX only');
+  process.exitCode = 2; return;
+}
+if (options.posixProcessGroup) {
+  try {
+    posixBackend = require('../../dw-collaboration/scripts/lib/posix-command-backend');
+    posixPrepared = await posixBackend.preparePosixCommandBackend({pythonPath:options.pythonPath});
+  } catch { backendHold = 'HOLD: POSIX backend preparation failed; commands not run'; }
+}
 const rows = [];
 let hasUpdate = false;
 let hasWarn = false;
@@ -59,9 +75,22 @@ function commandPath(name) {
   commandPaths.set(name, null);
   return null;
 }
-function run(name, args = []) {
+async function run(name, args = []) {
   const executable = commandPath(name) || name;
   if (process.platform !== 'win32') {
+    if (backendHold) return {code:null, stdout:'', stderr:'', timedOut:false, reason:backendHold};
+    if (posixPrepared) {
+      let value;
+      try { value = await posixBackend.runPosixCommand({...posixPrepared, executable, args, cwd:options.projectPath, env:process.env, timeoutMs:options.timeoutSec * 1000, maxOutputBytes:65536}); }
+      catch { backendHold = 'HOLD: POSIX backend failed; later commands not run'; }
+      if (!value || value.error || value.cleanup !== 'verified_absent' || !value.terminal || value.supervisorClosed !== true || value.outputComplete !== true || value.releaseError || value.reason !== 'child_exit' || value.status == null) {
+        backendHold = value?.reason === 'timeout_elapsed' ? 'HOLD: POSIX command timed out; later commands not run'
+          : value?.reason === 'output_limit' ? 'HOLD: POSIX command output limit exceeded; later commands not run'
+          : 'HOLD: POSIX command boundary failed; later commands not run';
+        return {code:null, stdout:'', stderr:'', timedOut:value?.reason === 'timeout_elapsed', reason:backendHold};
+      }
+      return {code:value.status, stdout:String(value.stdout || ''), stderr:String(value.stderr || ''), timedOut:false, reason:null};
+    }
     return { code: null, stdout: '', stderr: '', timedOut: false, reason: 'HOLD: owned descendant cleanup is unverified on this platform' };
   }
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -76,9 +105,9 @@ function run(name, args = []) {
     return { code: value.exitCode, stdout: String(value.stdout || ''), stderr: String(value.stderr || ''), timedOut: value.status === 'timed_out', reason: value.status === 'completed' ? null : value.status === 'timed_out' ? 'command timed out' : value.status === 'output_limit' ? 'command output limit exceeded' : 'HOLD: command unavailable; cleanup verified' };
   } catch { return { code: null, stdout: '', stderr: '', timedOut: false, reason: 'HOLD: command backend response invalid; cleanup unverified' }; }
 }
-function cliVersion(name) {
+async function cliVersion(name) {
   if (!commandPath(name)) return { status: 'MISSING', version: null, detail: `${name} not found on PATH` };
-  const r = run(name, ['--version']);
+  const r = await run(name, ['--version']);
   if (r.reason || r.code !== 0) return { status: 'WARN', version: null, detail: r.reason || 'version command failed' };
   const version = safeVersion(r.stdout || r.stderr, name);
   return version ? { status: 'OK', version, detail: version } : { status: 'WARN', version: null, detail: 'version response invalid' };
@@ -95,17 +124,17 @@ function safeVersion(value, label) {
 
 function normalizeVersion(v) { const m = String(v || '').match(/\d+(?:\.\d+){0,2}/); return m ? m[0].split('.').map(Number) : null; }
 function compareVersion(a, b) { const x = normalizeVersion(a) || [0], y = normalizeVersion(b) || [0]; for (let i = 0; i < 3; i += 1) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; }
-function npmGlobals() {
+async function npmGlobals() {
   if (!commandPath('npm')) return null;
-  const r = run('npm', ['list', '-g', '--depth=0', '--json']);
+  const r = await run('npm', ['list', '-g', '--depth=0', '--json']);
   if (r.reason || r.code !== 0) { add('Local', 'npm globals', 'WARN', r.reason || 'global package inventory failed'); return null; }
   try { const value = JSON.parse(r.stdout); if (!value || typeof value !== 'object' || Array.isArray(value) || value.error) throw new Error(); return value; }
   catch { add('Local', 'npm globals', 'WARN', 'global package inventory response invalid'); return null; }
 }
 function npmVersion(deps, pkg) { return deps?.dependencies?.[pkg] ? safeVersion(deps.dependencies[pkg].version || deps.dependencies[pkg]) : null; }
-function pipVersion(pkg) {
+async function pipVersion(pkg) {
   if (!commandPath('python')) return { status: 'INFO', detail: 'python not found; pip package unchecked' };
-  const r = run('python', ['-m', 'pip', 'show', pkg]);
+  const r = await run('python', ['-m', 'pip', 'show', pkg]);
   if (r.reason) return { status: 'WARN', detail: r.reason };
   if (r.code === 1) return { status: 'INFO', detail: 'pip package not found' };
   if (r.code !== 0) return { status: 'WARN', detail: 'pip inventory failed' };
@@ -120,8 +149,8 @@ function codexMcpNames() {
   catch { add('Codex', 'MCP configuration', 'WARN', 'configuration could not be read'); return []; }
 }
 const versions = new Map();
-function checkCli(category, name, label, pkg, deps) { const v = cliVersion(name); versions.set(name, v); const nv = npmVersion(deps, pkg); if (v.status === 'MISSING' && nv) add(category, label, 'INFO', `CLI absent; npm global v${nv}`); else add(category, label, v.status, v.detail); }
-function checkRemote(deps) {
+async function checkCli(category, name, label, pkg, deps) { const v = await cliVersion(name); versions.set(name, v); const nv = npmVersion(deps, pkg); if (v.status === 'MISSING' && nv) add(category, label, 'INFO', `CLI absent; npm global v${nv}`); else add(category, label, v.status, v.detail); }
+async function checkRemote(deps) {
   section('7. Remote npm update check');
   if (options.noRemote) {
     add('Remote', 'npm outdated', 'INFO', 'skipped because --no-remote was specified');
@@ -131,7 +160,7 @@ function checkRemote(deps) {
     add('Remote', 'npm outdated', 'MISSING', 'npm not found');
     return;
   }
-  const r = run('npm', ['outdated', '-g', '--json']);
+  const r = await run('npm', ['outdated', '-g', '--json']);
   if (r.reason) {
     add('Remote', 'npm outdated', 'WARN', r.reason);
     return;
@@ -169,20 +198,20 @@ function checkRemote(deps) {
   }
 }
 
-const deps = npmGlobals();
+const deps = await npmGlobals();
 const settings = readJson(path.join(os.homedir(), '.claude', 'settings.json'));
 const mcpConfigurations = discoverMcpConfigurations(os.homedir(), pluginInstallPaths(os.homedir(), enabledPluginIds(os.homedir())), options.projectPath);
 const claudeMcp = new Set(mcpConfigurations.map(item => item.name));
 const codexMcp = codexMcpNames();
 section('1. Claude Code and plugins');
-checkCli('Claude', 'claude', 'Claude Code CLI', '@anthropic-ai/claude-code', deps);
+await checkCli('Claude', 'claude', 'Claude Code CLI', '@anthropic-ai/claude-code', deps);
 if (settings) add('Claude', 'enabledPlugins', 'INFO', `${Object.keys(settings.enabledPlugins || {}).length} configured`); else add('Claude', 'settings.json', 'WARN', 'not found or invalid JSON');
 const cacheCount = countDirs(path.join(os.homedir(), '.claude', 'plugins', 'cache')); add('Claude', 'plugin cache', 'INFO', cacheCount == null ? 'not found' : `${cacheCount} marketplace cache directories`);
 section('2. MCP servers'); if (claudeMcp.size) { add('MCP', 'Claude MCP servers', 'INFO', `${claudeMcp.size} configured; live availability unchecked`); for (const n of [...claudeMcp].sort()) add('MCP', n, 'INFO', 'configured; live availability unchecked'); } else add('MCP', 'Claude MCP servers', 'INFO', 'no configured entries found in supported local sources');
-section('3. CodeGraph'); checkCli('CodeGraph', 'codegraph', 'CodeGraph CLI', '@colbymchenry/codegraph', deps); add('CodeGraph', 'Claude MCP registration', claudeMcp.has('codegraph') ? 'OK' : 'WARN', claudeMcp.has('codegraph') ? 'codegraph configured' : 'codegraph not found in Claude MCP config'); add('CodeGraph', 'Codex MCP registration', codexMcp.includes('codegraph') ? 'OK' : 'INFO', codexMcp.includes('codegraph') ? 'codegraph configured' : 'not registered in Codex config'); add('CodeGraph', 'project index', exists(path.join(options.projectPath, '.codegraph')) ? 'OK' : 'INFO', exists(path.join(options.projectPath, '.codegraph')) ? '.codegraph exists in project' : 'current project is not indexed'); add('CodeGraph', 'global index directory', exists(path.join(os.homedir(), '.claude', '.codegraph')) ? 'OK' : 'INFO', exists(path.join(os.homedir(), '.claude', '.codegraph')) ? 'global index exists' : 'not found');
-section('4. OpenSpec'); checkCli('OpenSpec', 'openspec', 'OpenSpec CLI', '@fission-ai/openspec', deps); const specRoot = path.join(options.projectPath, 'openspec'); if (exists(specRoot)) add('OpenSpec', 'project directory', 'OK', `openspec/ exists; specs=${countDirs(path.join(specRoot, 'specs')) || 0}, changes=${countDirs(path.join(specRoot, 'changes')) || 0}`); else add('OpenSpec', 'project directory', 'INFO', 'current project has no openspec/ directory'); const omcp = pipVersion('openspec-mcp'); add('OpenSpec', 'openspec-mcp', omcp.status, omcp.detail); add('OpenSpec', 'Claude MCP registration', 'INFO', claudeMcp.has('openspec') ? 'openspec configured; live availability unchecked' : 'not found in supported local config'); add('OpenSpec', 'Codex MCP registration', 'INFO', codexMcp.some(n => n.includes('openspec')) ? 'openspec configured; live availability unchecked' : 'not found in supported local config');
+section('3. CodeGraph'); await checkCli('CodeGraph', 'codegraph', 'CodeGraph CLI', '@colbymchenry/codegraph', deps); add('CodeGraph', 'Claude MCP registration', claudeMcp.has('codegraph') ? 'OK' : 'WARN', claudeMcp.has('codegraph') ? 'codegraph configured' : 'codegraph not found in Claude MCP config'); add('CodeGraph', 'Codex MCP registration', codexMcp.includes('codegraph') ? 'OK' : 'INFO', codexMcp.includes('codegraph') ? 'codegraph configured' : 'not registered in Codex config'); add('CodeGraph', 'project index', exists(path.join(options.projectPath, '.codegraph')) ? 'OK' : 'INFO', exists(path.join(options.projectPath, '.codegraph')) ? '.codegraph exists in project' : 'current project is not indexed'); add('CodeGraph', 'global index directory', exists(path.join(os.homedir(), '.claude', '.codegraph')) ? 'OK' : 'INFO', exists(path.join(os.homedir(), '.claude', '.codegraph')) ? 'global index exists' : 'not found');
+section('4. OpenSpec'); await checkCli('OpenSpec', 'openspec', 'OpenSpec CLI', '@fission-ai/openspec', deps); const specRoot = path.join(options.projectPath, 'openspec'); if (exists(specRoot)) add('OpenSpec', 'project directory', 'OK', `openspec/ exists; specs=${countDirs(path.join(specRoot, 'specs')) || 0}, changes=${countDirs(path.join(specRoot, 'changes')) || 0}`); else add('OpenSpec', 'project directory', 'INFO', 'current project has no openspec/ directory'); const omcp = await pipVersion('openspec-mcp'); add('OpenSpec', 'openspec-mcp', omcp.status, omcp.detail); add('OpenSpec', 'Claude MCP registration', 'INFO', claudeMcp.has('openspec') ? 'openspec configured; live availability unchecked' : 'not found in supported local config'); add('OpenSpec', 'Codex MCP registration', 'INFO', codexMcp.some(n => n.includes('openspec')) ? 'openspec configured; live availability unchecked' : 'not found in supported local config');
 section('5. Codex');
-checkCli('Codex', 'codex', 'Codex CLI', '@openai/codex', deps);
+await checkCli('Codex', 'codex', 'Codex CLI', '@openai/codex', deps);
 const cconfig = path.join(os.homedir(), '.codex', 'config.toml');
 add('Codex', 'config.toml', exists(cconfig) ? 'OK' : 'WARN', exists(cconfig) ? 'exists; sensitive values not printed' : 'not found');
 const cv = readJson(path.join(os.homedir(), '.codex', 'version.json'));
@@ -203,8 +232,8 @@ add('Codex', 'skills', 'INFO', codexSkills == null ? 'skills directory not found
 const codexRules = countDirs(path.join(os.homedir(), '.codex', 'rules'));
 if (codexRules != null) add('Codex', 'rules', 'INFO', `${codexRules} installed`);
 section('6. Skills'); for (const [label, dir, detail] of [['CC Switch skills', path.join(os.homedir(), '.cc-switch', 'skills'), 'update via CC Switch workflow'], ['Claude local skills', path.join(os.homedir(), '.claude', 'skills'), ''], ['Codex skills', path.join(os.homedir(), '.codex', 'skills'), '']]) { const n=countDirs(dir); add('Skills', label, 'INFO', n == null ? 'not found' : `${n} installed${detail ? `; ${detail}` : ''}`); }
-checkRemote(deps);
-const summary = { generated_at: new Date().toISOString(), project_path: options.projectPath, check_remote: !options.noRemote, no_remote: options.noRemote, has_update: hasUpdate, has_warn: hasWarn, has_error: hasError, item_count: rows.length };
+await checkRemote(deps);
+const summary = { command_backend: options.posixProcessGroup ? 'posix-process-group' : process.platform === 'win32' ? 'windows-job' : 'hold', escaped_descendants: process.platform === 'win32' ? 'job-bound' : 'unverified', generated_at: new Date().toISOString(), project_path: options.projectPath, check_remote: !options.noRemote, no_remote: options.noRemote, has_update: hasUpdate, has_warn: hasWarn, has_error: hasError, item_count: rows.length };
 let reportMessage = 'Report file skipped because --no-report was specified';
 if (!options.noReport) {
   try {
@@ -221,3 +250,6 @@ summary.has_warn = hasWarn;
 summary.item_count = rows.length;
 section('8. Summary'); console.log(hasError ? '  Errors found; inspect ERROR rows.' : hasUpdate ? '  Updates available.' : hasWarn ? '  No confirmed updates, but warnings need attention.' : '  No confirmed updates in this check.'); console.log(`\n  ${reportMessage}`);
 process.exitCode = 0;
+
+}
+main().catch(() => { console.error("CHECK_UPDATES_FAILED: audit incomplete"); process.exitCode = 2; });
