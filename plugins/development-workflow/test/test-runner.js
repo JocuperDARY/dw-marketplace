@@ -48,14 +48,23 @@ function runTest(test) {
   // A named suite must exercise its full fixture set in a fresh temporary root.
   delete env.DW_TASK_RESOURCE_TEST_FOCUS;
   delete env.DW_TRANSACTION_TEST_ROOT;
-  const result = childProcess.spawnSync(test.command, test.args || [], {
-    env,
-    encoding: 'utf8',
-    timeout: test.timeoutMs || 120000,
-    windowsHide: true,
-  });
+  let result;
+  try {
+    result = childProcess.spawnSync(test.command, test.args || [], {
+      env,
+      encoding: 'utf8',
+      timeout: test.timeoutMs || 120000,
+      windowsHide: true,
+    });
+  } catch (error) {
+    result = { error };
+  }
   const output = `${result.stdout || ''}${result.stderr || ''}`;
-  if (result.error || result.status !== 0) return { status: 'fail', output, error: result.error };
+  if (result.error) return { status: 'fail', output, error: result.error, stopSuite: true };
+  if (result.status == null) {
+    return { status: 'fail', output, error: { code: result.signal || 'UNKNOWN_EXIT' }, stopSuite: true };
+  }
+  if (result.status !== 0) return { status: 'fail', output };
   const skipped = isSkipped(output);
   if (skipped && !hasLifecycleEvidence(output)) return { status: 'skip', output, skipped: true };
   return { status: 'pass', output, skipped };
@@ -81,7 +90,7 @@ function main() {
   const lifecycleMarker = selectedSuite.requiredLifecycle ? `LIFECYCLE_RAN:${selectedSuite.requiredLifecycle}` : null;
   let lifecycleRan = false;
 
-  for (const test of selectedSuite.tests) {
+  for (const [index, test] of selectedSuite.tests.entries()) {
     const result = runTest(test);
     counts[result.status] += 1;
     if (result.status === 'pass' && result.skipped) counts.skip += 1;
@@ -90,6 +99,13 @@ function main() {
     if (result.error) console.error(`TEST_EXECUTION_ERROR:${result.error.code || 'UNKNOWN'}`);
     if (result.status === 'pass' && result.skipped) console.log(`SKIP - ${test.name} (inapplicable evidence)`);
     if (result.output) process.stdout.write(result.output);
+    if (result.stopSuite) {
+      // spawnSync cannot establish descendant cleanup after interrupted execution.
+      counts['not-run'] += selectedSuite.tests.length - index - 1;
+      console.error('DESCENDANT_CLEANUP:UNKNOWN');
+      console.error('SUITE_STOPPED:execution boundary failure');
+      break;
+    }
   }
 
   if (lifecycleMarker && !lifecycleRan) {

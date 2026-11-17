@@ -197,22 +197,36 @@ function probeMarkerProcesses(marker) {
   return childProcess.spawnSync(powershellExecutable(), [
     '-NoProfile',
     '-Command',
-    `$marker='${marker}'; @(
-      Get-CimInstance Win32_Process -OperationTimeoutSec 3 | Where-Object {
+    `$ErrorActionPreference='Stop'; $marker='${marker}'; @(
+      Get-CimInstance Win32_Process -OperationTimeoutSec 3 -ErrorAction Stop | Where-Object {
         $_.ProcessId -ne $PID -and $_.CommandLine -like "*$marker*"
       }
     ).Count`,
   ], { encoding: 'utf8', timeout: 10000, windowsHide: true });
 }
 
-function cleanupMarkerProcesses(marker) {
-  return childProcess.spawnSync(powershellExecutable(), [
-    '-NoProfile',
-    '-Command',
-    `$marker='${marker}'; Get-CimInstance Win32_Process -OperationTimeoutSec 3 | Where-Object {
-      $_.ProcessId -ne $PID -and $_.CommandLine -like "*$marker*"
-    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
-  ], { encoding: 'utf8', timeout: 10000, windowsHide: true });
+// Markers support read-only diagnostics only. The checker owns and closes its Job;
+// matching command text never authorizes this test to terminate a process.
+function observeMarkerProcesses(marker) {
+  try {
+    return probeMarkerProcesses(marker);
+  } catch (error) {
+    return { error };
+  }
+}
+
+function assertOwnedProcessResult(result, probe, marker, expectTimeout = false) {
+  const cleanupUnknown = 'CLEANUP_UNKNOWN: marker observation does not prove owned Job cleanup';
+  assert.strictEqual(result.error, undefined, cleanupUnknown + ': ' + result.error);
+  assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+  if (expectTimeout) assert.match(result.stdout, /timed out/);
+  if (processObservationUnavailable(probe)) {
+    skipTest('HOLD: Win32_Process observation unavailable; ' + cleanupUnknown);
+    return;
+  }
+  assert.strictEqual(probe.error, undefined, cleanupUnknown + ': ' + probe.error);
+  assert.strictEqual(probe.status, 0, cleanupUnknown + ': ' + probe.stderr);
+  assert.strictEqual(probe.stdout.trim(), '0', cleanupUnknown + ': matching process still running: ' + marker);
 }
 
 function processObservationUnavailable(result) {
@@ -715,7 +729,6 @@ test('check-updates kills the owned process tree after a CLI timeout on Windows'
   };
   let result;
   let probe;
-  let cleanup;
   try {
     result = childProcess.spawnSync(powershell, [
       '-NoProfile',
@@ -731,21 +744,12 @@ test('check-updates kills the owned process tree after a CLI timeout on Windows'
       timeout: 30000,
       windowsHide: true,
     });
-    probe = probeMarkerProcesses(marker);
   } finally {
-    cleanup = cleanupMarkerProcesses(marker);
+    // Observe even after a launch exception, without replacing that exception.
+    probe = observeMarkerProcesses(marker);
   }
 
-  if (processObservationUnavailable(cleanup) || processObservationUnavailable(probe)) {
-    skipTest('HOLD: Win32_Process observation or cleanup is unavailable under the current permission boundary');
-    return;
-  }
-  assert.strictEqual(cleanup.status, 0, cleanup.stderr);
-  assert.strictEqual(result.error, undefined, `check-updates timed out: ${result.error}`);
-  assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /timed out/);
-  assert.strictEqual(probe.status, 0, probe.stderr);
-  assert.strictEqual(probe.stdout.trim(), '0', `owned process still running: ${marker}`);
+  assertOwnedProcessResult(result, probe, marker, true);
 });
 
 test('check-updates reclaims a child after its CLI parent exits normally on Windows', () => {
@@ -775,7 +779,6 @@ test('check-updates reclaims a child after its CLI parent exits normally on Wind
   };
   let result;
   let probe;
-  let cleanup;
   try {
     result = childProcess.spawnSync(powershellExecutable(), [
       '-NoProfile',
@@ -791,20 +794,12 @@ test('check-updates reclaims a child after its CLI parent exits normally on Wind
       timeout: 30000,
       windowsHide: true,
     });
-    probe = probeMarkerProcesses(marker);
   } finally {
-    cleanup = cleanupMarkerProcesses(marker);
+    // Observe even after a launch exception, without replacing that exception.
+    probe = observeMarkerProcesses(marker);
   }
 
-  if (processObservationUnavailable(cleanup) || processObservationUnavailable(probe)) {
-    skipTest('HOLD: Win32_Process observation or cleanup is unavailable under the current permission boundary');
-    return;
-  }
-  assert.strictEqual(cleanup.status, 0, cleanup.stderr);
-  assert.strictEqual(result.error, undefined, `check-updates timed out: ${result.error}`);
-  assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-  assert.strictEqual(probe.status, 0, probe.stderr);
-  assert.strictEqual(probe.stdout.trim(), '0', `detached child still running: ${marker}`);
+  assertOwnedProcessResult(result, probe, marker, false);
 });
 
 test('domain reference notes link to existing plugin assets', () => {

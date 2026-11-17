@@ -166,6 +166,34 @@ function makeHarness(policyOverrides = {}, queueOverrides = {}) {
   };
 }
 
+test('scheduling uses one detached observation despite authorization callback mutation', () => {
+  const input = observation({ cpuCores: 0 });
+  let mutate = false;
+  const harness = makeHarness({}, {
+    authorizationResolver: () => {
+      if (mutate) {
+        input.cpuCores = 8;
+        input.nowMs = 9000;
+        input.gpu.capabilities.push('callback-added');
+      }
+      return true;
+    },
+  });
+  harness.enqueue(profile('snapshot-task'));
+  mutate = true;
+  const result = harness.queue.schedule(input);
+  assert.strictEqual(input.cpuCores, 8, 'callback actually mutated the caller object');
+  assert.strictEqual(result.action, 'CONTINUE_SAFE_WORK');
+  assert.deepStrictEqual(result.start, []);
+  assert.strictEqual(result.tasks['snapshot-task'].state, 'ready');
+  assert.strictEqual(result.capacity.total.cpuCores, 0);
+  assert.strictEqual(result.reservations[0].waitedMs, 1000);
+  const snapshot = harness.queue.snapshot();
+  assert.strictEqual(snapshot.lastObservation.cpuCores, 0);
+  assert.strictEqual(snapshot.lastObservation.nowMs, 2000);
+  assert.deepStrictEqual(snapshot.lastObservation.gpu.capabilities, ['compute', 'tensor-cores']);
+});
+
 test('blocks admission when profile, observation, authorization, or root scope is incomplete', () => {
   assert.throws(() => new ResourceAwareQueue({ policy }), /TRACKER_REQUIRED/);
   const harness = makeHarness();

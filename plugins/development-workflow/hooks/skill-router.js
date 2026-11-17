@@ -19,6 +19,11 @@ const SKILL_IDS = Object.freeze(SKILL_REGISTRY.map(skill => skill.name));
 
 const ROUTES = [
   {
+    id: 'design-challenge', skills: ['dw-planning'],
+    pattern: /^(?:审视|质询|追问|挑战|压力测试)\s*(?:一下|这个|这份|我的|我们的)?\s*(?:方案|设计|计划|假设)|^(?:grill\s+me\s+(?:about|on)\s+(?:(?:this|the|my|our)\s+)?(?:plan|design|decision|idea)|(?:stress[ -]test|challenge)\s+(?:this|the|my|our)\s+(?:plan|design|decision|idea))\b/im,
+    context: 'Use `development-workflow:dw-planning` to test assumptions and decision dependencies. Look up facts first, ask only material unresolved decisions, preserve interview-only scope and existing authorization, and stop when the requested decision is sufficiently supported.',
+  },
+  {
     id: 'writing', skills: ['dw-writing'],
     pattern: /(?:请|帮我|需要)?\s*(?:润色|改写|改进表述|简化说明|说人话|任务命名)|\b(?:rewrite|polish)\s+(?:this|the|my|our)\s+(?:text|explanation|summary|report)\b/i,
     context: 'Use `development-workflow:dw-writing` to make the wording clear while preserving facts, evidence, and the requested scope.',

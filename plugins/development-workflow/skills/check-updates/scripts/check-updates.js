@@ -157,8 +157,9 @@ function checkRemote(deps) {
   }
   for (const pkg of packages) {
     const item = data[pkg];
+    const current = item && safeVersion(item.current);
     const latest = item && safeVersion(item.latest);
-    if (latest) add('Remote', pkg, 'UPDATE', `installed ${safeVersion(item.current) || 'unknown'}; latest ${latest}`);
+    if (current && latest) add('Remote', pkg, compareVersion(current, latest) < 0 ? 'UPDATE' : 'OK', `installed ${current}; latest ${latest}`);
     else if (item) add('Remote', pkg, 'WARN', 'registry package version invalid');
     else if (uncertain) add('Remote', pkg, 'INFO', 'registry response uncertain; package status unavailable');
     else if (npmVersion(deps, pkg)) add('Remote', pkg, 'OK', `installed v${npmVersion(deps, pkg)}; not listed as outdated`);

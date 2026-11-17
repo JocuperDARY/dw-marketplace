@@ -67,6 +67,32 @@ try {
   expectCode(() => api.validateEvidenceRoot(verifiedRoot, { now: NOW }), 'HOST_TRUST_NOT_PROVEN');
   assert.deepStrictEqual(api.validateEvidenceRoot(verifiedRoot, { now: NOW, trustedHostAttestor: ({ host }) => host === 'codex' }), { VERIFIED: 1, UNVERIFIED: 2, FAILED: 0, total: 3 });
 
+  // Reseal deliberately invalid evidence so these assertions exercise time
+  // validation rather than only rejecting stale hashes.
+  for (const cleanupTime of ['2026-08-29T00:16:00Z', '2026-08-29T01:01:00Z']) {
+    const eventRoot = makeRoot(); const probe = makeProbe('codex');
+    probe.cleanup.observed_at = cleanupTime; seal(probe.cleanup, 'source_sha256'); seal(probe);
+    writeSet(eventRoot, makePolicy(['codex']), verifiedReceipts, { codex: probe });
+    expectCode(() => api.validateEvidenceRoot(eventRoot, { now: NOW, trustedHostAttestor: () => true }), 'PROBE_EVENT_OUTSIDE_WINDOW');
+  }
+
+  const boundaryRoot = makeRoot(); const boundaryProbe = makeProbe('codex');
+  boundaryProbe.cleanup.observed_at = NOW; boundaryProbe.observed_at = NOW;
+  seal(boundaryProbe.cleanup, 'source_sha256'); seal(boundaryProbe);
+  writeSet(boundaryRoot, makePolicy(['codex']), verifiedReceipts, { codex: boundaryProbe });
+  assert.deepStrictEqual(api.validateEvidenceRoot(boundaryRoot, { now: NOW, trustedHostAttestor: () => true }), { VERIFIED: 1, UNVERIFIED: 2, FAILED: 0, total: 3 });
+
+  for (const routeTime of ['2026-08-29T00:15:00Z', '2026-08-29T00:16:00Z', '2026-08-29T01:01:00Z']) {
+    const routeRoot = makeRoot(); const probe = makeProbe('codex'); const receipts = clone(verifiedReceipts);
+    receipts.codex.route_attestation = 'VERIFIED'; receipts.codex.actual_model = 'fixture-model'; receipts.codex.actual_effort = 'fixture-effort'; seal(receipts.codex);
+    probe.route_metadata = seal({ evidence_id: 'route-A', actual_model: 'fixture-model', actual_effort: 'fixture-effort',
+      source_kind: 'host_runtime_metadata', observed_at: routeTime, evidence_refs: ['route-fixture-A'], source_sha256: '0'.repeat(64) }, 'source_sha256');
+    seal(probe); writeSet(routeRoot, makePolicy(['codex']), receipts, { codex: probe });
+    const validate = () => api.validateEvidenceRoot(routeRoot, { now: NOW, trustedHostAttestor: () => true });
+    if (routeTime === probe.observed_at) assert.deepStrictEqual(validate(), { VERIFIED: 1, UNVERIFIED: 2, FAILED: 0, total: 3 });
+    else expectCode(validate, 'ROUTE_METADATA_OUTSIDE_WINDOW');
+  }
+
   const missingProbeRoot = makeRoot(); writeSet(missingProbeRoot, makePolicy(['codex']), verifiedReceipts);
   expectCode(() => api.validateEvidenceRoot(missingProbeRoot, { now: NOW }), 'PROBE_EVIDENCE_MISSING');
 

@@ -5,6 +5,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { checkSkillStructure } = require('../skills/dw-tooling/scripts/check-skill-structure.js');
+const catalogPath = 'skills/dw-tooling/references/automation-coverage.json';
+
+function coverageEntry(overrides = {}) {
+  return { path: 'hooks/session-start.js', owner: 'dw-writing', enforcement: 'advisory',
+    tests: ['test/sample.test.js'], limits: 'Fixture only; no host acceptance.', ...overrides };
+}
+
+function catalog(entries = [coverageEntry()]) {
+  return { schemaVersion: 1, scope: 'Source inventory and test references, not execution evidence.', entries };
+}
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-structure-'));
@@ -20,6 +30,7 @@ function fixture() {
   put('hooks/session-start.js', "'use strict';\n");
   put('test/sample.test.js', "'use strict';\n");
   put('test/test-manifest.json', { suites: { all: { tests: [{ name: 'sample', command: 'node', args: ['test/sample.test.js'] }] } } });
+  put(catalogPath, catalog());
   const options = {
     pluginRoot: root,
     skillIds: ['development-workflow', 'dw-writing'],
@@ -86,6 +97,53 @@ const cases = [
     put('test/test-manifest.json', '{broken json');
     assert(checkSkillStructure(options).issues.some(issue => issue.code === 'JSON_INVALID'));
   }],
+  ['requires the coverage catalog and an entry for every production source', ({ put, options, root }) => {
+    fs.unlinkSync(path.join(root, catalogPath));
+    assert(checkSkillStructure(options).issues.some(issue => issue.code === 'FILE_UNREADABLE' && issue.file === catalogPath));
+    put(catalogPath, catalog());
+    for (const file of ['skills/dw-writing/scripts/new.js', 'skills/dw-writing/scripts/native/New.cs', 'hooks/new.py']) {
+      put(file, '// unclassified source');
+    }
+    const result = checkSkillStructure(options);
+    assert.strictEqual(result.scripts.length, 2);
+    assert.strictEqual(result.runtimeSources.length, 4);
+    assert.strictEqual(result.issues.filter(issue => issue.code === 'SOURCE_NOT_CATALOGED').length, 3);
+  }],
+  ['rejects duplicate and dangling source paths', ({ put, options }) => {
+    put(catalogPath, catalog([coverageEntry(), coverageEntry(), coverageEntry({ path: 'hooks/missing.js' })]));
+    const issues = checkSkillStructure(options).issues;
+    assert(issues.some(issue => issue.code === 'COVERAGE_SOURCE_DUPLICATE'));
+    assert(issues.some(issue => issue.code === 'COVERAGE_SOURCE_MISSING'));
+  }],
+  ['requires a shipped owner and existing registered tests', ({ put, options }) => {
+    put('test/unregistered.test.js', "'use strict';\n");
+    put(catalogPath, catalog([coverageEntry({ owner: 'dw-missing', tests: ['test/missing.test.js', 'test/unregistered.test.js'] })]));
+    const issues = checkSkillStructure(options).issues;
+    assert(issues.some(issue => issue.code === 'COVERAGE_OWNER_MISSING'));
+    assert(issues.some(issue => issue.code === 'COVERAGE_TEST_MISSING'));
+    assert(issues.some(issue => issue.code === 'COVERAGE_TEST_NOT_REGISTERED'));
+  }],
+  ['reports invalid catalog values without crashing', ({ put, options }) => {
+    for (const value of ['{invalid', 'null', '[]', '42', '{"schemaVersion":1,"entries":{}}',
+      JSON.stringify(catalog([null, 42, [], {}, coverageEntry({ path: '../outside.js' }),
+        coverageEntry({ enforcement: 'always-run', tests: [null], limits: '' }),
+        coverageEntry({ owner: { toString: null, valueOf: null } })]))]) {
+      put(catalogPath, value);
+      let result;
+      assert.doesNotThrow(() => { result = checkSkillStructure(options); });
+      assert.strictEqual(result.ok, false, value);
+      assert(result.issues.some(issue => ['JSON_INVALID', 'COVERAGE_CATALOG_INVALID', 'COVERAGE_ENTRY_INVALID'].includes(issue.code)), value);
+    }
+  }],
+  ['requires native production sources to be packaged', ({ put, options }) => {
+    const source = 'skills/dw-writing/scripts/native/Helper.cs';
+    put(source, 'class Helper {}');
+    put(catalogPath, catalog([coverageEntry(), coverageEntry({ path: source, enforcement: 'opt-in-runtime' })]));
+    put('package.json', { files: ['skills/development-workflow/', 'skills/dw-writing/SKILL.md', 'skills/dw-tooling/references/', 'hooks/', 'test/'] });
+    const result = checkSkillStructure(options);
+    assert(result.runtimeSources.includes(source));
+    assert(result.issues.some(issue => issue.code === 'ASSET_NOT_PACKAGED' && issue.file === source));
+  }],
 ];
 
 for (const [name, run] of cases) {
@@ -107,6 +165,8 @@ if (!current.ok) {
   console.error(JSON.stringify(current.issues, null, 2));
   process.exitCode = 1;
 } else {
+  assert.strictEqual(current.scripts.length, 21, 'Existing JS/PS1 script count remains compatible');
+  assert.strictEqual(current.runtimeSources.length, 22, 'Inventory includes the native C# source');
   console.log('ok - current plugin has no missing skills, references, route targets or test registrations');
 }
 if (!process.exitCode) console.log(`${cases.length + 1}/${cases.length + 1} skill structure tests passed`);

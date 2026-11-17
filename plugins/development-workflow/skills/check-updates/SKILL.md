@@ -15,7 +15,7 @@ description: Use when 用户要求检查、比较或排查 Claude Code、Codex�
 
 | 类别 | 检查内容 |
 |------|----------|
-| Claude Code | CLI 版本、用户级启用插件数量、插件缓存和 MCP 配置摘要 |
+| Claude Code | CLI 版本、用户级插件配置条目数、插件缓存和 MCP 配置摘要 |
 | MCP Servers | Claude 用户级配置中的注册项与安装方式分类；不探测每个 server 的远程版本 |
 | CodeGraph | CLI/npm 全局包、Claude/Codex MCP 注册、当前项目 `.codegraph/` 和已知全局索引目录 |
 | OpenSpec | CLI/npm 全局包、项目 `openspec/` 目录、`openspec-mcp` 和 MCP 注册 |

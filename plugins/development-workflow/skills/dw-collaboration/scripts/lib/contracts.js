@@ -652,7 +652,7 @@ function selectedEffort(lane, floor) {
   return 'unspecified';
 }
 
-const AUTOMATIC_MODELS = new Set(['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+const AUTOMATIC_MODELS = new Set(['gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6-astra']);
 function normalizedModelId(value) { return typeof value === 'string' ? value.trim().toLowerCase() : ''; }
 function excludedAutomaticModel(value) {
   return /^(?:gpt-5\.[56](?:-|$)|gpt-6-sol(?:-|$))/.test(normalizedModelId(value));

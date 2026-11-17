@@ -5,6 +5,7 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 
 const runner = path.join(__dirname, 'test-runner.js');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-test-runner-'));
@@ -114,16 +115,118 @@ try {
     assert.strictEqual(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /complete fixture selected/);
   });
-  test('a child timeout preserves its failure reason', () => {
-    fs.writeFileSync(manifestPath, JSON.stringify({ suites: { all: { tests: [{
-      name: 'bounded slow child', command: node,
-      args: ['-e', 'setTimeout(() => {}, 5000)'], timeoutMs: 50,
-    }] } } }));
-    const result = run('all');
-    assert.strictEqual(result.status, 1, result.stderr || result.stdout);
-    assert.match(result.stderr, /TEST_EXECUTION_ERROR:ETIMEDOUT/);
-    assert.match(result.stdout, /fail: 1/);
+  function mockedRunner(outcomes) {
+    const messages = [];
+    let launches = 0;
+    const manifest = { suites: { all: { tests: [
+      { name: 'first', command: 'fixture-first' },
+      { name: 'second', command: 'fixture-second' },
+      { name: 'third', command: 'fixture-third' },
+    ] } } };
+    const fakeProcess = { argv: ['node', runner, '--manifest', 'fixture.json', '--suite', 'all'],
+      env: {}, stdout: { write: text => messages.push(text) } };
+    vm.runInNewContext(fs.readFileSync(runner, 'utf8'), {
+      require: name => name === 'child_process' ? { spawnSync: () => {
+        const result = outcomes[launches++];
+        if (result instanceof Error) throw result;
+        return result;
+      } } : name === 'fs' ? { readFileSync: () => JSON.stringify(manifest) } : require(name),
+      process: fakeProcess,
+      console: { log: text => messages.push(text), error: text => messages.push(text) },
+    }, { filename: runner });
+    return { launches, output: messages.join('\n'), exitCode: fakeProcess.exitCode };
+  }
+
+  for (const code of ['ETIMEDOUT', 'ENOBUFS', 'ENOENT']) {
+    test('execution error ' + code + ' stops subsequent suite launches with cleanup unknown', () => {
+      const result = mockedRunner([{ error: Object.assign(new Error(code), { code }), status: null }]);
+      assert.strictEqual(result.launches, 1);
+      assert.strictEqual(result.exitCode, 1);
+      assert.match(result.output, new RegExp('TEST_EXECUTION_ERROR:' + code));
+      assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
+      assert.match(result.output, /not-run: 2/);
+      assert.match(result.output, /fail: 1/);
+    });
+  }
+  test('a synchronous launch exception also stops subsequent launches', () => {
+    const result = mockedRunner([Object.assign(new Error('launch failed'), { code: 'EACCES' })]);
+    assert.strictEqual(result.launches, 1);
+    assert.strictEqual(result.exitCode, 1);
+    assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
+    assert.match(result.output, /not-run: 2/);
   });
+  test('an interrupted child without an exit status stops the suite', () => {
+    const result = mockedRunner([{ status: null, signal: 'SIGTERM' }]);
+    assert.strictEqual(result.launches, 1);
+    assert.strictEqual(result.exitCode, 1);
+    assert.match(result.output, /TEST_EXECUTION_ERROR:SIGTERM/);
+    assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
+    assert.match(result.output, /not-run: 2/);
+  });
+  test('a later execution error preserves earlier passes and counts only remaining tests', () => {
+    const result = mockedRunner([{ status: 0 }, { status: null, error: { code: 'ETIMEDOUT' } }]);
+    assert.strictEqual(result.launches, 2);
+    assert.match(result.output, /pass: 1/);
+    assert.match(result.output, /fail: 1/);
+    assert.match(result.output, /not-run: 1/);
+  });
+  test('an ordinary failing exit retains the subsequent suite launches', () => {
+    const result = mockedRunner([{ status: 1 }, { status: 0 }, { status: 0 }]);
+    assert.strictEqual(result.launches, 3);
+    assert.strictEqual(result.exitCode, 1);
+    assert.match(result.output, /not-run: 0/);
+    assert.match(result.output, /pass: 2/);
+    assert.doesNotMatch(result.output, /DESCENDANT_CLEANUP/);
+  });
+
+  function hookObservationFixture(probeResult) {
+    const file = path.join(__dirname, 'hooks.test.js');
+    const source = fs.readFileSync(file, 'utf8').split('const retainedContractTests =')[0];
+    const commands = [];
+    const skips = [];
+    const context = { require: name => name === 'child_process' ? {
+      spawnSync: (command, args) => {
+        commands.push([command, args]);
+        if (probeResult instanceof Error) throw probeResult;
+        return probeResult;
+      },
+    } : require(name), __dirname, process, console };
+    const api = vm.runInNewContext(source + '\n;({ observeMarkerProcesses, assertOwnedProcessResult, setSkip: fn => { skipTest = fn; } })', context);
+    api.setSkip(message => skips.push(message));
+    return { ...api, commands, skips };
+  }
+  test('marker observations never terminate processes and residual matches remain cleanup unknown', () => {
+    const fixture = hookObservationFixture({ status: 0, stdout: '1', stderr: '' });
+    const probe = fixture.observeMarkerProcesses('fixture-marker');
+    assert.throws(() => fixture.assertOwnedProcessResult({ status: 0 }, probe, 'fixture-marker'), /CLEANUP_UNKNOWN/);
+    assert.strictEqual(fixture.commands.length, 1);
+    assert.doesNotMatch(JSON.stringify(fixture.commands), /Stop-Process|taskkill|TerminateProcess/i);
+  });
+  test('failed execution is not hidden by unavailable process observation', () => {
+    const fixture = hookObservationFixture({ status: 1, stderr: 'Access is denied' });
+    assert.throws(() => fixture.assertOwnedProcessResult({ status: 9, stderr: 'original fixture failure' },
+      fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker'), /original fixture failure/);
+    assert.strictEqual(fixture.skips.length, 0);
+  });
+  test('observation exceptions cannot mask execution failures and do not trigger cleanup', () => {
+    const fixture = hookObservationFixture(new Error('observation failed'));
+    const probe = fixture.observeMarkerProcesses('fixture-marker');
+    assert.throws(() => fixture.assertOwnedProcessResult({ error: new Error('original execution error') }, probe,
+      'fixture-marker'), /original execution error/);
+    assert.strictEqual(fixture.commands.length, 1);
+  });
+  test('unavailable observation only skips after successful execution with cleanup unknown', () => {
+    const fixture = hookObservationFixture({ status: 1, stderr: 'Access is denied' });
+    fixture.assertOwnedProcessResult({ status: 0 }, fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker');
+    assert.match(fixture.skips[0], /CLEANUP_UNKNOWN/);
+  });
+  test('failed observation after successful execution remains cleanup unknown', () => {
+    const fixture = hookObservationFixture({ status: 1, stderr: 'CIM provider unavailable' });
+    assert.throws(() => fixture.assertOwnedProcessResult({ status: 0 },
+      fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker'), /CLEANUP_UNKNOWN/);
+    assert.strictEqual(fixture.skips.length, 0);
+  });
+
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

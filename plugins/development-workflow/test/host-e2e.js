@@ -84,8 +84,12 @@ function validateProbe(probe, receipt, policy, now) {
   if (new Set(events.map((event) => event.evidence_id)).size !== events.length) fail('PROBE_EVIDENCE_ID_DUPLICATE');
   if (!events.every((event, index) => index === 0 || Date.parse(event.observed_at) >= Date.parse(events[index - 1].observed_at))) fail('PROBE_TIME_NOT_MONOTONIC');
   if (!isUtc(probe.observed_at) || !isUtc(probe.expires_at) || Date.parse(probe.observed_at) > Date.parse(now) || Date.parse(probe.expires_at) <= Date.parse(now) || probe.expires_at !== policy.expiry_by_host[receipt.host].expires_on) fail('PROBE_EXPIRED');
+  // A monotonic sequence may still describe events after its own observation.
+  // Every event must already exist when the probe is observed and validated.
+  if (events.some((event) => Date.parse(event.observed_at) > Date.parse(probe.observed_at) || Date.parse(event.observed_at) > Date.parse(now))) fail('PROBE_EVENT_OUTSIDE_WINDOW');
   if (!exactKeys(probe.verifier, ['actor_id', 'evidence_refs']) || typeof probe.verifier.actor_id !== 'string' || !probe.verifier.actor_id || !strings(probe.verifier.evidence_refs) || [probe.producer.actor_id, probe.producer.adapter_id, probe.request.producer_id, probe.ack.producer_id, probe.collect.producer_id, probe.independent_message.producer_id, probe.liveness.producer_id, probe.cleanup.producer_id].includes(probe.verifier.actor_id)) fail('PROBE_VERIFIER_NOT_INDEPENDENT');
   const routeMetadata = validateRouteMetadata(probe.route_metadata, receipt);
+  if (routeMetadata && (Date.parse(probe.route_metadata.observed_at) > Date.parse(probe.observed_at) || Date.parse(probe.route_metadata.observed_at) > Date.parse(now))) fail('ROUTE_METADATA_OUTSIDE_WINDOW');
   if (receipt.route_attestation === 'VERIFIED' && !routeMetadata) fail('ROUTE_METADATA_REQUIRED');
   if (receipt.route_attestation === 'UNVERIFIED' && (routeMetadata || receipt.actual_model !== 'unknown' || receipt.actual_effort !== 'unknown')) fail('ROUTE_ATTESTATION_INVALID');
 }

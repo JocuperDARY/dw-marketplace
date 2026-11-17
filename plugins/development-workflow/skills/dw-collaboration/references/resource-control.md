@@ -7,6 +7,8 @@ close. It accepts an executable plus an argument array, registers before launch,
 
 Manager journal operations are serialized: a pending start, observation or stop rejects a second operation before its adapter action. Started commands may continue running concurrently. Final close persists and reads back the real tracker close before releasing the recovery writer through the store. The durable reason `TRACKER_CLOSED_WRITER_RELEASE_PENDING` describes this ordering; the public manager returns `CLOSED` only after the store confirms release. Unverified final persistence or writer release returns public `HOLD`, with the evidence and any unreleased lease retained. A durable tracker `CLOSED` record alone does not prove writer-lease absence; recovery must observe the current lease separately. This package includes integration interfaces and synthetic adapters, not a production OS adapter.
 
+The manager passes `timeoutMs` and `actionTimeoutMs` to the adapter and awaits its result. It does not independently interrupt a stuck adapter or cancel late OS side effects. A production adapter needs its own bounded execution and verified cleanup before those parameters can support a hard deadline claim. The queue likewise returns scheduling decisions; it does not dispatch agents or reserve physical resources. See the [automation coverage](../../dw-tooling/references/automation-coverage.md) for the distinction between libraries, connected entry points, and host validation.
+
 ## Scheduled audit gate
 
 A scheduled audit is only a policy-timed trigger for another bounded read-only observation. It does not create, grant, inherit, refresh, or expand cleanup authority or termination authority. Cadence is host policy, not a universal interval. Each run must reacquire the current owner, run/session, scope, lease and manager generation, complete process identity, teardown condition, policy references, and action authorization; a prior run's PID, status, classification, or receipt is historical evidence only.
@@ -99,4 +101,4 @@ Use four short reports:
 
 ## Compatibility boundary retained from 5.2.0
 
-兼容层不包含付费模型询问、供应商 API 适配、密钥登记表或远程模型列表刷新。这些仍是未来可选方案；任何真实付费调用或凭据网络操作都需要另行设计和用户逐次明确批准。
+兼容层不包含付费模型询问、供应商 API 适配、密钥登记表或远程模型列表刷新。这些仍是未来可选方案。实施时需要先明确目标、凭据用途、调用与费用上限；已有授权在约定范围和有效期内持续适用。只有扩大范围、突破上限、改变凭据用途或缺少必要决定时才重新确认，不把每次调用都变成重复审批。

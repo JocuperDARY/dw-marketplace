@@ -356,11 +356,17 @@ class ResourceAwareQueue {
     return this._withStateOperation('schedule', () => this._schedule(observation));
   }
 
-  _schedule(observation) {
+  _schedule(inputObservation) {
+    let observation;
+    try {
+      observation = detached(inputObservation);
+    } catch (_) {
+      return this._result('HOLD', ['RESOURCE_OBSERVATION_INCOMPLETE'], [], [], null);
+    }
     if (!validateObservation(observation)) {
       return this._result('HOLD', ['RESOURCE_OBSERVATION_INCOMPLETE'], [], [], null);
     }
-    this._lastObservation = detached(observation);
+    this._lastObservation = observation;
     const safetyAction = unsafeAction(observation);
     if (safetyAction !== null) {
       return this._result(safetyAction, ['RESOURCE_SAFETY_LIMIT'], [], [], this._capacity(observation));
