@@ -122,7 +122,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.7.0 版本
+3. 将插件更新到当前的 5.9.0 版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -199,7 +199,7 @@ Windows 运行会记录 `LIFECYCLE_RAN` 或 `SKIP_NOT_APPLICABLE`。Windows 平�
 
 `IMPLEMENTED` 只表示代码或文本已写入；`PASS_STATIC` 表示结构和相关静态检查通过；`PASS_FOCUSED` 表示指定焦点测试通过；`VERIFIED` 需要对应功能的运行时与独立读回证据；`VERIFIED_DEGRADED` 表示已验证但能力受限；`UNVERIFIED`、`NOT_RUN`、`FAIL` 和 `HOLD` 保留原因，并按原状态记录。
 
-`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付。5.9.0 的 Windows 命令 adapter 将真实启动、观察、停止和释放接入 manager；通用测试入口直接复用同一受管命令后端。临时目录、重连接、队列自动派发、Linux 和 Claude/Codex/Grok 的实际宿主接线仍需独立实现或验证。合成协议测试与实际 Windows 命令测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
+`TaskResourceManager`、tracker、recovery store 和验证器已作为库交付。5.9.0 提供面向生产调用的 Windows 命令 adapter，将真实启动、观察、停止和释放接入 manager；通用测试入口直接复用同一受管命令后端。临时目录、重连接、队列自动派发、Linux 和 Claude/Codex/Grok 的实际宿主接线仍需独立实现或验证。合成协议测试与实际 Windows 命令测试分别计证。managed 模型路由要求宿主提供可信的模型映射和允许组合；它不调用模型，也不证明实际 dispatch 的模型。
 
 更新检查工具有独立的 Windows Job Object 命令后端，仅用于约束它自己启动的检查命令及 Job 内后代，不替代完整 manager adapter。无法建立或确认命令归属时报告 HOLD；POSIX 外部命令检查尚无等价后端，保持 HOLD/NOT_RUN，本地文件审计仍可运行。Windows 监管器的验收覆盖本地隔离 fixture；原生 Linux、Grok Build、真实 Claude/Codex 插件加载和用户配置切换另行验收。
 
