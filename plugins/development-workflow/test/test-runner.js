@@ -8,10 +8,12 @@ function parseArgs(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
+    if (key === '--posix-process-group') { options.posixProcessGroup = true; continue; }
     if (key === '--portable-direct') { options.portableDirect = true; continue; }
-    if (!['--manifest', '--suite'].includes(key) || !argv[i+1] || argv[i+1].startsWith('--')) return null;
-    options[key.slice(2)] = argv[++i];
+    if (!['--manifest', '--suite', '--python-path'].includes(key) || !argv[i+1] || argv[i+1].startsWith('--')) return null;
+    options[key === '--python-path' ? 'pythonPath' : key.slice(2)] = argv[++i];
   }
+  if (options.portableDirect && options.posixProcessGroup || options.pythonPath && !options.posixProcessGroup || options.posixProcessGroup && !options.pythonPath) return null;
   return options.manifest && options.suite ? options : null;
 }
 function testIdentity(test) { return JSON.stringify([test.command, test.args || []]); }
@@ -22,7 +24,9 @@ function executableFor(command) {
 }
 async function createExecutionContext(options, dependencies = {}) {
   const platform = dependencies.platform || process.platform;
+  if (options.portableDirect && options.posixProcessGroup || options.pythonPath && !options.posixProcessGroup) throw Object.assign(new Error('Conflicting backend options'), {code:'COMMAND_BACKEND_OPTIONS'});
   if (platform === 'win32') {
+    if (options.posixProcessGroup || options.pythonPath) throw Object.assign(new Error('POSIX backend is forbidden on Windows'), {code:'POSIX_BACKEND_WINDOWS_FORBIDDEN'});
     if (options.portableDirect) throw Object.assign(new Error('Portable direct mode is forbidden on Windows'), {code:'PORTABLE_DIRECT_WINDOWS_FORBIDDEN'});
     const backend = dependencies.backend || require('../skills/dw-collaboration/scripts/lib/windows-command-backend');
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-suite-supervisor-'));
@@ -49,6 +53,12 @@ async function createExecutionContext(options, dependencies = {}) {
       },
     };
   }
+  if (options.posixProcessGroup) {
+    const backend = dependencies.posixBackend || require('../skills/dw-collaboration/scripts/lib/posix-command-backend');
+    const prepared = await backend.preparePosixCommandBackend({pythonPath:options.pythonPath, platform});
+    return {owned:true, label:'posix-process-group', pythonPath:prepared.pythonPath, dispose:()=>{},
+      execute:request=>backend.runPosixCommand({...prepared, ...request})};
+  }
   if (!options.portableDirect) throw Object.assign(new Error('Use --portable-direct explicitly for portable non-Windows tests'), {code:'COMMAND_BACKEND_UNSUPPORTED'});
   return {owned:false, label:'portable-direct', dispose:()=>{}, execute:async request => cp.spawnSync(request.executable, request.args, {
     env:request.env, cwd:request.cwd, encoding:'utf8', timeout:request.timeoutMs, maxBuffer:request.maxOutputBytes, windowsHide:true,
@@ -59,6 +69,10 @@ async function runTest(test, context) {
   // Named suites must exercise the full fixture set in a fresh fixture root.
   delete env.DW_TASK_RESOURCE_TEST_FOCUS;
   delete env.DW_TRANSACTION_TEST_ROOT;
+  delete env.DW_TEST_COMMAND_BACKEND;
+  delete env.DW_TEST_PYTHON_PATH;
+  env.DW_TEST_COMMAND_BACKEND = context.label;
+  if (context.pythonPath) env.DW_TEST_PYTHON_PATH = context.pythonPath;
   let result;
   try {
     result = await context.execute({executable:executableFor(test.command), args:test.args || [], cwd:process.cwd(), env,
@@ -69,7 +83,7 @@ async function runTest(test, context) {
   const common = {output, cleanup, terminal:result.terminal};
   if (result.error) return {...common, status:'fail', error:result.error, stopSuite:true};
   if (context.owned && (cleanup !== 'VERIFIED_ABSENT' || !result.terminal || result.supervisorClosed !== true || result.outputComplete !== true || result.releaseError)) {
-    return {...common, status:'fail', error:{code:result.reason || 'WINDOWS_EXECUTION_BOUNDARY'}, stopSuite:true};
+    return {...common, status:'fail', error:{code:result.reason || (context.label === 'posix-process-group' ? 'POSIX_EXECUTION_BOUNDARY' : 'WINDOWS_EXECUTION_BOUNDARY')}, stopSuite:true};
   }
   if (result.status == null) return {...common, status:'fail', error:{code:result.reason || result.signal || 'UNKNOWN_EXIT'}, stopSuite:true};
   if (context.owned && result.reason && result.reason !== 'child_exit') return {...common, status:'fail', error:{code:result.reason}, stopSuite:true};
@@ -88,6 +102,7 @@ async function runSuite(manifest, suiteName, context, log = console, stdout = pr
   const marker = suite.requiredLifecycle ? `LIFECYCLE_RAN:${suite.requiredLifecycle}` : null;
   let lifecycleRan = false;
   log.log(`COMMAND_BACKEND:${context.label}`);
+  if (context.label === 'posix-process-group') log.error('ESCAPED_DESCENDANTS:UNVERIFIED');
   if (!context.owned) log.error('DESCENDANT_CLEANUP:UNVERIFIED');
   for (const [index, test] of suite.tests.entries()) {
     const result = await runTest(test, context);
@@ -112,7 +127,7 @@ async function runSuite(manifest, suiteName, context, log = console, stdout = pr
 async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   if (!options) {
-    console.error('Usage: node test/test-runner.js --manifest <path> --suite <name> [--portable-direct]');
+    console.error('Usage: node test/test-runner.js --manifest <path> --suite <name> [--portable-direct | --posix-process-group --python-path <absolute-python3>]');
     console.error('--portable-direct permits portable non-Windows tests with descendant cleanup UNVERIFIED; forbidden on Windows.');
     process.exitCode = 2; return;
   }

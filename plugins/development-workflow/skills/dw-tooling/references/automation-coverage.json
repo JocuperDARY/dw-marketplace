@@ -125,14 +125,14 @@
       "path": "skills/dw-collaboration/scripts/lib/task-resource-manager.js",
       "owner": "dw-collaboration",
       "enforcement": "opt-in-runtime",
-      "tests": ["test/task-resource-manager.test.js", "test/collaboration-safety.test.js", "test/windows-command-adapter.test.js"],
+      "tests": ["test/task-resource-manager.test.js", "test/collaboration-safety.test.js", "test/windows-command-adapter.test.js", "test/resource-command-dispatcher.test.js"],
       "limits": "Finite manager API requires an adapter, identity and authorization; the Windows command adapter supplies one bounded implementation. Other adapters and installed hosts require their own evidence."
     },
     {
       "path": "skills/dw-collaboration/scripts/lib/task-resource-tracker.js",
       "owner": "dw-collaboration",
       "enforcement": "opt-in-runtime",
-      "tests": ["test/resource-control.test.js", "test/identity-support-v2.test.js"],
+      "tests": ["test/resource-control.test.js", "test/identity-support-v2.test.js", "test/resource-command-dispatcher.test.js"],
       "limits": "Tracks registered resources and close evidence for explicit callers; unregistered resources and unsupported hosts remain outside its scope."
     },
     {
@@ -154,7 +154,7 @@
       "owner": "dw-collaboration",
       "enforcement": "opt-in-runtime",
       "tests": ["test/windows-command-adapter.test.js"],
-      "limits": "V1 Windows command resources with no temporary root; explicit deadline/force authority. No automatic queue dispatch, installed-host activation or non-Windows adapter."
+      "limits": "V1 Windows command resources with no temporary root; explicit deadline/force authority and native-release gate for queue closure. No installed-host activation or non-Windows manager adapter."
     },
     {
       "path": "skills/dw-collaboration/scripts/process-supervisor/DwProcessSupervisor.Managed.cs",
@@ -176,6 +176,27 @@
       "enforcement": "validation",
       "tests": ["test/skill-structure.test.js"],
       "limits": "Read-only source, package-declaration, link and registration checks; no behavioral coverage measurement, native compilation or host acceptance."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/resource-command-dispatcher.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/resource-command-dispatcher.test.js"],
+      "limits": "Explicit prepared-command dispatch with bounded calls and exact scope-release consumption. No automatic retry, host-agent interception, or recovery replay."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/posix-command-backend.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/posix-command-backend.test.js", "test/test-runner.test.js"],
+      "limits": "Explicit Python interpreter and POSIX process-group execution. Offline contract tests do not establish native Linux/macOS acceptance; escaped or brokered descendants remain unverified."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/process-supervisor/posix_command_supervisor.py",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/posix-command-backend.test.js"],
+      "limits": "Controller/guardian enforce deadlines and output limits for their newly created process group. No adoption of old PIDs; no Windows Job equivalent or native acceptance inferred from mocks."
     }
   ]
 }

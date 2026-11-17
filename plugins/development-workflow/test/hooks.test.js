@@ -296,7 +296,8 @@ test('published package can run its own npm test without repository-only files',
   // Forward the explicit portable mode through the leaf npm script; the normal
   // Windows npm test still exercises the public default entry point.
   const testArgs = process.platform === 'win32' ? [npmCli(), 'test']
-    : [npmCli(), 'run', 'test:all', '--', '--portable-direct'];
+    : [npmCli(), 'run', 'test:all', '--', ...(process.env.DW_TEST_COMMAND_BACKEND === 'posix-process-group'
+      ? ['--posix-process-group', '--python-path', process.env.DW_TEST_PYTHON_PATH || ''] : ['--portable-direct'])];
   const result = childProcess.spawnSync(node, testArgs, {
     cwd: packagedRoot,
     env: {

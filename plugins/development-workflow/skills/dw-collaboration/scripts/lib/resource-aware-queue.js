@@ -1,7 +1,7 @@
 'use strict';
 
 const { createDetachedJsonSnapshot } = require('./canonical-json');
-const { TaskResourceTracker } = require('./task-resource-tracker');
+const { TaskResourceTracker, isTaskResourceQueueAuthority } = require('./task-resource-tracker');
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 const BOTTLENECK_EXEMPTIONS = new Set([
@@ -13,6 +13,7 @@ const BOTTLENECK_EXEMPTIONS = new Set([
 ]);
 const RESERVED_TASK_IDS = new Set(['__proto__', 'constructor', 'prototype']);
 const QUEUE_OPERATION_STATE = new WeakMap();
+const QUEUE_AUTHORITIES = new WeakMap();
 const GPU_WINDOW_VERSION = 1;
 const GPU_WINDOW_MIN_SAMPLES = 3;
 const GPU_WINDOW_MAX_SAMPLES = 120;
@@ -289,7 +290,9 @@ function evaluateGpuTarget(input = {}) {
 class ResourceAwareQueue {
   constructor(options = {}) {
     const policy = validatePolicy(options.policy);
-    if (!(options.tracker instanceof TaskResourceTracker)) throw new ResourceQueueError('TRACKER_REQUIRED');
+    const authority = options.authority || options.tracker;
+    if (!(authority instanceof TaskResourceTracker)
+      && !isTaskResourceQueueAuthority(authority)) throw new ResourceQueueError('TRACKER_REQUIRED');
     if (typeof options.authorizationResolver !== 'function') {
       throw new ResourceQueueError('AUTHORIZATION_RESOLVER_REQUIRED');
     }
@@ -299,8 +302,9 @@ class ResourceAwareQueue {
       configurable: false,
       writable: false,
     });
+    QUEUE_AUTHORITIES.set(this, authority);
     Object.defineProperty(this, 'tracker', {
-      value: options.tracker,
+      value: authority instanceof TaskResourceTracker ? authority.queueAuthority() : authority,
       enumerable: false,
       configurable: false,
       writable: false,
@@ -328,7 +332,7 @@ class ResourceAwareQueue {
     if (this._tasks.has(taskId)) throw new ResourceQueueError('TASK_ALREADY_QUEUED');
     if (this._tasks.size >= this.policy.maxTasks) throw new ResourceQueueError('QUEUE_TASK_LIMIT_REACHED');
     const reasons = validateProfile(safeProfile);
-    if (reasons.length === 0 && !this.tracker.hasOpenScope(safeProfile.scopeBinding)) {
+    if (reasons.length === 0 && !QUEUE_AUTHORITIES.get(this).hasOpenScope(safeProfile.scopeBinding)) {
       reasons.push('ROOT_SCOPE_NOT_READY');
     }
     if (reasons.length === 0 && !this._authorizationAccepted(safeProfile, null)) {
@@ -429,8 +433,16 @@ class ResourceAwareQueue {
 
   _beginDrain(taskId, outcome) {
     const task = this._requireTask(taskId);
-    if (task.state !== 'running') throw new ResourceQueueError('TASK_NOT_RUNNING');
+    if (task.state !== 'running'
+      && !(outcome === 'cancelled' && ['ready', 'blocked'].includes(task.state))) {
+      throw new ResourceQueueError('TASK_NOT_RUNNING');
+    }
     if (!TERMINAL_STATES.has(outcome)) throw new ResourceQueueError('TASK_OUTCOME_INVALID');
+    // Cancellation may follow rejected authorization before admission claimed the
+    // scope. Claiming only for teardown does not authorize or launch its work.
+    if (outcome === 'cancelled' && ['ready', 'blocked'].includes(task.state)) {
+      this._claimTaskScope(task.profile);
+    }
     task.state = 'draining';
     task.drainReason = outcome;
     task.outcome = outcome;
@@ -489,7 +501,7 @@ class ResourceAwareQueue {
     for (const task of this._tasks.values()) {
       if (TERMINAL_STATES.has(task.state) || task.state === 'running' || task.state === 'draining') continue;
       const staticReasons = validateProfile(task.profile);
-      if (staticReasons.length === 0 && !this.tracker.hasOpenScope(task.profile.scopeBinding)) {
+      if (staticReasons.length === 0 && !QUEUE_AUTHORITIES.get(this).hasOpenScope(task.profile.scopeBinding)) {
         staticReasons.push('ROOT_SCOPE_NOT_READY');
       }
       if (staticReasons.length === 0 && !this._authorizationAccepted(task.profile, task)) {
@@ -697,7 +709,7 @@ class ResourceAwareQueue {
 
   _claimTaskScope(profile) {
     try {
-      return this.tracker.claimTaskScope(
+      return QUEUE_AUTHORITIES.get(this).claimTaskScope(
         profile.taskId,
         profile.scopeBinding,
         profile.trackedResourceIds,
@@ -709,7 +721,7 @@ class ResourceAwareQueue {
 
   _consumeTaskCloseResult(task, trackerCloseResult) {
     try {
-      return this.tracker.consumeTaskCloseResult(
+      return QUEUE_AUTHORITIES.get(this).consumeTaskCloseResult(
         task.taskId,
         trackerCloseResult,
         task.profile.scopeBinding,

@@ -20,7 +20,7 @@ const SKILL_IDS = Object.freeze(SKILL_REGISTRY.map(skill => skill.name));
 const ROUTES = [
   {
     id: 'resource-lifecycle', skills: ['dw-collaboration', 'dw-verification'],
-    pattern: /^(?:请|帮我)?\s*(?:管理|回收|停止|监管)\s*(?:本任务的?|测试的?|这些)?\s*(?:子进程|进程树|任务资源)|^(?:请|帮我)?\s*(?:补齐|接入|实现)\s*(?:生产资源管理适配|通用测试的?子进程回收)|^(?:manage|reclaim|supervise)\s+(?:(?:this|the|test|task|owned)\s+)*(?:subprocesses|process\s+trees|task\s+resources)\b/im,
+    pattern: /^(?:请|帮我)?\s*(?:管理|回收|停止|监管)\s*(?:本任务的?|测试的?|这些)?\s*(?:子进程|进程树|任务资源)|^(?:请|帮我)?\s*(?:补齐|接入|实现|接通)\s*(?:生产资源管理适配|通用测试的?子进程回收|队列到资源管理器|启动失败后的资源释放|POSIX\s*子进程回收)|^(?:manage|reclaim|supervise)\s+(?:(?:this|the|test|task|owned)\s+)*(?:subprocesses|process\s+trees|task\s+resources)\b/im,
     context: 'Use `development-workflow:dw-collaboration` for task-owned command resources and `development-workflow:dw-verification` for lifecycle evidence. Reuse the bounded command backend; enable the persistent manager only when needed. Preserve existing authorization and platform limits. Missing identity or terminal evidence remains HOLD/UNKNOWN; this routing advice does not launch or terminate processes.',
   },
   {

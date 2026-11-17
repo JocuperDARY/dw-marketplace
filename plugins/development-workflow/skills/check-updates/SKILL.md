@@ -44,7 +44,7 @@ node "./plugins/development-workflow/skills/check-updates/scripts/check-updates.
 
 Windows 外部命令由 `scripts/bounded-command-windows.ps1` 管理：通过 `STARTUPINFOEX / PROC_THREAD_ATTRIBUTE_JOB_LIST` 在挂起创建时原子绑定本次私有 Job Object，然后才恢复运行；设置命令超时及输出上限，正常退出和超时都回收仍属于该 Job 的后代，并检查 active process 数为零。私有 Job 的 kill-on-close 语义覆盖后端突然退出的路径。该创建接口要求 Windows 10 / Server 2016 或更新版本；无法建立归属或确认回收时按 `HOLD` 原因记录为 `WARN`，不回退到先创建再分配的路径，也不会按进程名称或 PID 扫描终止。此后端仅服务于环境检查工具，不等于完整 `TaskResourceManager` 宿主适配器。接口支持范围见 [Microsoft UpdateProcThreadAttribute 文档](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)。
 
-当前 POSIX 外部命令的后代回收尚未验证，脚本保留本地文件/配置审计，CLI、pip、npm 外部检查返回明确 `HOLD`，不执行这些命令。这一限制需要对应平台实现和实测后再解除。每个 Windows 外部命令受 `CommandTimeoutSec` 限制，另留有限后端启动/清理时间；不是整次审计的总时间上限。
+POSIX 默认保留本地文件/配置审计，CLI、pip、npm 外部检查返回明确 `HOLD`，不执行这些命令。显式传入 `--posix-process-group --python-path /absolute/path/to/python3` 后，使用 Python 进程组后端按命令超时和输出上限执行；解释器路径必须为绝对路径。不接受 `--portable-direct`，Windows 拒绝 POSIX 参数。后端准备失败、控制通道/清理证据不完整、超时、输出超限或执行边界无法确认时停止派发后续外部检查；普通非零退出由对应检查解释，本地文件审计仍继续。此模式只确认仍在受管 POSIX 进程组内的进程已回收，脱离进程组的后代保持 `UNVERIFIED`，并不提供 Windows Job 等价的树级保证；Linux/macOS 原生验收必须单独记录，mock 测试不代表原生通过。每个 Windows 外部命令受 `CommandTimeoutSec` 限制，另留有限后端启动/清理时间；不是整次审计的总时间上限。
 ### 2. 受限环境需要本地-only 时加 `-NoRemote`
 
 只有在用户明确要求不联网、当前环境没有网络权限、或正在做离线排障时，才关闭远程检查：

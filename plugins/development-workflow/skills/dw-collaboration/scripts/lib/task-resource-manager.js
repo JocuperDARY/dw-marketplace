@@ -1405,12 +1405,18 @@ class TaskResourceManager {
       });
       const admitted = input.harness.trustedProducer(envelope, expectedContext);
       if (admitted !== true) { observeRejectedNativePromise(admitted); throw hold(); }
-      const trustedObservationResolver = trustedResolution(
+      const observedResolver = trustedResolution(
         input.harness.trustedProducer,
         expectedContext,
         provenance,
         'observation',
       );
+      const localNoStartProofs = new Set();
+      const trustedObservationResolver = candidate => {
+        if (candidate && candidate.purpose === 'resource_not_acquired'
+          && localNoStartProofs.has(computeDetachedSha256(candidate))) return true;
+        return observedResolver(candidate);
+      };
       const trustedFilesystemResolver = trustedResolution(
         input.harness.trustedProducer,
         expectedContext,
@@ -1447,6 +1453,7 @@ class TaskResourceManager {
         dataRoot: input.dataRoot,
         harness: input.harness,
         limits: input.limits,
+        localNoStartProofs,
         provenance,
         requiredReferences,
         rootScope,
@@ -1484,11 +1491,176 @@ class TaskResourceManager {
     finally { if (state.operation.token === token) state.operation.token = null; }
   }
 
+  queueAuthority() {
+    const state = PRIVATE_STATE.get(this);
+    return state.tracker.queueAuthority(candidate => state.trustedObservationResolver(
+      detachedSnapshot({ purpose: 'queue_release', ...candidate }),
+    ), () => { runtimePersist(state); return true; });
+  }
+
+  async prepareCommand(value) {
+    const normalized = normalizeCommandInput(value);
+    if (normalized.verification || normalized.command.temporaryRoot !== null) throw hold();
+    return this.#runOperation(() => this.#startCommand(value, null, true));
+  }
+
+  async startPrepared(commandId) {
+    return this.#runOperation(() => {
+      const record = PRIVATE_STATE.get(this).commands.get(commandId);
+      if (!record || record.status !== 'PREPARED' || record.scopeClosed
+        || record.scope.snapshot().accepting !== true) throw hold();
+      return this.#startCommand(record.input, commandId);
+    });
+  }
+
+  async cancelPrepared(commandId) {
+    const state = PRIVATE_STATE.get(this);
+    const record = state.commands.get(commandId);
+    if (!record || record.dispatched || (record.status !== 'PREPARED' && !record.commandCloseResult)) throw hold();
+    return this.closeCommand(commandId);
+  }
+
+  async closeCommand(commandId) {
+    return this.#closeCommand(commandId, false);
+  }
+
+  async #closeCommand(commandId, managerClosing) {
+    const state = PRIVATE_STATE.get(this);
+    const record = state.commands.get(commandId);
+    if (!record) throw hold();
+    if (record.commandCloseResult) return record.commandCloseResult;
+    if (state.operation.token !== null || record.startAttempt !== undefined
+      || (!managerClosing && state.closeTransaction.admissionClosed)) {
+      return detachedSnapshot({ status: 'CLOSING', commandId, reason: 'COMMAND_OPERATION_IN_PROGRESS' });
+    }
+    return this.#runOperation(async () => {
+      const result = (status, reason) => detachedSnapshot({ status, commandId, reason });
+      if (record.command.temporaryRoot !== null || record.resourceIds?.temporaryAllocation != null) {
+        return result('HOLD', 'TEMPORARY_COMMAND_CLOSE_UNSUPPORTED');
+      }
+      if (record.scope === null || record.resourceIds === null) return result('HOLD', 'COMMAND_START_INCOMPLETE');
+      if (record.spawnResponse === null) {
+        const local = record.dispatched === false;
+        const native = record.noStart;
+        if (!local && !native) return result('HOLD', 'COMMAND_START_INCOMPLETE');
+        if (record.command.temporaryRoot !== null || record.allocationResponse !== null) {
+          return result('HOLD', 'TEMPORARY_CLEANUP_UNAVAILABLE');
+        }
+        const proof = detachedSnapshot({ type: 'TaskResourceNotAcquired1', commandId,
+          scopeId: record.scope.scopeId, generation: state.provenance.managerGeneration,
+          resourceIds: [record.resourceIds.commandSession, record.resourceIds.processTree],
+          startState: local ? 'not_dispatched' : native.startState,
+          cleanup: 'verified_absent', supervisorClosed: true,
+          requestSha256: local ? null : native.requestSha256,
+          launchNonce: local ? null : native.launchNonce,
+          evidenceRefs: local ? ['manager:no-dispatch:' + commandId] : native.evidenceRefs,
+        });
+        try {
+          for (const resourceId of proof.resourceIds.slice().reverse()) {
+            const resource = record.scope.getResource(resourceId);
+            if (resource.releaseConfirmed) continue;
+            const candidate = { purpose: 'resource_not_acquired', ownerId: state.provenance.ownerId,
+              runId: state.provenance.runId, generation: state.provenance.managerGeneration,
+              resource, observation: proof };
+            const proofHash = computeDetachedSha256(candidate);
+            state.localNoStartProofs.add(proofHash);
+            try { record.scope.confirmNotAcquired(resourceId, proof); }
+            finally { state.localNoStartProofs.delete(proofHash); }
+          }
+          record.pendingAction = null;
+          const closed = await record.scope.close('command_not_started');
+          if (!verifiedTrackerClose(state, record.scope, closed)) return result('HOLD', 'COMMAND_SCOPE_CLOSE_REJECTED');
+          runtimePersist(state);
+          record.scopeClosed = true;
+          record.status = 'CLOSED';
+          record.commandCloseResult = detachedSnapshot({ status: 'CLOSED', commandId, closeResult: closed });
+          return record.commandCloseResult;
+        } catch (_) { return result('HOLD', 'COMMAND_NO_START_CLOSE_REJECTED'); }
+      }
+      try {
+        try {
+          if (record.status !== 'STOPPED') {
+            const stopped = await this.#advanceStop(
+              state, record, record.stopReasonCode ?? 'manager_close',
+            );
+            if (stopped.status === 'STOP_REQUESTED' || stopped.status === 'WAITING') {
+              return result('CLOSING', 'COMMAND_STOP_IN_PROGRESS');
+            }
+            if (stopped.status !== 'STOPPED') return result('HOLD', 'COMMAND_STOP_HOLD');
+          }
+          const processTree = record.scope.getResource(record.resourceIds.processTree);
+          if (record.status !== 'STOPPED' || record.pendingAction !== null
+            || record.absenceResponse?.disposition !== 'ABSENT_CONFIRMED'
+            || processTree.releaseConfirmed !== true) return result('HOLD', 'COMMAND_STOP_HOLD');
+        } catch (_) {
+          return result('HOLD', 'COMMAND_STOP_HOLD');
+        }
+
+        try {
+          const session = record.scope.getResource(record.resourceIds.commandSession);
+          if (session.releaseConfirmed !== true) {
+            const identity = record.spawnResponse.identity;
+            const scope = { kind: 'scope', value: record.scope.scopeId };
+            const decision = record.scope.observe(record.resourceIds.commandSession, {
+              duplicate_run_lock: false,
+              owner_status: 'owned',
+              orphaned: false,
+              expected_identity: identity,
+              observed_identity: identity,
+              expected_generation: state.provenance.managerGeneration,
+              observed_generation: state.provenance.managerGeneration,
+              expected_scope: scope,
+              observed_scope: scope,
+              graceful: { requested: true, deadline_reached: false, exit_observed: true },
+              exact_tree_termination_supported: false,
+              absence: { process_absent: true, thread_absent: true, port_absent: true },
+              evidence_refs: record.absenceResponse.evidenceRefs,
+            });
+            if (decision.action !== 'OBSERVE_ONLY' || decision.reasons.length !== 1
+              || decision.reasons[0] !== 'ABSENCE_VERIFIED'
+              || decision.identity_confidence !== 'MATCH'
+              || decision.downstream_release_allowed !== true) {
+              return result('HOLD', 'COMMAND_SESSION_RELEASE_REJECTED');
+            }
+          }
+        } catch (_) {
+          return result('HOLD', 'COMMAND_SESSION_RELEASE_REJECTED');
+        }
+
+        if (record.resourceIds.temporaryAllocation !== null) {
+          const temporaryFailure = await advanceTemporaryClose(state, record);
+          if (temporaryFailure !== null) return result('HOLD', temporaryFailure);
+        }
+
+        try {
+          const closed = await record.scope.close('manager_close');
+          const hasTemporary = record.resourceIds.temporaryAllocation !== null;
+          if (!verifiedTrackerClose(state, record.scope, closed)
+            || closed.order.length !== (hasTemporary ? 3 : 2)
+            || closed.order[0] !== record.resourceIds.processTree
+            || closed.order[1] !== record.resourceIds.commandSession
+            || (hasTemporary && closed.order[2] !== record.resourceIds.temporaryAllocation)) {
+            return result('HOLD', 'COMMAND_SCOPE_CLOSE_REJECTED');
+          }
+          record.scopeClosed = true;
+        } catch (_) {
+          return result('HOLD', 'COMMAND_SCOPE_CLOSE_REJECTED');
+        }
+
+        runtimePersist(state);
+        const closed = await record.scope.close('manager_close');
+        record.status = 'CLOSED';
+        record.commandCloseResult = detachedSnapshot({ status: 'CLOSED', commandId, closeResult: closed });
+        return record.commandCloseResult;
+      } catch (_) { return result('HOLD', 'COMMAND_CLOSE_REJECTED'); }
+    });
+  }
+
   async startCommand(value) {
     return this.#runOperation(() => this.#startCommand(value));
   }
 
-  async #startCommand(value) {
+  async #startCommand(value, preparedId = null, prepareOnly = false) {
     let command;
     let state;
     let record;
@@ -1499,7 +1671,8 @@ class TaskResourceManager {
       const verification = normalized.verification;
       state = PRIVATE_STATE.get(this);
       if (!state || state.closeTransaction.admissionClosed
-        || state.commands.has(command.commandId)) throw hold();
+        || (preparedId === null ? state.commands.has(command.commandId)
+          : preparedId !== command.commandId || state.commands.get(preparedId)?.status !== 'PREPARED')) throw hold();
       let holderState = null;
       if (verification) {
         holderState = BOOTSTRAP_HOLDER_STATE.get(verification.bootstrapVerificationHolder);
@@ -1507,8 +1680,11 @@ class TaskResourceManager {
           || holderState.used || holderState.grant !== null) throw hold();
       }
       attempt = Symbol('TaskResourceManager.startCommand');
+      if (preparedId === null) {
       record = {
         status: 'STARTING',
+        input: prepareOnly ? detachedSnapshot(value) : null,
+        dispatched: false,
         command,
         scope: null,
         resourceIds: null,
@@ -1583,6 +1759,24 @@ class TaskResourceManager {
         }
       }
 
+      } else {
+        record = state.commands.get(preparedId);
+        record.startAttempt = attempt;
+        record.status = 'STARTING';
+      }
+      if (prepareOnly) {
+        record.status = 'PREPARED';
+        record.phase = 'PREPARED';
+        record.preparedResult = detachedSnapshot({
+          status: 'PREPARED', commandId: command.commandId,
+          scopeBinding: { ownerId: state.provenance.ownerId, runId: state.provenance.runId,
+            scopeId: record.scope.scopeId, generation: state.provenance.managerGeneration },
+          resourceIds: [record.resourceIds.commandSession, record.resourceIds.processTree],
+        });
+        return record.preparedResult;
+      }
+
+      const { scope, resourceIds } = record;
       if (verification) bindBootstrapGrant(this, state, record, verification, holderState, attempt);
 
       if (state.closeTransaction.admissionClosed) throw hold();
@@ -1615,6 +1809,7 @@ class TaskResourceManager {
           creationNonce,
         });
         runtimeIntent(state, record, 'allocateTemporaryRoot', allocationRequest);
+        record.dispatched = true;
         const allocationValue = record.bootstrapGrant
           ? invokeBootstrapFirstAction(state, record, attempt,
             () => state.adapter.allocateTemporaryRoot(allocationRequest), 'ALLOCATING_TEMPORARY_ROOT')
@@ -1675,11 +1870,26 @@ class TaskResourceManager {
       });
       record.phase = 'SPAWNING';
       runtimeIntent(state, record, 'spawnManaged', spawnRequest);
+      record.dispatched = true;
       const spawnValue = record.bootstrapGrant && command.temporaryRoot === null
         ? invokeBootstrapFirstAction(state, record, attempt,
           () => state.adapter.spawnManaged(spawnRequest), 'SPAWNING')
         : state.adapter.spawnManaged(spawnRequest);
       const spawnResolved = await spawnValue;
+      if (spawnResolved && spawnResolved.type === 'TaskResourceNoStart1') {
+        const noStart = detachedSnapshot(spawnResolved);
+        if (noStart.requestSha256 !== spawnRequest.requestSha256
+          || noStart.commandId !== command.commandId || noStart.launchNonce !== launchNonce
+          || !['never_created', 'created_reclaimed'].includes(noStart.startState)
+          || noStart.cleanup !== 'verified_absent' || noStart.supervisorClosed !== true
+          || state.trustedObservationResolver(noStart) !== true) throw hold();
+        requireEvidenceResponse(noStart, state.trackerMaxInputBytes);
+        record.noStart = noStart;
+        record.pendingAction = null;
+        runtimeOutcome(state, record, 'spawnManaged', 'REJECTED', null);
+        throw hold();
+      }
+
       if (record.bootstrapGrant) requireBootstrapStartOpen(state, record, attempt);
       const spawnResponse = normalizeAdapterResponse(spawnResolved);
       if (state.trustedObservationResolver(spawnResponse) !== true) throw hold();
@@ -2178,6 +2388,14 @@ class TaskResourceManager {
       return transaction.terminalResult;
     };
     try {
+      if (state.operation.token === null) {
+        for (const record of state.commands.values()) {
+          if (!record.scopeClosed && record.spawnResponse === null
+            && record.startAttempt === undefined && (record.dispatched === false || record.noStart)) {
+            await this.#closeCommand(record.command.commandId, true);
+          }
+        }
+      }
       const records = [...state.commands.values()].reverse();
       const preflightFailure = closePreflightFailure(state, records);
       transaction.phase = 'CLOSING';

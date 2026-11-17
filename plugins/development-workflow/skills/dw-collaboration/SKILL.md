@@ -58,13 +58,13 @@ When a gate requires a machine-readable decision, emit exactly one token; never 
 
 Stop retries when the immutable failure fingerprint repeats or the injected retry budget is exhausted. Preserve evidence and open the circuit; communication failure changes topology, not model intelligence or permissions.
 
-For executable task-resource tracking, repeated-failure loop exit, work levels, resource-aware queueing, and user progress reports, follow [resource-control.md](references/resource-control.md). Register and bind resources before launch; inject filesystem and observation checks when the tracker is created; use a monotonic compare-and-swap store for failure budgets; bind each queued task to a non-empty list of resources in one exact scope; stop after one summarized bounded exit attempt repeats the same failure family; and do not refill queue capacity until that task's exact tracker close result is consumed.
+For executable task-resource tracking, repeated-failure loop exit, work levels, resource-aware queueing, and user progress reports, follow [resource-control.md](references/resource-control.md). Use [command dispatch](references/resource-command-dispatcher.md) to prepare exact resource declarations before queue admission and bind actual identities after launch. Never invent a process identity for a reservation. Inject filesystem and observation checks when the tracker is created; use a monotonic compare-and-swap store for failure budgets; associate each queued task with a non-empty resource set in one exact scope; stop after one summarized bounded exit attempt repeats the same failure family; and do not refill capacity until that task's exact tracker close result is consumed.
 
 ## 5.3 resource manager entry point
 
 Use `TaskResourceManager` when the task needs an executable lifecycle rather than a decision-only tracker. Its public sequence is `open` → `startCommand` → `observe`/`stop` → `close`. Recovery after interruption is a host-owned workflow: reload the persisted recovery record, re-observe identity, and confirm that the operation is covered by current authorization before invoking a bounded manager operation. The manager never accepts a concatenated shell command, never infers ownership from a name or PID, and never turns a request or tracker projection into proof of cleanup. The platform adapter remains the only layer allowed to perform the OS action.
 
-The package supplies the manager, tracker, store and validators, plus a Windows command adapter and synthetic protocol fixtures. The command adapter binds observations and actions to retained native process/Job handles, enforces a finite deadline and output cap, and supports commands without temporary-root management. Linux, temporary-storage adapters, host agent messaging and installed Claude/Codex/Grok integration remain separate work. Read the adapter's supported inputs and failure states before use; local fixture results do not establish installed-host acceptance.
+The package supplies the manager, tracker, store and validators, a Windows command adapter, a command dispatcher, and an opt-in [POSIX process-group backend](references/posix-command-backend.md). The Windows adapter binds observations and actions to retained native process/Job handles, enforces a finite deadline and output cap, and supports commands without temporary-root management. The POSIX backend has its own narrower containment and evidence boundary. Temporary-storage adapters, host agent messaging and installed Claude/Codex/Grok integration remain separate work. Read each entry's supported inputs and failure states; local or mocked results do not establish native-platform or installed-host acceptance.
 
 Before a managed `COMPLETE`, require root acceptance, review, independent verification for every required phase as defined by the executable protocol, exact plan/ledger references, resolved contradictions, and verified resource reclamation. Continue later Git or external operations under the user's existing authorization; completing a managed task adds no permissions.
 
@@ -72,6 +72,8 @@ Read only the reference needed:
 
 - Routing, probes, host fallbacks: [runtime-adapters.md](references/runtime-adapters.md)
 - Windows command execution, trust and limits: [windows-command-adapter.md](references/windows-command-adapter.md)
+- Prepared commands, queue dispatch and verified capacity release: [resource-command-dispatcher.md](references/resource-command-dispatcher.md)
+- Opt-in POSIX process-group execution: [posix-command-backend.md](references/posix-command-backend.md)
 - Ordinary roles, communication and capability mapping: [ordinary-collaboration.md](references/ordinary-collaboration.md)
 - Run/child/resource transitions: [state-machines.md](references/state-machines.md)
 - Process, storage, progress, retry: [resource-lifecycle.md](references/resource-lifecycle.md)

@@ -18,12 +18,12 @@ function link(target, destination) { fs.symlinkSync(target, destination, process
 function route(prompt) { const selected = router.routePrompt(prompt); return selected && selected.id; }
 
 test('owned resource requests route to lifecycle and verification without granting actions', () => {
-  for (const prompt of ['请回收本任务的子进程', '补齐生产资源管理适配', '接入通用测试子进程回收', 'Manage the owned process trees']) {
+  for (const prompt of ['请回收本任务的子进程', '补齐生产资源管理适配', '接入通用测试子进程回收', 'Manage the owned process trees', '接通队列到资源管理器', '实现启动失败后的资源释放', '接入 POSIX 子进程回收']) {
     const selected = router.routePrompt(prompt);
     assert.strictEqual(selected.id, 'resource-lifecycle', prompt);
     assert.deepStrictEqual(selected.skills, ['dw-collaboration', 'dw-verification']);
   }
-  for (const prompt of ['这篇文章讨论子进程回收', 'The process trees are documented here']) {
+  for (const prompt of ['这篇文章讨论子进程回收', 'The process trees are documented here', '不要接通队列到资源管理器', '> 接入 POSIX 子进程回收', '解释“实现启动失败后的资源释放”']) {
     assert.strictEqual(route(prompt), null, prompt);
   }
 });

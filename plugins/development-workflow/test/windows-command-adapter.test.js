@@ -8,6 +8,13 @@ const { createWindowsCommandHost } = require('../skills/dw-collaboration/scripts
 const { buildSupervisor } = require('../skills/dw-collaboration/scripts/build-process-supervisor');
 const { computeDetachedSha256 } = require('../skills/dw-collaboration/scripts/lib/canonical-json');
 
+test('caller-supplied launch failure properties cannot mint native no-start authority', () => {
+  const { getWindowsNoStartFailure } = require('../skills/dw-collaboration/scripts/lib/windows-command-backend');
+  const forged = Object.assign(new Error('forged'), { supervisorClosed: true,
+    cleanup: 'verified_absent', launchFailed: { startState: 'never_created', cleanup: 'verified_absent' } });
+  assert.equal(getWindowsNoStartFailure(forged), null);
+});
+
 if (process.platform !== 'win32') {
   console.log('SKIP_NOT_APPLICABLE:windows-command-adapter');
   test('Windows native manager loop', { skip: 'Windows only' }, () => {});
@@ -90,16 +97,44 @@ else {
     await stopped.wait('force');
     await close(stopped);
   });
-  test('native launch failure remains manager HOLD without false tracker closure', async () => {
+  test('native proven no-start closes declared resources without a fake process identity', async () => {
     const h = await host();
     const invalidExe = path.join(root, 'invalid.exe');
     fs.writeFileSync(invalidExe, 'not an executable');
     await assert.rejects(h.startCommand({ ...command('failed', ''), executable: invalidExe }));
     const result = await h.close();
-    assert.equal(result.manager.status, 'HOLD');
-    assert(result.manager.decision.reasons.includes('COMMAND_START_INCOMPLETE'));
+    assert.equal(result.manager.status, 'CLOSED', JSON.stringify(result));
     assert.deepEqual(result.releases, []);
   });
+  test('queue authority waits for native release even through the compatible manager property', async () => {
+    const h = await host();
+    const prepared = await h.prepareCommand(command('queued', 'process.exit(0)'));
+    const authority = h.manager.queueAuthority();
+    assert(authority.claimTaskScope('queued-task', prepared.scopeBinding, prepared.resourceIds));
+    await h.startPrepared('queued');
+    await h.wait('queued');
+    let managerClosed;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      managerClosed = await h.manager.closeCommand('queued');
+      if (managerClosed.status !== 'CLOSING') break;
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    assert.equal(managerClosed.status, 'CLOSED', JSON.stringify(managerClosed));
+    assert.equal(authority.consumeTaskCloseResult('queued-task', managerClosed.closeResult,
+      prepared.scopeBinding, prepared.resourceIds), false);
+    const released = await h.closeCommand('queued');
+    assert.equal(released.status, 'CLOSED', JSON.stringify(released));
+    assert(authority.consumeTaskCloseResult('queued-task', released.closeResult,
+      prepared.scopeBinding, prepared.resourceIds));
+    const cancelled = await h.prepareCommand(command('notlaunched', 'process.exit(0)'));
+    assert(authority.claimTaskScope('cancel-task', cancelled.scopeBinding, cancelled.resourceIds));
+    const closed = await h.cancelPrepared('notlaunched');
+    assert.equal(closed.status, 'CLOSED', JSON.stringify(closed));
+    assert(authority.consumeTaskCloseResult('cancel-task', closed.closeResult,
+      cancelled.scopeBinding, cancelled.resourceIds));
+    await close(h);
+  });
+
   test('disposal waits for an in-flight native start and releases its retained session', async () => {
     const h = await host();
     const starting = h.startCommand(command('race', 'setInterval(()=>{},1000)'));

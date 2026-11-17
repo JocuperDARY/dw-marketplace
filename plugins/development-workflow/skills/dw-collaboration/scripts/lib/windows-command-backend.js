@@ -1,4 +1,6 @@
 'use strict';
+const NATIVE_NO_START = new WeakMap();
+function getWindowsNoStartFailure(error) { return NATIVE_NO_START.get(error) || null; }
 
 const { spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
@@ -246,7 +248,13 @@ async function startWindowsCommand(options) {
     const close = await release();
     const error = failure || fault('Native launch has no identity');
     error.cleanup = 'unknown'; error.supervisorClosed = close.supervisorClosed;
-    if (decoder.launchFailed) { error.launchFailed = decoder.launchFailed; error.cleanup = decoder.launchFailed.cleanup; }
+    if (decoder.launchFailed) {
+      error.launchFailed = decoder.launchFailed; error.cleanup = decoder.launchFailed.cleanup;
+      if (close.supervisorClosed === true && decoder.launchFailed.cleanup === 'verified_absent'
+        && ['never_created', 'created_reclaimed'].includes(decoder.launchFailed.startState)) {
+        NATIVE_NO_START.set(error, Object.freeze({ ...decoder.launchFailed, supervisorClosed: true }));
+      }
+    }
     throw error;
   }
   return Object.freeze({ session, binding, identity: decoder.identity,
@@ -276,4 +284,4 @@ async function runWindowsCommand(options) {
   }
 }
 
-module.exports = { prepareWindowsCommandBackend, startWindowsCommand, runWindowsCommand, ManagedProtocol };
+module.exports = { getWindowsNoStartFailure, prepareWindowsCommandBackend, startWindowsCommand, runWindowsCommand, ManagedProtocol };

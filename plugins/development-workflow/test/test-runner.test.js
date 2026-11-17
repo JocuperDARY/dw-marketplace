@@ -78,6 +78,52 @@ async function main() {
     assert.equal(executableFor('node'),process.execPath);
     assert.throws(()=>executableFor('fixture.exe'),/absolute/);
   });
+  await test('nested npm entry point preserves explicit POSIX selection',()=>{
+    const filename=path.join(__dirname,'test-entry-points.test.js');
+    const source=fs.readFileSync(filename,'utf8').split('function test(name, fn)')[0];
+    const calls=[];
+    const fakeProcess={...process,platform:'linux',env:{}};
+    const context={require:name=>name==='child_process'?{spawnSync:(command,args,options)=>{calls.push({command,args,options});return {};}}:require(name),__dirname,process:fakeProcess};
+    const run=vm.runInNewContext(source+'\nrunNpm',context);
+    run('test:core',{DW_TEST_COMMAND_BACKEND:'posix-process-group',DW_TEST_PYTHON_PATH:'/absolute/python3',PATH:'/tools'});
+    assert.deepEqual(Array.from(calls[0].args.slice(-4)),['--','--posix-process-group','--python-path','/absolute/python3']);
+    run('test:core',{DW_TEST_COMMAND_BACKEND:'portable-direct',PATH:'/tools'});
+    assert.deepEqual(Array.from(calls[1].args.slice(-2)),['--','--portable-direct']);
+    run('test:core',{DW_TEST_COMMAND_BACKEND:'posix-process-group',PATH:'/tools'});
+    assert.equal(calls[2].args.at(-1),'');
+    assert(!calls[2].args.includes('--portable-direct'));
+  });
+  await test('POSIX flags require an explicit interpreter and reject mixed modes',()=>{
+    assert.equal(parseArgs(['--manifest','x','--suite','core','--posix-process-group']),null);
+    assert.equal(parseArgs(['--manifest','x','--suite','core','--python-path','/python']),null);
+    assert.equal(parseArgs(['--manifest','x','--suite','core','--portable-direct','--posix-process-group','--python-path','/python']),null);
+    assert.equal(parseArgs(['--manifest','x','--suite','core','--posix-process-group','--python-path','/python']).pythonPath,'/python');
+  });
+  await test('POSIX preparation and selection propagate through fixture environment',async()=>{
+    const requests=[]; let prepares=0;
+    const context=await createExecutionContext({posixProcessGroup:true,pythonPath:'/python'}, {platform:'linux',posixBackend:{
+      preparePosixCommandBackend: options=>{prepares++;assert.equal(options.pythonPath,'/python');return {pythonPath:'/python',supervisorPath:'/supervisor'};},
+      runPosixCommand: async request=>{requests.push(request);return normal();},
+    }});
+    await runTest({command:'node'},context);await runTest({command:'node'},context);
+    assert.equal(prepares,1);assert.equal(context.label,'posix-process-group');
+    assert.equal(requests[0].supervisorPath,'/supervisor');
+    assert.equal(requests[0].env.DW_TEST_COMMAND_BACKEND,'posix-process-group');
+    assert.equal(requests[0].env.DW_TEST_PYTHON_PATH,'/python');
+    await assert.rejects(createExecutionContext({posixProcessGroup:true,pythonPath:'/python'}, {platform:'win32'}), {code:'POSIX_BACKEND_WINDOWS_FORBIDDEN'});
+  });
+  await test('POSIX preparation failure never dispatches but ordinary test failure continues',async()=>{
+    let launches=0;
+    await assert.rejects(createExecutionContext({posixProcessGroup:true,pythonPath:'/python'}, {platform:'darwin',posixBackend:{
+      preparePosixCommandBackend:()=>{throw new Error('unavailable');},runPosixCommand:()=>{launches++;},
+    }}), /unavailable/);
+    assert.equal(launches,0);
+    const fixture=suiteFixture([normal({status:7}),normal(),normal()]);fixture.context.label='posix-process-group';
+    const result=await fixture.run();assert.equal(result.launches,3);assert.equal(result.counts['not-run'],0);
+    assert.equal(result.counts.fail,1);assert.equal(result.counts.pass,2);
+    assert.doesNotMatch(result.output,/SUITE_STOPPED/);
+    assert.match(result.output,/ESCAPED_DESCENDANTS:UNVERIFIED/);
+  });
   await test('unsupported backend and forbidden Windows fallback launch no fixture',async()=>{
     await assert.rejects(createExecutionContext({}, {platform:'linux'}), {code:'COMMAND_BACKEND_UNSUPPORTED'});
     await assert.rejects(createExecutionContext({portableDirect:true}, {platform:'win32'}), {code:'PORTABLE_DIRECT_WINDOWS_FORBIDDEN'});

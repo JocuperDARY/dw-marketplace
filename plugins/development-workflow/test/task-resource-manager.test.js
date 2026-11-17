@@ -6443,6 +6443,144 @@ test('3-6B manager publishes STARTED only after a durable runtime transaction ex
 test('Store V3 preserves real holder data, validates reference equality and isolates V2 chains', () => bootstrapStoreTracer());
 
 
+test('prepared queue commands reserve declared resources and cancel with a formal durable close', async () => {
+  const fixture = startFixture();
+  const manager = fixture.manager();
+  const prepared = await manager.prepareCommand(commandInput({ temporaryRoot: null }));
+  const authority = manager.queueAuthority();
+  assert(require('../skills/dw-collaboration/scripts/lib/task-resource-tracker').isTaskResourceQueueAuthority(authority));
+  assert(Object.isFrozen(authority));
+  assert.strictEqual(authority.tracker, undefined);
+  assert.strictEqual(fixture.calls.spawnManaged, 0);
+  assert(authority.claimTaskScope('queued-A', prepared.scopeBinding, prepared.resourceIds));
+  const closed = await manager.cancelPrepared(prepared.commandId);
+  assert.strictEqual(closed.status, 'CLOSED', JSON.stringify(closed));
+  assert.strictEqual(closed.closeResult.order.length, 2);
+  assert(closed.closeResult.decisions.every(value => value.action === 'NOT_ACQUIRED'));
+  assert(authority.consumeTaskCloseResult('queued-A', closed.closeResult, prepared.scopeBinding, prepared.resourceIds));
+  assert.strictEqual(await manager.cancelPrepared(prepared.commandId), closed);
+  await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+  assert.strictEqual(fixture.calls.spawnManaged, 0);
+  assert.strictEqual((await manager.close()).status, 'CLOSED');
+});
+
+test('prepared start is dispatched once and unknown spawn stays charged', async () => {
+  const fixture = startFixture({ spawn() { throw new Error('unknown side effect'); } });
+  const manager = fixture.manager();
+  const prepared = await manager.prepareCommand(commandInput({ temporaryRoot: null }));
+  const authority = manager.queueAuthority();
+  assert(authority.claimTaskScope('queued-A', prepared.scopeBinding, prepared.resourceIds));
+  await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+  assert.strictEqual(fixture.calls.spawnManaged, 1);
+  assert.strictEqual((await manager.closeCommand(prepared.commandId)).status, 'HOLD');
+  await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+  await expectHoldAsync(() => manager.cancelPrepared(prepared.commandId));
+  assert.strictEqual(fixture.calls.spawnManaged, 1);
+  assert(!authority.consumeTaskCloseResult('queued-A', { status: 'CLOSED' }, prepared.scopeBinding, prepared.resourceIds));
+});
+
+test('authenticated no-start receipt releases without inventing process identity', async () => {
+  const fixture = startFixture({ spawn(request) { return {
+    type: 'TaskResourceNoStart1', commandId: request.commandId,
+    requestSha256: request.requestSha256, launchNonce: request.launchNonce,
+    startState: 'never_created', cleanup: 'verified_absent', supervisorClosed: true,
+    evidenceRefs: [EVIDENCE_REF],
+  }; } });
+  const manager = fixture.manager();
+  const prepared = await manager.prepareCommand(commandInput({ temporaryRoot: null }));
+  await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+  const closed = await manager.closeCommand(prepared.commandId);
+  assert.strictEqual(closed.status, 'CLOSED', JSON.stringify(closed));
+  assert(closed.closeResult.decisions.every(value => value.action === 'NOT_ACQUIRED'));
+  assert.strictEqual(fixture.calls.spawnManaged, 1);
+  assert.strictEqual((await manager.close()).status, 'CLOSED');
+});
+
+test('prepared no-start proofs reject spoofing and recover only from a trusted complete history', () => {
+  const { TaskResourceTracker } = require('../skills/dw-collaboration/scripts/lib/task-resource-tracker');
+  const options = { ownerId: 'queue-owner', runId: 'queue-replay', generation: 1 };
+  let accept = false;
+  const tracker = new TaskResourceTracker({ ...options,
+    trustedObservationResolver: () => accept });
+  const scope = tracker.openRootScope({ scopeId: 'queue-scope', purpose: 'fixture declaration' });
+  scope.register({ resourceId: 'unstarted', type: 'process_tree', purpose: 'fixture process',
+    teardownCondition: 'never acquired or exact absence', evidenceRefs: ['fixture:declaration'] });
+  const binding = { ...options, scopeId: 'queue-scope' };
+  assert(tracker.claimPreparedTaskScope('queued', binding, ['unstarted']));
+  const proof = { type: 'TaskResourceNotAcquired1', commandId: 'unstarted',
+    scopeId: 'queue-scope', generation: 1, resourceIds: ['unstarted'],
+    startState: 'not_dispatched', cleanup: 'verified_absent', supervisorClosed: true,
+    evidenceRefs: ['fixture:trusted-no-dispatch'] };
+  assert.throws(() => scope.confirmNotAcquired('unstarted', proof), /TRUST_NOT_PROVEN/);
+  accept = true;
+  assert.throws(() => scope.confirmNotAcquired('unstarted', { ...proof, cleanup: 'unknown' }), /PROOF_INVALID/);
+  scope.confirmNotAcquired('unstarted', proof);
+  const closed = scope.close('fixture');
+  const history = tracker.exportHistory();
+  assert(!history.some(event => event.kind === 'RESOURCE_BOUND'));
+  assert.throws(() => TaskResourceTracker.fromHistory({ ...options,
+    trustedHistoryResolver: () => false }, history), /HISTORY_TRUST_NOT_PROVEN/);
+  const restored = TaskResourceTracker.fromHistory({ ...options,
+    trustedHistoryResolver: request => request.historyHeadSha256 === history.at(-1).eventSha256 }, history);
+  assert(restored.verifyCloseResult(closed, binding));
+  assert(restored.consumeTaskCloseResult('queued', closed, binding, ['unstarted']));
+  assert(restored.consumeTaskCloseResult('queued', closed, binding, ['unstarted']));
+  assert(!restored.consumeTaskCloseResult('other', closed, binding, ['unstarted']));
+});
+
+test('prepared command close refuses legacy temporary cleanup without taking an action', async () => {
+  const fixture = startFixture();
+  const manager = fixture.manager();
+  await manager.startCommand(commandInput());
+  const before = fixture.actions.length;
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const result = await manager.closeCommand('command-A');
+    assert.strictEqual(result.status, 'HOLD');
+    assert.strictEqual(result.reason, 'TEMPORARY_COMMAND_CLOSE_UNSUPPORTED');
+  }
+  assert.strictEqual(fixture.actions.length, before);
+  assert.strictEqual(fixture.calls.requestGracefulStop, 0);
+  assert.strictEqual(fixture.calls.quarantineTemporaryRoot, 0);
+  assert.strictEqual(fixture.calls.removeTemporaryRoot, 0);
+});
+
+test('prepared in-flight start cannot cancel, duplicate or release a pending launch', async () => {
+  let resolveSpawn;
+  let request;
+  const fixture = startFixture({ spawn(value) {
+    request = value;
+    return new Promise(resolve => { resolveSpawn = resolve; });
+  } });
+  const manager = fixture.manager();
+  const prepared = await manager.prepareCommand(commandInput({ temporaryRoot: null }));
+  const starting = manager.startPrepared(prepared.commandId);
+  assert.strictEqual(fixture.calls.spawnManaged, 1);
+  assert.strictEqual((await manager.closeCommand(prepared.commandId)).status, 'CLOSING');
+  await expectHoldAsync(() => manager.cancelPrepared(prepared.commandId));
+  await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+  resolveSpawn({ identity: processIdentityFor(request), evidenceRefs: [EVIDENCE_REF],
+    requestSha256: request.requestSha256 });
+  assert.strictEqual((await starting).status, 'STARTED');
+  assert.strictEqual(fixture.calls.spawnManaged, 1);
+});
+
+test('prepared invalid no-start claims retain unknown resources', async () => {
+  for (const mutation of [ { cleanup: 'unknown' }, { supervisorClosed: false },
+    { launchNonce: 'wrong-nonce' }, { startState: 'unknown' }, { requestSha256: '0'.repeat(64) } ]) {
+    const fixture = startFixture({ spawn(request) { return {
+      type: 'TaskResourceNoStart1', commandId: request.commandId,
+      requestSha256: request.requestSha256, launchNonce: request.launchNonce,
+      startState: 'never_created', cleanup: 'verified_absent', supervisorClosed: true,
+      evidenceRefs: [EVIDENCE_REF], ...mutation,
+    }; } });
+    const manager = fixture.manager();
+    const prepared = await manager.prepareCommand(commandInput({ temporaryRoot: null }));
+    await expectHoldAsync(() => manager.startPrepared(prepared.commandId));
+    assert.strictEqual((await manager.closeCommand(prepared.commandId)).status, 'HOLD');
+    assert.strictEqual(fixture.calls.spawnManaged, 1);
+  }
+});
+
 const TASK_RESOURCE_TEST_FOCUS = process.env.DW_TASK_RESOURCE_TEST_FOCUS;
 const M2_V2_CONTRACT_FOCUS = 'm2-v2-contract-v1';
 const M2_V2_CONTRACT_TEST_NAMES = Object.freeze([
@@ -6471,6 +6609,11 @@ function selectTaskResourceTests() {
       selectedTests: tests,
       summaryLine: `task resource manager tests passed (${tests.length} tests).\n`,
     };
+  }
+  if (TASK_RESOURCE_TEST_FOCUS === 'queue-lifecycle') {
+    const selectedTests = [tests[0], ...tests.filter(({ name }) =>
+      name.startsWith('prepared ') || name.startsWith('authenticated no-start '))];
+    return { selectedTests, summaryLine: `${selectedTests.length}/${selectedTests.length} queue lifecycle tests passed\n` };
   }
   assert.strictEqual(TASK_RESOURCE_TEST_FOCUS, M2_V2_CONTRACT_FOCUS);
   const sentinelIndex = tests.findIndex(({ name }) => name === M2_V2_CONTRACT_TEST_NAMES.at(-1));

@@ -5,7 +5,7 @@ const path = require('path');
 const { TaskResourceManager } = require('./task-resource-manager');
 const { createDetachedJsonSnapshot, computeDetachedSha256 } = require('./canonical-json');
 const { validateResourceIdentity2 } = require('./identity-support-v2');
-const { startWindowsCommand } = require('./windows-command-backend');
+const { startWindowsCommand, getWindowsNoStartFailure } = require('./windows-command-backend');
 const snapshot = value => createDetachedJsonSnapshot(value).snapshot;
 const hash = value => computeDetachedSha256(snapshot(value));
 const same = (a, b) => hash(a) === hash(b);
@@ -106,6 +106,9 @@ async function createWindowsCommandHost(options) {
   const requiredReferences = [authorization.cleanupAuthorityRef, capabilityRef].sort();
   const commands = new Map();
   const pendingStarts = new Set();
+  const preparedCommands = new Map();
+  const attemptedCommands = new Set();
+  const noStartCommands = new Map();
   const pendingCommandIds = new Set();
   const requests = new Set();
   const receipts = new Map();
@@ -121,6 +124,24 @@ async function createWindowsCommandHost(options) {
       if (!contextMatches(context)) return false;
       if (!context.resolutionType) return same(candidate, envelope);
       if (context.resolutionType !== 'observation' || !same(context.provenance, provenance)) return false;
+      if (candidate.purpose === 'queue_release') {
+        const binding = candidate.binding;
+        const closedScope = candidate.closeResult;
+        if (!binding || !closedScope || binding.ownerId !== input.ownerId || binding.runId !== input.runId
+          || binding.generation !== input.managerGeneration || !binding.scopeId.startsWith('command:')
+          || closedScope.status !== 'CLOSED' || closedScope.scopeId !== binding.scopeId
+          || closedScope.ownerId !== binding.ownerId || closedScope.runId !== binding.runId
+          || closedScope.generation !== binding.generation) return false;
+        const commandId = binding.scopeId.slice('command:'.length);
+        if (!same(candidate.resourceIds.slice().sort(),
+          [`command:${commandId}:session`, `command:${commandId}:process-tree`].sort())
+          || pendingCommandIds.has(commandId)) return false;
+        const record = commands.get(commandId);
+        if (record) return record.releaseResult?.supervisorClosed === true
+          && record.releaseResult.cleanup === 'verified_absent' && record.releaseResult.errorCode === null;
+        return noStartCommands.has(commandId)
+          || (preparedCommands.has(commandId) && !attemptedCommands.has(commandId));
+      }
       if (receipts.has(hash(candidate))) return true;
       if (candidate.purpose !== 'process_recovery' || candidate.ownerId !== input.ownerId
           || candidate.runId !== input.runId || candidate.generation !== input.managerGeneration) return false;
@@ -153,7 +174,8 @@ async function createWindowsCommandHost(options) {
   function commandValid(command) {
     if (!command || command.temporaryRoot !== null || Object.hasOwn(command, 'gracefulShutdown')) fail();
     positive(command.timeoutMs, bounds.maxTimeoutMs);
-    executablePath(command.executable);
+    if (typeof command.executable !== 'string' || !path.isAbsolute(command.executable)
+      || /[\0\r\n]/.test(command.executable) || path.extname(command.executable).toLowerCase() !== '.exe') fail();
     if (!Array.isArray(command.args) || command.args.some(x => typeof x !== 'string' || /[\0\r\n]/.test(x))
         || typeof command.cwd !== 'string' || !path.isAbsolute(command.cwd)
         || !fs.statSync(command.cwd).isDirectory()) fail();
@@ -233,12 +255,22 @@ async function createWindowsCommandHost(options) {
         commandSession: `command:${request.commandId}:session`, processTree: `command:${request.commandId}:process-tree` })) fail();
       pendingCommandIds.add(request.commandId);
       launches += 1;
+      attemptedCommands.add(request.commandId);
       const launching = startWindowsCommand({ supervisorPath, executable: request.executable,
         args: request.args, cwd: request.cwd, timeoutMs: request.timeoutMs, graceMs: bounds.graceMs,
         maxOutputBytes: bounds.maxOutputBytes, retentionMs: bounds.retentionMs, binding: request.requestSha256 });
       pendingStarts.add(launching);
       let session;
-      try { session = await launching; } finally { pendingStarts.delete(launching); pendingCommandIds.delete(request.commandId); }
+      try { session = await launching; }
+      catch (error) {
+        const native = getWindowsNoStartFailure(error);
+        if (!native || native.binding !== request.requestSha256 || native.supervisorClosed !== true) throw error;
+        const result = receipt(null, request, native, { type: 'TaskResourceNoStart1',
+          commandId: request.commandId, launchNonce: request.launchNonce,
+          startState: native.startState, cleanup: native.cleanup, supervisorClosed: true });
+        noStartCommands.set(request.commandId, result);
+        return result;
+      } finally { pendingStarts.delete(launching); pendingCommandIds.delete(request.commandId); }
       const record = { session, request: snapshot(request), identity: null, observations: [], scopeId: null };
       commands.set(request.commandId, record);
       if (closed) { await releaseRecord(record); fail(); }
@@ -353,7 +385,30 @@ async function createWindowsCommandHost(options) {
     }
     return snapshot({ status: result.status, manager: result, releases: [] });
   }
+  async function closeCommand(commandId) {
+    const result = await manager.closeCommand(commandId);
+    if (result.status !== 'CLOSED') return result;
+    const record = commands.get(commandId);
+    if (record) {
+      const released = await releaseRecord(record);
+      if (!released.supervisorClosed || released.cleanup !== 'verified_absent' || released.errorCode !== null) {
+        return snapshot({ status: 'HOLD', commandId, reason: 'NATIVE_RELEASE_UNVERIFIED' });
+      }
+    }
+    return result;
+  }
   return Object.freeze({ manager, platformAdapter, trustedProducer,
+    queueAuthority: () => manager.queueAuthority(),
+    prepareCommand(command) {
+      if (!command || Object.keys(command).sort().join(',') !== 'args,commandId,cwd,executable,temporaryRoot,timeoutMs') fail();
+      commandValid(command);
+      return manager.prepareCommand(command).then(result => {
+        preparedCommands.set(command.commandId, result); return result;
+      });
+    },
+    startPrepared: commandId => manager.startPrepared(commandId),
+    closeCommand,
+    cancelPrepared: async commandId => { await manager.cancelPrepared(commandId); return closeCommand(commandId); },
     startCommand(command) {
       if (!command || Object.keys(command).sort().join(',') !== 'args,commandId,cwd,executable,temporaryRoot,timeoutMs') fail();
       commandValid(command); return manager.startCommand(command);
