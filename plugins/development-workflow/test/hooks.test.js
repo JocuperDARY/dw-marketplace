@@ -293,7 +293,11 @@ test('published package can run its own npm test without repository-only files',
   const packagedRoot = unpackPublishedPlugin(home);
   const platformSandboxRoot = path.join(home, 'platform-sandbox');
   mkdirp(platformSandboxRoot);
-  const result = childProcess.spawnSync(node, [npmCli(), 'test'], {
+  // Forward the explicit portable mode through the leaf npm script; the normal
+  // Windows npm test still exercises the public default entry point.
+  const testArgs = process.platform === 'win32' ? [npmCli(), 'test']
+    : [npmCli(), 'run', 'test:all', '--', '--portable-direct'];
+  const result = childProcess.spawnSync(node, testArgs, {
     cwd: packagedRoot,
     env: {
       ...process.env,

@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-internal static class DwProcessSupervisor
+internal static partial class DwProcessSupervisor
 {
     [StructLayout(LayoutKind.Sequential)] struct Security { public int size; public IntPtr descriptor; public int inherit; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct Startup
@@ -247,6 +247,8 @@ internal static class DwProcessSupervisor
 
     static int Main(string[] args)
     {
+        for (int argument = 0; argument + 1 < args.Length && args[argument] != "--"; argument += 2)
+            if (args[argument] == "--mode" && args[argument + 1] == "managed") return ManagedMain(args);
         Stopwatch clock = Stopwatch.StartNew(); Result result = new Result(); int exitCode = 125;
         IntPtr job = IntPtr.Zero, parent = IntPtr.Zero, inRead = IntPtr.Zero, inWrite = IntPtr.Zero;
         IntPtr outRead = IntPtr.Zero, outWrite = IntPtr.Zero, errRead = IntPtr.Zero, errWrite = IntPtr.Zero;

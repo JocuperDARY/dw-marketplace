@@ -17,6 +17,17 @@ function write(file, content) { fs.mkdirSync(path.dirname(file), { recursive: tr
 function link(target, destination) { fs.symlinkSync(target, destination, process.platform === 'win32' ? 'junction' : 'dir'); }
 function route(prompt) { const selected = router.routePrompt(prompt); return selected && selected.id; }
 
+test('owned resource requests route to lifecycle and verification without granting actions', () => {
+  for (const prompt of ['请回收本任务的子进程', '补齐生产资源管理适配', '接入通用测试子进程回收', 'Manage the owned process trees']) {
+    const selected = router.routePrompt(prompt);
+    assert.strictEqual(selected.id, 'resource-lifecycle', prompt);
+    assert.deepStrictEqual(selected.skills, ['dw-collaboration', 'dw-verification']);
+  }
+  for (const prompt of ['这篇文章讨论子进程回收', 'The process trees are documented here']) {
+    assert.strictEqual(route(prompt), null, prompt);
+  }
+});
+
 test('routing ignores negated actions, explanations, quoted requests and word suffixes', () => {
   for (const prompt of [
     '不要修复这个 bug，只解释现象', 'do not fix this bug; explain the behavior',

@@ -4,6 +4,8 @@ Scope: this reference defines the optional managed protocol and its machine-read
 
 Treat Claude Code, Codex, Grok Build, or any other host name as a discovery hint only. Select behavior from observed semantic capabilities.
 
+For finite Windows commands, the shipped [command adapter](windows-command-adapter.md) connects TaskResourceManager to the native Job supervisor. Its process observations and bounded command lifecycle are a narrower capability than the host-agent receipts described below. It does not establish agent messaging, model dispatch, temporary-storage support or installed-host acceptance. Ordinary commands and tests can use the shared backend without adopting this full host protocol.
+
 ## Evidence ladder
 
 ```text

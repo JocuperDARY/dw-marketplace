@@ -1,189 +1,35 @@
 'use strict';
-
-const assert = require('assert');
-const childProcess = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const vm = require('vm');
-
-const runner = path.join(__dirname, 'test-runner.js');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-test-runner-'));
-const manifestPath = path.join(root, 'manifest.json');
-const node = process.execPath;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    console.error(`not ok - ${name}`);
-    console.error(error.stack || error.message);
-    process.exitCode = 1;
-  }
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const vm = require('node:vm');
+const {parseArgs, executableFor, createExecutionContext, runTest, runSuite} = require('./test-runner');
+let passed = 0;
+async function test(name, fn) {
+  try { await fn(); passed++; console.log(`ok - ${name}`); }
+  catch(error) { console.error(`not ok - ${name}`); console.error(error.stack); process.exitCode = 1; }
 }
-
-function run(suite, env = process.env) {
-  return childProcess.spawnSync(node, [runner, '--manifest', manifestPath, '--suite', suite], {
-    encoding: 'utf8',
-    env,
-    timeout: 10000,
-  });
+const normal = overrides => ({status:0, stdout:'', stderr:'', cleanup:'verified_absent', reason:'child_exit',
+  supervisorClosed:true, outputComplete:true, terminal:{cleanup:'verified_absent'}, ...overrides});
+function suiteFixture(outcomes, extra = {}) {
+  let launches=0;
+  const requests=[];
+  const messages=[];
+  const context={owned:true, label:'mock-windows-job', execute:async request=>{
+    requests.push(request); const result=outcomes[launches++]; if(result instanceof Error) throw result; return result;
+  }};
+  const manifest={suites:{all:{tests:['first','second','third'].map(name=>({name,command:'node'})), ...extra}}};
+  return {context,manifest,requests,messages, run:async()=>{
+    const counts=await runSuite(manifest,'all',context,{log:t=>messages.push(t),error:t=>messages.push(t)},{write:t=>messages.push(t)});
+    return {counts,launches,output:messages.join('\n')};
+  }};
 }
-
-fs.writeFileSync(manifestPath, JSON.stringify({
-  suites: {
-    core: {
-      tests: [
-        { name: 'core passes', command: node, args: ['-e', "console.log('core complete')"] },
-        { name: 'inapplicable platform evidence', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:host is linux')"] },
-      ],
-    },
-    'platform:windows': {
-      requiredLifecycle: 'windows',
-      tests: [
-        { name: 'windows lifecycle skipped', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:no registered sandbox')"] },
-      ],
-    },
-    hooks: {
-      tests: [{ name: 'hook passes', command: node, args: ['-e', "console.log('hook complete')"] }],
-    },
-    all: {
-      tests: [
-        { name: 'core passes', command: node, args: ['-e', "console.log('core complete')"] },
-        { name: 'inapplicable platform evidence', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:host is linux')"] },
-        { name: 'windows lifecycle skipped', command: node, args: ['-e', "console.log('SKIP_NOT_APPLICABLE:windows:no registered sandbox')"] },
-        { name: 'hook passes', command: node, args: ['-e', "console.log('hook complete')"] }],
-    },
-  },
-}, null, 2));
-
-try {
-  test('core reports skips separately and marks unselected tests not-run', () => {
-    const result = run('core');
-    assert.strictEqual(result.error, undefined, result.error && result.error.message);
-    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /pass: 1/);
-    assert.match(result.stdout, /fail: 0/);
-    assert.match(result.stdout, /skip: 1/);
-    assert.match(result.stdout, /not-run: 2/);
-    assert.doesNotMatch(result.stdout, /pass: 2/);
-  });
-
-  test('a designated platform suite fails when its lifecycle evidence only skips', () => {
-    const result = run('platform:windows');
-    assert.strictEqual(result.error, undefined, result.error && result.error.message);
-    assert.strictEqual(result.status, 1, result.stderr || result.stdout);
-    assert.match(result.stdout, /skip: 1/);
-    assert.match(result.stdout, /not-run: 3/);
-    assert.match(result.stderr, /LIFECYCLE_NOT_RUN:windows/);
-  });
-
-  test('a designated platform suite counts applicable lifecycle evidence as a pass', () => {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    manifest.suites['platform:windows'].tests[0].args = [
-      '-e',
-      "console.log('SKIP_NOT_APPLICABLE:linux:host is win32');console.log('LIFECYCLE_RAN:windows')",
-    ];
-    manifest.suites.all.tests[2].args = manifest.suites['platform:windows'].tests[0].args;
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    const result = run('platform:windows');
-    assert.strictEqual(result.error, undefined, result.error && result.error.message);
-    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /pass: 1/);
-    assert.match(result.stdout, /skip: 1/);
-    assert.match(result.stdout, /fail: 0/);
-    assert.match(result.stdout, /not-run: 3/);
-  });
-
-  test('the complete suite reports no tests as not-run when it covers every test identity', () => {
-    const result = run('all');
-    assert.strictEqual(result.error, undefined, result.error && result.error.message);
-    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /pass: 3/);
-    assert.match(result.stdout, /skip: 2/);
-    assert.match(result.stdout, /not-run: 0/);
-  });
-
-  test('suite runs cannot silently inherit a narrowed manager focus or transaction root', () => {
-    const manifest = { suites: { all: { tests: [{
-      name: 'unfocused fixture', command: node,
-      args: ['-e', "if (process.env.DW_TASK_RESOURCE_TEST_FOCUS || process.env.DW_TRANSACTION_TEST_ROOT) process.exit(1); console.log('complete fixture selected')"],
-    }] } } };
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
-    const result = run('all', { ...process.env, DW_TASK_RESOURCE_TEST_FOCUS: 'm2-v2-contract-v1', DW_TRANSACTION_TEST_ROOT: 'unexpected-override' });
-    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /complete fixture selected/);
-  });
-  function mockedRunner(outcomes) {
-    const messages = [];
-    let launches = 0;
-    const manifest = { suites: { all: { tests: [
-      { name: 'first', command: 'fixture-first' },
-      { name: 'second', command: 'fixture-second' },
-      { name: 'third', command: 'fixture-third' },
-    ] } } };
-    const fakeProcess = { argv: ['node', runner, '--manifest', 'fixture.json', '--suite', 'all'],
-      env: {}, stdout: { write: text => messages.push(text) } };
-    vm.runInNewContext(fs.readFileSync(runner, 'utf8'), {
-      require: name => name === 'child_process' ? { spawnSync: () => {
-        const result = outcomes[launches++];
-        if (result instanceof Error) throw result;
-        return result;
-      } } : name === 'fs' ? { readFileSync: () => JSON.stringify(manifest) } : require(name),
-      process: fakeProcess,
-      console: { log: text => messages.push(text), error: text => messages.push(text) },
-    }, { filename: runner });
-    return { launches, output: messages.join('\n'), exitCode: fakeProcess.exitCode };
-  }
-
-  for (const code of ['ETIMEDOUT', 'ENOBUFS', 'ENOENT']) {
-    test('execution error ' + code + ' stops subsequent suite launches with cleanup unknown', () => {
-      const result = mockedRunner([{ error: Object.assign(new Error(code), { code }), status: null }]);
-      assert.strictEqual(result.launches, 1);
-      assert.strictEqual(result.exitCode, 1);
-      assert.match(result.output, new RegExp('TEST_EXECUTION_ERROR:' + code));
-      assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
-      assert.match(result.output, /not-run: 2/);
-      assert.match(result.output, /fail: 1/);
-    });
-  }
-  test('a synchronous launch exception also stops subsequent launches', () => {
-    const result = mockedRunner([Object.assign(new Error('launch failed'), { code: 'EACCES' })]);
-    assert.strictEqual(result.launches, 1);
-    assert.strictEqual(result.exitCode, 1);
-    assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
-    assert.match(result.output, /not-run: 2/);
-  });
-  test('an interrupted child without an exit status stops the suite', () => {
-    const result = mockedRunner([{ status: null, signal: 'SIGTERM' }]);
-    assert.strictEqual(result.launches, 1);
-    assert.strictEqual(result.exitCode, 1);
-    assert.match(result.output, /TEST_EXECUTION_ERROR:SIGTERM/);
-    assert.match(result.output, /DESCENDANT_CLEANUP:UNKNOWN/);
-    assert.match(result.output, /not-run: 2/);
-  });
-  test('a later execution error preserves earlier passes and counts only remaining tests', () => {
-    const result = mockedRunner([{ status: 0 }, { status: null, error: { code: 'ETIMEDOUT' } }]);
-    assert.strictEqual(result.launches, 2);
-    assert.match(result.output, /pass: 1/);
-    assert.match(result.output, /fail: 1/);
-    assert.match(result.output, /not-run: 1/);
-  });
-  test('an ordinary failing exit retains the subsequent suite launches', () => {
-    const result = mockedRunner([{ status: 1 }, { status: 0 }, { status: 0 }]);
-    assert.strictEqual(result.launches, 3);
-    assert.strictEqual(result.exitCode, 1);
-    assert.match(result.output, /not-run: 0/);
-    assert.match(result.output, /pass: 2/);
-    assert.doesNotMatch(result.output, /DESCENDANT_CLEANUP/);
-  });
-
+async function main() {
   function hookObservationFixture(probeResult) {
     const file = path.join(__dirname, 'hooks.test.js');
     const source = fs.readFileSync(file, 'utf8').split('const retainedContractTests =')[0];
-    const commands = [];
-    const skips = [];
+    const commands = [], skips = [];
     const context = { require: name => name === 'child_process' ? {
       spawnSync: (command, args) => {
         commands.push([command, args]);
@@ -195,41 +41,175 @@ try {
     api.setSkip(message => skips.push(message));
     return { ...api, commands, skips };
   }
-  test('marker observations never terminate processes and residual matches remain cleanup unknown', () => {
+  await test('marker observations never terminate matches or certify their cleanup', () => {
     const fixture = hookObservationFixture({ status: 0, stdout: '1', stderr: '' });
     const probe = fixture.observeMarkerProcesses('fixture-marker');
     assert.throws(() => fixture.assertOwnedProcessResult({ status: 0 }, probe, 'fixture-marker'), /CLEANUP_UNKNOWN/);
-    assert.strictEqual(fixture.commands.length, 1);
+    assert.equal(fixture.commands.length, 1);
     assert.doesNotMatch(JSON.stringify(fixture.commands), /Stop-Process|taskkill|TerminateProcess/i);
   });
-  test('failed execution is not hidden by unavailable process observation', () => {
+  await test('failed execution is not hidden by unavailable process observation', () => {
     const fixture = hookObservationFixture({ status: 1, stderr: 'Access is denied' });
     assert.throws(() => fixture.assertOwnedProcessResult({ status: 9, stderr: 'original fixture failure' },
       fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker'), /original fixture failure/);
-    assert.strictEqual(fixture.skips.length, 0);
+    assert.equal(fixture.skips.length, 0);
   });
-  test('observation exceptions cannot mask execution failures and do not trigger cleanup', () => {
+  await test('observation exceptions preserve execution failures without cleanup', () => {
     const fixture = hookObservationFixture(new Error('observation failed'));
     const probe = fixture.observeMarkerProcesses('fixture-marker');
     assert.throws(() => fixture.assertOwnedProcessResult({ error: new Error('original execution error') }, probe,
       'fixture-marker'), /original execution error/);
-    assert.strictEqual(fixture.commands.length, 1);
+    assert.equal(fixture.commands.length, 1);
   });
-  test('unavailable observation only skips after successful execution with cleanup unknown', () => {
+  await test('unavailable observation skips only successful execution with unknown cleanup', () => {
     const fixture = hookObservationFixture({ status: 1, stderr: 'Access is denied' });
     fixture.assertOwnedProcessResult({ status: 0 }, fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker');
     assert.match(fixture.skips[0], /CLEANUP_UNKNOWN/);
   });
-  test('failed observation after successful execution remains cleanup unknown', () => {
+  await test('failed observation after successful execution remains cleanup unknown', () => {
     const fixture = hookObservationFixture({ status: 1, stderr: 'CIM provider unavailable' });
     assert.throws(() => fixture.assertOwnedProcessResult({ status: 0 },
       fixture.observeMarkerProcesses('fixture-marker'), 'fixture-marker'), /CLEANUP_UNKNOWN/);
-    assert.strictEqual(fixture.skips.length, 0);
+    assert.equal(fixture.skips.length, 0);
   });
-
-} finally {
-  fs.rmSync(root, { recursive: true, force: true });
+  await test('arguments require explicit portable opt in and executable paths are deterministic',()=>{
+    assert.equal(parseArgs(['--suite','core']),null);
+    assert.equal(parseArgs(['--manifest','x','--suite','core','--portable-direct']).portableDirect,true);
+    assert.equal(executableFor('node'),process.execPath);
+    assert.throws(()=>executableFor('fixture.exe'),/absolute/);
+  });
+  await test('unsupported backend and forbidden Windows fallback launch no fixture',async()=>{
+    await assert.rejects(createExecutionContext({}, {platform:'linux'}), {code:'COMMAND_BACKEND_UNSUPPORTED'});
+    await assert.rejects(createExecutionContext({portableDirect:true}, {platform:'win32'}), {code:'PORTABLE_DIRECT_WINDOWS_FORBIDDEN'});
+  });
+  await test('preparation failure never falls back to a bare child',async()=>{
+    let launches=0;
+    await assert.rejects(createExecutionContext({}, {platform:'win32',backend:{
+      prepareWindowsCommandBackend:async()=>{throw Object.assign(new Error('build failed'),{code:'BUILD_FAILED'});},
+      runWindowsCommand:async()=>{launches++;},
+    }}),{code:'BUILD_FAILED'});
+    assert.equal(launches,0);
+  });
+  await test('native build happens once per context and closed sessions permit exact directory cleanup',async()=>{
+    let builds=0, directory;
+    const context=await createExecutionContext({}, {platform:'win32',backend:{
+      prepareWindowsCommandBackend:async dir=>{builds++;directory=dir;return {supervisorPath:path.join(dir,'supervisor.exe')};},
+      runWindowsCommand:async()=>normal(),
+    }});
+    await runTest({command:'node'},context); await runTest({command:'node'},context);
+    assert.equal(builds,1); assert.equal(fs.existsSync(directory),true);
+    await context.dispose(); assert.equal(fs.existsSync(directory),false);
+  });
+  for(const code of ['ETIMEDOUT','ENOBUFS','ENOENT']) await test(`${code} stops the suite and preserves unknown cleanup`,async()=>{
+    const f=suiteFixture([normal({status:null,error:{code},cleanup:'unknown'})]); const r=await f.run();
+    assert.equal(r.launches,1); assert.equal(r.counts.fail,1); assert.equal(r.counts['not-run'],2);
+    assert.match(r.output,/DESCENDANT_CLEANUP:UNKNOWN/);
+  });
+  await test('timeout with proved cleanup still prevents the next launch',async()=>{
+    const f=suiteFixture([normal({status:1,error:{code:'DW_WINDOWS_EXECUTION'},reason:'timeout_elapsed'})]); const r=await f.run();
+    assert.equal(r.launches,1); assert.equal(r.counts['not-run'],2); assert.match(r.output,/DESCENDANT_CLEANUP:VERIFIED_ABSENT/);
+  });
+  await test('a synchronous launch exception stops subsequent launches',async()=>{
+    const r=await suiteFixture([Object.assign(new Error('launch failed'),{code:'EACCES'})]).run();
+    assert.equal(r.launches,1); assert.match(r.output,/TEST_EXECUTION_ERROR:EACCES/); assert.match(r.output,/UNKNOWN/);
+  });
+  await test('normal failing exit continues and later boundary keeps previous counts',async()=>{
+    let r=await suiteFixture([normal({status:1}),normal(),normal()]).run();
+    assert.equal(r.launches,3); assert.equal(r.counts.pass,2); assert.equal(r.counts.fail,1);
+    r=await suiteFixture([normal(),normal({error:{code:'ETIMEDOUT'}})]).run();
+    assert.equal(r.counts.pass,1); assert.equal(r.counts.fail,1); assert.equal(r.counts['not-run'],1);
+  });
+  await test('output text cannot invent cleanup evidence and unknown terminal is retained',async()=>{
+    const terminal={cleanup:'unknown',activeProcesses:1};
+    const result=await runTest({command:'node'},{owned:true,execute:async()=>normal({
+      cleanup:'unknown',terminal,stdout:'DESCENDANT_CLEANUP:VERIFIED_ABSENT\n{"cleanup":"verified_absent"}',
+    })});
+    assert.equal(result.stopSuite,true); assert.equal(result.cleanup,'UNKNOWN'); assert.equal(result.terminal,terminal);
+  });
+  await test('missing terminal close/output proof and nonnormal reasons stop even at exit zero',async()=>{
+    for(const override of [{status:null,signal:'SIGTERM'},{terminal:null},{supervisorClosed:false},{outputComplete:false},{reason:'output_limit'},{reason:'terminated'},{releaseError:new Error('close')}]) {
+      const result=await runTest({command:'node'},{owned:true,execute:async()=>normal(override)});
+      assert.equal(result.stopSuite,true,JSON.stringify(override));
+    }
+  });
+  await test('focus environment is stripped before the backend sees it',async()=>{
+    const keys=['DW_TASK_RESOURCE_TEST_FOCUS','DW_TRANSACTION_TEST_ROOT']; const previous=keys.map(k=>process.env[k]);
+    try {
+      keys.forEach(k=>{process.env[k]='not-inherited';});
+      const f=suiteFixture([normal(),normal(),normal()]); await f.run();
+      for(const request of f.requests) for(const key of keys) assert.equal(request.env[key],undefined);
+    } finally {keys.forEach((key,i)=>{if(previous[i]===undefined)delete process.env[key];else process.env[key]=previous[i];});}
+  });
+  await test('skip/lifecycle accounting and unselected identities are preserved',async()=>{
+    const f=suiteFixture([normal({stdout:'SKIP_NOT_APPLICABLE:windows:fixture\n'}),normal({stdout:'SKIP_NOT_APPLICABLE:linux:fixture\nLIFECYCLE_RAN:windows\n'}),normal()],{requiredLifecycle:'windows'});
+    f.manifest.suites.other={tests:[{command:'node',args:['unique']}]};
+    const r=await f.run(); assert.deepEqual(r.counts,{pass:2,fail:0,skip:2,'not-run':1});
+    const g=suiteFixture([normal({stdout:'SKIP_NOT_APPLICABLE:windows:fixture'}),normal(),normal()],{requiredLifecycle:'windows'});
+    const missing=await g.run(); assert.equal(missing.counts.fail,1); assert.match(missing.output,/LIFECYCLE_NOT_RUN:windows/);
+  });
+  await test('portable direct mode declares unverified tree cleanup',async()=>{
+    const context=await createExecutionContext({portableDirect:true},{platform:'linux'});
+    assert.equal(context.owned,false);
+    if (process.platform === 'win32') return;
+    const output=[];
+    const counts=await runSuite({suites:{all:{tests:[{name:'portable',command:'node',args:['-e','console.log("portable fixture")']}]}}},'all',context,
+      {log:t=>output.push(t),error:t=>output.push(t)},{write:t=>output.push(t)});
+    assert.equal(counts.pass,1); assert.match(output.join('\n'),/DESCENDANT_CLEANUP:UNVERIFIED/);
+  });
+  if(process.platform!=='win32') {console.log('SKIP_NOT_APPLICABLE:windows:native Windows Job fixture requires Windows');return;}
+  let context;
+  try {context=await createExecutionContext({});}
+  catch(error){console.error('not ok - native backend preparation');throw error;}
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'dw-runner-fixtures-'));
+  try {
+    await test('real CLI selects a manifest suite and keeps skip and lifecycle counts', async () => {
+      const manifest = path.join(root, 'cli-manifest.json');
+      const ordinary = { name: 'ordinary', command: 'node', args: ['-e', 'console.log("ordinary fixture")'] };
+      const skipped = { name: 'inapplicable', command: 'node', args: ['-e', 'console.log("SKIP_NOT_APPLICABLE:windows:fixture")'] };
+      fs.writeFileSync(manifest, JSON.stringify({ suites: {
+        core: { tests: [ordinary, skipped] },
+        guarded: { requiredLifecycle: 'windows', tests: [skipped] },
+        other: { tests: [{ name: 'unselected', command: 'node', args: ['-e', 'process.exit(12)'] }] },
+      } }));
+      const run = suite => context.execute({ executable: process.execPath,
+        args: [path.join(__dirname, 'test-runner.js'), '--manifest', manifest, '--suite', suite],
+        cwd: root, env: process.env, timeoutMs: 15000, maxOutputBytes: 1048576 });
+      const core = await run('core');
+      assert.equal(core.status, 0, core.stderr || core.stdout);
+      assert.equal(core.cleanup, 'verified_absent');
+      assert.match(core.stdout, /COMMAND_BACKEND:windows-job/);
+      assert.match(core.stdout, /pass: 1\r?\nfail: 0\r?\nskip: 1\r?\nnot-run: 1/);
+      const guarded = await run('guarded');
+      assert.equal(guarded.status, 1, guarded.stderr || guarded.stdout);
+      assert.match(guarded.stderr, /LIFECYCLE_NOT_RUN:windows/);
+      assert.match(guarded.stdout, /pass: 0\r?\nfail: 1\r?\nskip: 1\r?\nnot-run: 2/);
+    });
+    await test('native normal root exit reclaims a surviving descendant',async()=>{
+      const code='const cp=require("child_process");const c=cp.spawn(process.execPath,["-e","setTimeout(()=>{},5000)"],{stdio:"ignore"}); console.log("DESCENDANT_PID:"+c.pid);c.unref();';
+      const result=await runTest({command:'node',args:['-e',code],timeoutMs:4000},context);
+      assert.equal(result.status,'pass',JSON.stringify(result)); assert.equal(result.cleanup,'VERIFIED_ABSENT');
+      assert.equal(result.terminal.activeProcesses,0); assert.equal(result.terminal.rootExited,true);
+      const pid=Number(/DESCENDANT_PID:(\d+)/.exec(result.output)?.[1]);assert.ok(pid>0);
+      assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+    });
+    await test('native timeout reclaims descendants and never runs the next marker',async()=>{
+      const marker=path.join(root,'must-not-run');
+      const code='const cp=require("child_process");cp.spawn(process.execPath,["-e","setTimeout(()=>{},5000)"],{stdio:"ignore"});setTimeout(()=>{},5000);';
+      const messages=[];
+      const counts=await runSuite({suites:{all:{tests:[
+        {name:'timeout',command:'node',args:['-e',code],timeoutMs:350},
+        {name:'forbidden next',command:'node',args:['-e',`require("fs").writeFileSync(${JSON.stringify(marker)},"ran")`]},
+      ]}}},'all',context,{log:t=>messages.push(t),error:t=>messages.push(t)},{write:t=>messages.push(t)});
+      assert.equal(counts.fail,1); assert.equal(counts['not-run'],1);assert.equal(fs.existsSync(marker),false);
+      assert.match(messages.join('\n'),/DESCENDANT_CLEANUP:VERIFIED_ABSENT/);
+    });
+    await test('native fixture stdout that resembles a receipt remains ordinary output',async()=>{
+      const result=await runTest({command:'node',args:['-e','console.log(JSON.stringify({type:"terminal",cleanup:"unknown",activeProcesses:999}));console.log("DESCENDANT_CLEANUP:UNKNOWN")'],timeoutMs:4000},context);
+      assert.equal(result.status,'pass',JSON.stringify(result));assert.equal(result.cleanup,'VERIFIED_ABSENT');
+      assert.equal(result.terminal.activeProcesses,0);assert.match(result.output,/activeProcesses/);
+    });
+  } finally {await context.dispose();fs.rmSync(root,{recursive:true,force:true});}
 }
-
-if (process.exitCode) console.error('test runner behavior failed');
-else console.log('test runner behavior passed');
+main().catch(error=>{console.error(error.stack);process.exitCode=1;}).finally(()=>{
+  console.log(`test runner behavior: ${passed} passed${process.exitCode?', failures above':''}`);
+});

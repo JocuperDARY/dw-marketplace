@@ -69,7 +69,7 @@
       "path": "skills/dw-collaboration/scripts/build-process-supervisor.js",
       "owner": "dw-collaboration",
       "enforcement": "opt-in-runtime",
-      "tests": ["test/process-supervisor.test.js"],
+      "tests": ["test/process-supervisor.test.js", "test/process-supervisor-managed.test.js"],
       "limits": "Explicit Windows C# build helper; source inclusion or test registration does not prove a built binary or active supervisor."
     },
     {
@@ -125,8 +125,8 @@
       "path": "skills/dw-collaboration/scripts/lib/task-resource-manager.js",
       "owner": "dw-collaboration",
       "enforcement": "opt-in-runtime",
-      "tests": ["test/task-resource-manager.test.js", "test/collaboration-safety.test.js"],
-      "limits": "Finite manager API requires caller-supplied adapter, identity and authorization; synthetic tests do not establish a deployed production adapter."
+      "tests": ["test/task-resource-manager.test.js", "test/collaboration-safety.test.js", "test/windows-command-adapter.test.js"],
+      "limits": "Finite manager API requires an adapter, identity and authorization; the Windows command adapter supplies one bounded implementation. Other adapters and installed hosts require their own evidence."
     },
     {
       "path": "skills/dw-collaboration/scripts/lib/task-resource-tracker.js",
@@ -141,6 +141,27 @@
       "enforcement": "opt-in-runtime",
       "tests": ["test/process-supervisor.test.js"],
       "limits": "Windows Job Object supervisor for explicitly launched children; registration does not prove compilation, installation, active use or non-Windows support."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/windows-command-backend.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/windows-command-backend.test.js", "test/test-runner.test.js"],
+      "limits": "Explicit Windows command launch and bounded native protocol; missing terminal proof remains unknown. Does not own pre-existing or externally brokered processes."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/lib/windows-command-adapter.js",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/windows-command-adapter.test.js"],
+      "limits": "V1 Windows command resources with no temporary root; explicit deadline/force authority. No automatic queue dispatch, installed-host activation or non-Windows adapter."
+    },
+    {
+      "path": "skills/dw-collaboration/scripts/process-supervisor/DwProcessSupervisor.Managed.cs",
+      "owner": "dw-collaboration",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/process-supervisor-managed.test.js", "test/windows-command-backend.test.js"],
+      "limits": "Private Job and retained handles for newly launched commands; bounded protocol/output/deadline and release. Local lifecycle evidence does not prove user-host integration."
     },
     {
       "path": "skills/dw-collaboration/scripts/validate-artifact.js",

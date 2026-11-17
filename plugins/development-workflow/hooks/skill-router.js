@@ -19,6 +19,11 @@ const SKILL_IDS = Object.freeze(SKILL_REGISTRY.map(skill => skill.name));
 
 const ROUTES = [
   {
+    id: 'resource-lifecycle', skills: ['dw-collaboration', 'dw-verification'],
+    pattern: /^(?:请|帮我)?\s*(?:管理|回收|停止|监管)\s*(?:本任务的?|测试的?|这些)?\s*(?:子进程|进程树|任务资源)|^(?:请|帮我)?\s*(?:补齐|接入|实现)\s*(?:生产资源管理适配|通用测试的?子进程回收)|^(?:manage|reclaim|supervise)\s+(?:(?:this|the|test|task|owned)\s+)*(?:subprocesses|process\s+trees|task\s+resources)\b/im,
+    context: 'Use `development-workflow:dw-collaboration` for task-owned command resources and `development-workflow:dw-verification` for lifecycle evidence. Reuse the bounded command backend; enable the persistent manager only when needed. Preserve existing authorization and platform limits. Missing identity or terminal evidence remains HOLD/UNKNOWN; this routing advice does not launch or terminate processes.',
+  },
+  {
     id: 'design-challenge', skills: ['dw-planning'],
     pattern: /^(?:审视|质询|追问|挑战|压力测试)\s*(?:一下|这个|这份|我的|我们的)?\s*(?:方案|设计|计划|假设)|^(?:grill\s+me\s+(?:about|on)\s+(?:(?:this|the|my|our)\s+)?(?:plan|design|decision|idea)|(?:stress[ -]test|challenge)\s+(?:this|the|my|our)\s+(?:plan|design|decision|idea))\b/im,
     context: 'Use `development-workflow:dw-planning` to test assumptions and decision dependencies. Look up facts first, ask only material unresolved decisions, preserve interview-only scope and existing authorization, and stop when the requested decision is sufficiently supported.',
