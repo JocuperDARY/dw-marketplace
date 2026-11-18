@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.10.0 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.10.1 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.10.1**：完善 [dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 的阅读框架、同一实例贯穿与就近释义；新增按需引用的 [交互流程说明](./plugins/development-workflow/skills/dw-writing/references/interactive-html.md)，覆盖总图与详图衔接、卡片/术语解释和成品阅读检查。沿用现有 Skill 路由，短答复不增加固定目录，真实宿主安装与验证继续暂缓。
 
 **development-workflow 5.10.0**：补齐[命令队列执行](./plugins/development-workflow/skills/dw-collaboration/references/resource-command-dispatcher.md)，先登记待创建资源，再按容量启动；只有正式关闭得到确认后才归还容量。可证实的未启动与未知启动分别处理。新增显式选择的 [POSIX 进程组后端](./plugins/development-workflow/skills/dw-collaboration/references/posix-command-backend.md)，供测试与更新检查使用；其边界是同组进程，原生平台验收仍未运行。维护生命周期路由、测试与文档，真实宿主安装和验证继续暂缓。
 
