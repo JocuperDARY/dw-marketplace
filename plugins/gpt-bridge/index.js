@@ -620,7 +620,7 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
 }
 
 const server = new Server(
-  { name: 'gpt-bridge', version: '2.0.1' },
+  { name: 'gpt-bridge', version: '2.0.2' },
   { capabilities: { tools: {} } }
 );
 

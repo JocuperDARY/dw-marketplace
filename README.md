@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.10.1 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
-| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.1 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+| [development-workflow](./plugins/development-workflow/) | 5.10.2 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.2 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.10.2 / gpt-bridge 2.0.2**：清理初次 marketplace 迁移、gpt-bridge v2 和 DW 5.2.0 的三份已完成实施计划；配套设计、验证记录与 Git 历史继续保留。同步发布元数据与 MCP 握手版本，插件功能未变。
 
 **development-workflow 5.10.1**：完善 [dw-writing](./plugins/development-workflow/skills/dw-writing/SKILL.md) 的阅读框架、同一实例贯穿与就近释义；新增按需引用的 [交互流程说明](./plugins/development-workflow/skills/dw-writing/references/interactive-html.md)，覆盖总图与详图衔接、卡片/术语解释和成品阅读检查。沿用现有 Skill 路由，短答复不增加固定目录，真实宿主安装与验证继续暂缓。
 
