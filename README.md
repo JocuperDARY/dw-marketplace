@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.11.0 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.11.1 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.2 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.11.1**：更新自动子任务模型政策为 `gpt-6.1-terra`、`gpt-6.2-sol`、`gpt-6.2-astra`，统一检查原始名称、可信宿主解析结果与 fallback，排除已退休模型及其别名。保留根会话模型选择，补齐路由证据绑定和合成宿主回归；契约检查不代表真实模型分派或宿主验收。
 
 **development-workflow 5.11.0**：新增 [dw-interaction](./plugins/development-workflow/skills/dw-interaction/SKILL.md)，整理人机协作中的目标对齐、有效提问、授权续接、失败恢复、解释与交付验收，并提供从历史对话提炼经验和逐段回查的方法。复用现有规划、写作、验证、协作和交接职责；同步导航、按需路由与包清单。路由只给建议，真实宿主安装与验证继续暂缓。
 

@@ -58,6 +58,7 @@ const PLAN_PHASE_KINDS = Object.freeze(['diagnosis', 'planning', 'implementation
 const PLAN_LATENCY_COSTS = Object.freeze(['interactive', 'balanced', 'throughput', 'offline', 'unknown']);
 const PLAN_VALIDATION_COSTS = Object.freeze(['automatic_check', 'focused_tests', 'independent_verification', 'rollback_proof', 'full_surface_audit', 'unknown']);
 const PLAN_EFFORTS = Object.freeze(['unspecified', 'low', 'medium', 'high', 'xhigh', 'max', 'unknown']);
+const HOST_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 const PROCESS_RECOVERY_ACTIONS = Object.freeze(['REQUEST_GRACEFUL', 'WAIT_BOUNDED', 'TERMINATE_EXACT_TREE', 'OBSERVE_ONLY', 'HOLD']);
 const TEMPORARY_LEASE_ACTIONS = Object.freeze(['ALLOW_WRITE', 'STOP_EXPANSION', 'STOP_DISPATCH', 'OBSERVE_ONLY', 'QUARANTINE', 'RECLAIM_EXACT', 'HOLD']);
 const PROGRESS_CLASSIFICATIONS = Object.freeze(['QUIET_PROGRESS', 'EXTERNAL_WAIT', 'SUSPECTED_HUNG', 'UNVERIFIED']);
@@ -645,17 +646,20 @@ function routeFloor(phaseAxes, policy) {
   return 'light';
 }
 
-function selectedEffort(lane, floor) {
+const ORDINARY_FALLBACK_MODEL = 'gpt-6.2-sol';
+const AUTOMATIC_MODELS = new Set(['gpt-6.1-terra', ORDINARY_FALLBACK_MODEL, 'gpt-6.2-astra']);
+function usesOrdinaryFallback(floor) { return floor === 'light' || floor === 'standard'; }
+function selectedEffort(lane, floor, canonicalModel) {
   if (lane.request_control_support !== 'supported') return 'unspecified';
-  const preferred = floor === 'light' ? 'low' : floor === 'standard' ? 'medium' : 'high';
-  if (Array.isArray(lane.supported_efforts) && lane.supported_efforts.includes(preferred)) return preferred;
+  const defaultEffort = usesOrdinaryFallback(floor) ? 'medium' : 'high';
+  const effort = floor === 'light' && canonicalModel !== ORDINARY_FALLBACK_MODEL ? 'low' : defaultEffort;
+  if (Array.isArray(lane.supported_efforts) && lane.supported_efforts.includes(effort)) return effort;
   return 'unspecified';
 }
 
-const AUTOMATIC_MODELS = new Set(['gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6-astra']);
 function normalizedModelId(value) { return typeof value === 'string' ? value.trim().toLowerCase() : ''; }
 function excludedAutomaticModel(value) {
-  return /^(?:gpt-5\.[56](?:-|$)|gpt-6-sol(?:-|$))/.test(normalizedModelId(value));
+  return /^(?:gpt-5\.[56]|gpt-6-(?:luna|sol|astra)|gpt-6\.1-sol)(?:-|$)/.test(normalizedModelId(value));
 }
 function resolveAutomaticLane(lane, phaseAxes, floor, policy) {
   if (excludedAutomaticModel(lane.lane_id) || typeof policy.trustedLanePolicyResolver !== 'function') return null;
@@ -671,9 +675,8 @@ function resolveAutomaticLane(lane, phaseAxes, floor, policy) {
     const canonicalModel = normalizedModelId(resolution.canonicalModel);
     if (excludedAutomaticModel(canonicalModel) || !AUTOMATIC_MODELS.has(canonicalModel)
       || !nonEmptyUniqueStrings(resolution.supportedEfforts)
-      || resolution.supportedEfforts.some((effort) => !PLAN_EFFORTS.includes(effort)
-        || ['unspecified', 'unknown'].includes(effort))) return null;
-    const effort = selectedEffort(lane, floor);
+      || resolution.supportedEfforts.some((effort) => !HOST_REASONING_EFFORTS.has(effort))) return null;
+    const effort = selectedEffort(lane, floor, canonicalModel);
     if (effort === 'unspecified' || !resolution.supportedEfforts.includes(effort)) return null;
     return { lane, canonicalModel, effort };
   } catch (_) { return null; }
@@ -750,7 +753,9 @@ function selectRouteFromEffectiveCapabilities(availableLanes, phaseAxes, effecti
     capability_class: candidate.lane.capability_class,
     reasons: [`floor_${floor}`, `availability_${candidate.lane.availability_evidence_ref}`],
     required_validation: phaseAxes.validation_failure_cost,
-    fallbacks: [...new Set(eligible.filter((lane) => lane.canonicalModel !== candidate.canonicalModel).map((lane) => lane.canonicalModel))],
+    fallbacks: [...new Set(eligible
+      .map((lane) => lane.canonicalModel)
+      .filter((model) => model !== candidate.canonicalModel && (!usesOrdinaryFallback(floor) || model === ORDINARY_FALLBACK_MODEL)))],
   };
 }
 
@@ -1116,11 +1121,10 @@ function validateAuthorizedPlan(plan, capabilityMatrix, options, result) {
       trustedAuthorizationResolver: options.trustedAuthorizationResolver,
       trustedLanePolicyResolver: options.trustedLanePolicyResolver,
     });
-    const lane = options.availableLanes.find((candidate) => candidate && candidate.availability_evidence_ref === phase.route.selection_evidence);
     const exactFallbacks = Array.isArray(expected.fallbacks) && canonicalize(expected.fallbacks) === canonicalize(phase.route.allowed_fallbacks);
-    if (expected.status !== 'SELECTED' || !lane || phase.route.requested_model !== expected.requested_model
+    if (expected.status !== 'SELECTED' || phase.route.requested_model !== expected.requested_model
       || phase.route.requested_effort !== expected.requested_effort || phase.route.selected_model !== expected.selected_model
-      || phase.route.selected_effort !== expected.selected_effort || phase.route.selection_evidence !== lane.availability_evidence_ref
+      || phase.route.selected_effort !== expected.selected_effort || !expected.reasons.includes(`availability_${phase.route.selection_evidence}`)
       || !exactFallbacks || expected.required_validation !== phase.validation_failure_cost) {
       error(result, 'PLAN_ROUTE_EVIDENCE_REQUIRED', `$.phases[${index}].route`, 'AUTHORIZED plan route does not match the independently recomputed route');
     }
