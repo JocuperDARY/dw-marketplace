@@ -105,10 +105,14 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 ### gpt-bridge MCP 注册
 
+在实际安装或升级的执行窗口中，先从安装结果定位 gpt-bridge 目录，读取该目录的 `package.json`，确认版本与上方版本表一致。注册时使用同目录 `index.js` 的绝对路径；下方路径是占位示例，须替换为已核对的安装路径。不要用通配符匹配缓存版本，也不要假定不同宿主具有相同的缓存层级。
+
 ```bash
 claude mcp add gpt-bridge -- node \
-  ~/.claude/plugins/cache/dw-marketplace/gpt-bridge/*/plugins/gpt-bridge/index.js
+  "/absolute/path/to/installed-gpt-bridge/index.js"
 ```
+
+升级已有服务时，通过宿主的 MCP 配置管理更新原有 `gpt-bridge` 注册项，确认其执行参数指向新目录。下一次启动后核对 MCP 初始化返回的 `serverInfo.version` 与安装包版本；旧进程不会因下载新包自动切换。此处说明恢复执行窗口后的步骤，当前真实安装、重注册与启动验证仍暂缓。
 
 ### gpt-bridge 模型与权限
 
