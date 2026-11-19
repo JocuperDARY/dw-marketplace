@@ -1,7 +1,7 @@
 {
   "name": "development-workflow",
-  "version": "5.10.2",
-  "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共14个 Skill（1个总纲 + 13个子 Skill），并含 hooks、rules 及环境健康检查。",
+  "version": "5.11.0",
+  "description": "全流程开发准则：风险分级的诊断、规划、实现、验证与收尾。共15个 Skill（1个总纲 + 14个子 Skill），并含 hooks、rules 及环境健康检查。",
   "scripts": {
     "check:skills": "node skills/dw-tooling/scripts/check-skill-structure.js",
     "test": "npm run test:all",
@@ -37,6 +37,7 @@
     "skills/dw-wrapup/",
     "skills/dw-handoff/",
     "skills/dw-writing/",
+    "skills/dw-interaction/",
     "skills/dw-optimization/",
     "skills/dw-debugging/",
     "skills/dw-tooling/",

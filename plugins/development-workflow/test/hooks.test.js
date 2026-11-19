@@ -250,7 +250,8 @@ test('development-workflow package includes check-updates skill assets', () => {
   const commonJsPath = path.join(pluginRoot, 'skills', 'check-updates', 'scripts', 'check-updates.js');
 
   assert(packageJson.files.includes('skills/check-updates/'));
-  assert.match(pluginJson.description, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
+  const skillCount = readSkillDirectories().length;
+  assert(pluginJson.description.includes(`${skillCount}个 Skill（1个总纲 + ${skillCount - 1}个子 Skill）`));
   assert.match(hub, /check-updates/);
   assert(fs.existsSync(skillPath), 'expected check-updates skill');
   assert(fs.existsSync(scriptPath), 'expected check-updates compatibility wrapper');
@@ -342,7 +343,8 @@ function parseSkillFrontmatter(content, file) {
 
 test('all skills expose concise trigger-only discovery metadata', () => {
   const skills = readSkillDirectories();
-  assert.strictEqual(skills.length, 14, `expected 14 skills, found ${skills.length}`);
+  assert.deepStrictEqual(skills.map(skill => skill.name).sort(),
+    [...require('../hooks/skill-router.js').SKILL_IDS].sort());
 
   for (const skill of skills) {
     const content = fs.readFileSync(skill.file, 'utf8');
@@ -536,7 +538,7 @@ test('contributor and package manifests expose the real skill and test surface',
     return;
   }
   const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /1 core hub \+ 13 sub-skills/);
+  assert(agents.includes(`1 core hub + ${readSkillDirectories().length - 1} sub-skills`));
 });
 
 test('tooling and wrap-up require owned child processes to be reclaimed', () => {
@@ -834,7 +836,9 @@ test('development-workflow manifests and README agree on version and skill count
   assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
   assert.strictEqual(packageJson.version, pluginJson.version);
   assert.strictEqual(packageJson.description, pluginJson.description);
-  assert.match(packageJson.description, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
+  const skillCount = readSkillDirectories().length;
+  const skillDescription = `${skillCount}个 Skill（1个总纲 + ${skillCount - 1}个子 Skill）`;
+  assert(packageJson.description.includes(skillDescription));
   const coreSkill = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
   const writingPath = path.join(pluginRoot, 'skills', 'dw-writing', 'SKILL.md');
   const writing = fs.readFileSync(writingPath, 'utf8');
@@ -883,7 +887,7 @@ test('development-workflow manifests and README agree on version and skill count
   assert.strictEqual(packageJson.version, marketplaceEntry.version);
   assert.strictEqual(packageJson.description, marketplaceEntry.description);
   assert.match(readme, new RegExp(`development-workflow.*${packageJson.version}`));
-  assert.match(readme, /14个 Skill（1个总纲 \+ 13个子 Skill）/);
+  assert(readme.includes(skillDescription));
 });
 
 test('documentation states evidence boundaries and manager entry points', () => {
