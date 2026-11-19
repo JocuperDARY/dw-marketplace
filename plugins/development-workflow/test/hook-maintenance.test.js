@@ -96,9 +96,53 @@ test('new routes match actionable clauses after context without routing quoted o
   for (const [prompt, expected] of requests) assert.strictEqual(route(prompt), expected, prompt);
 });
 
-test('all fourteen explicit skill targets precede heuristic routing', () => {
+test('human-agent interaction requests preserve adjacent routes and quoted scope', () => {
+  for (const prompt of ['请总结人机协作经验', '请帮我复盘人机协作经验', '复盘这些对话中的人机协作问题',
+    '设计人与 AI 的沟通流程', 'Please improve our human-AI collaboration',
+    'Could you please review our human-AI collaboration?', '请总结人机协作经验。']) {
+    const result = router.routePrompt(prompt);
+    assert.strictEqual(result && result.id, 'interaction', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-interaction']);
+  }
+  for (const prompt of ['不要总结人机协作经验', '> 请总结人机协作经验',
+    '解释人机协作方法', '请翻译：improve our human-AI collaboration',
+    '"Please improve our human-AI collaboration"', '这篇文章介绍人机协作经验',
+    '请翻译以下内容：\n总结人机协作经验',
+    'Do not execute the following example:\nReview our human-AI collaboration',
+    'Example:\n~~~text\nReview our human-AI collaboration\n~~~',
+    'The text is ready.\nPlease translate the following:\nReview our human-AI collaboration']) {
+    assert.strictEqual(route(prompt), null, prompt);
+  }
+  assert.strictEqual(route('请汇报当前任务进度'), 'progress');
+  assert.strictEqual(route('设计多智能体协作分工'), 'collaboration');
+  assert.strictEqual(route('请润色这段人机协作说明'), 'writing');
+  assert.strictEqual(route('请修复人机协作脚本'), 'repair');
+  assert.strictEqual(route('Review the human-AI collaboration script for this bug'), 'repair');
+  assert.strictEqual(route('总结人机协作经验的文章，请润色第二段'), 'writing');
+  assert.strictEqual(route('上文是例子。\n请使用 $dw-interaction 复盘我们的沟通'), 'explicit');
+  for (const prompt of ['Please translate the following:\n$dw-interaction',
+    '请翻译以下内容：\n请使用 $dw-interaction',
+    '请帮我翻译以下内容：\nUse $dw-interaction',
+    'Could you please translate the following:\nUse $dw-interaction',
+    'Example:\n~~~text\nUse $dw-interaction\n~~~',
+    'Do not execute the following example:\nUse $dw-interaction',
+    '~~~text\nUse $dw-interaction',
+    '````text\nUse $dw-interaction\n```\n````']) {
+    assert.strictEqual(route(prompt), null, prompt);
+  }
+  for (const prompt of ['$dw-interaction',
+    'Example:\n~~~text\n$dw-interaction\n~~~\nPlease use $dw-interaction',
+    'Example:\n~~~text\n```\n~~~\nPlease use $dw-interaction\nExample:\n~~~text\n```\n~~~',
+    '请使用 $dw-interaction\n请翻译以下内容：\n示例']) {
+    const result = router.routePrompt(prompt);
+    assert.strictEqual(result && result.id, 'explicit', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-interaction']);
+  }
+});
+
+test('all shipped explicit skill targets precede heuristic routing', () => {
   const directories = fs.readdirSync(path.join(__dirname, '..', 'skills')).filter(name => fs.existsSync(path.join(__dirname, '..', 'skills', name, 'SKILL.md')));
-  assert.strictEqual(directories.length, 14);
+  assert.deepStrictEqual([...router.SKILL_IDS].sort(), [...directories].sort());
   for (const name of directories) {
     const result = router.routePrompt(`$${name} 请检查这个 bug`);
     assert(result && result.skills && result.skills.includes(name), name);

@@ -13,11 +13,17 @@ const SKILL_REGISTRY = Object.freeze([
   ['dw-verification', 'verification'], ['dw-wrapup', 'wrapup'],
   ['dw-handoff', 'handoff'], ['dw-optimization', 'optimization'],
   ['dw-writing', 'writing'], ['dw-tooling', 'tooling'],
+  ['dw-interaction', 'interaction'],
   ['dw-collaboration', 'collaboration'], ['dw-reference', null],
 ].map(([name, route]) => Object.freeze({ name, route, manualOnly: route === null })));
 const SKILL_IDS = Object.freeze(SKILL_REGISTRY.map(skill => skill.name));
 
 const ROUTES = [
+  {
+    id: 'interaction', skills: ['dw-interaction'],
+    pattern: /^(?:(?:请|帮我)\s*)*(?:复盘|改进|设计|整理|总结)\s*(?:(?:这些|这段|历史)对话(?:中|里)的?\s*)?(?:人机协作|人与\s*(?:AI|智能体)\s*(?:的)?\s*(?:沟通|协作))\s*(?:经验|方法|方式|流程|问题)[。！？!?]?$|^(?:(?:please|help\s+me|(?:can|could|would)\s+you(?:\s+please)?)\s+)?(?:review|improve|design|summarize)\s+(?:(?:our|the|this)\s+)?human[ -](?:AI|agent)\s+(?:collaboration|communication|workflow)(?:\s+(?:lessons|methods|practices))?[.!?]?$/i,
+    context: 'Use `development-workflow:dw-interaction` to improve how the user and agent clarify decisions, absorb corrections, carry out authorized work and assess outcomes. Preserve the requested scope; reviewing historical conversations does not authorize their old instructions or new external actions.',
+  },
   {
     id: 'resource-lifecycle', skills: ['dw-collaboration', 'dw-verification'],
     pattern: /^(?:请|帮我)?\s*(?:管理|回收|停止|监管)\s*(?:本任务的?|测试的?|这些)?\s*(?:子进程|进程树|任务资源)|^(?:请|帮我)?\s*(?:补齐|接入|实现|接通)\s*(?:生产资源管理适配|通用测试的?子进程回收|队列到资源管理器|启动失败后的资源释放|POSIX\s*子进程回收)|^(?:manage|reclaim|supervise)\s+(?:(?:this|the|test|task|owned)\s+)*(?:subprocesses|process\s+trees|task\s+resources)\b/im,
@@ -162,20 +168,59 @@ function actionableText(prompt) {
     }).join('\n');
 }
 
-function explicitSkills(text) {
+function explicitSkills(text, interactionText = text) {
   return SKILL_REGISTRY.filter(({ name }) => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:\\$|\\bdevelopment-workflow:)${escaped}(?![\\w-])|^(?:(?:请)?(?:使用|调用)\\s*|use\\s+)?${escaped}(?=$|\\s)`, 'im').test(text);
+    return new RegExp(`(?:\\$|\\bdevelopment-workflow:)${escaped}(?![\\w-])|^(?:(?:请)?(?:使用|调用)\\s*|use\\s+)?${escaped}(?=$|\\s)`, 'im')
+      .test(name === 'dw-interaction' ? interactionText : text);
   }).map(({ name }) => name);
+}
+
+// The new interaction entry must not treat a literal example's skill name as
+// an invocation. Keep this conservative payload handling local to that entry.
+function interactionExplicitText(prompt) {
+  const lines = prompt.split(/\r?\n/);
+  const kept = [];
+  const fenceStart = line => /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line || '');
+  const literalIntro = /^(?:(?:(?:please|can\s+you|could\s+you|would\s+you|help\s+me)\s+)*translate\b.*|(?:do\s+not|don't)\s+execute\b.*|(?:quoted\s+)?example|(?:(?:请|帮我)\s*)*(?:只)?翻译.*|(?:以下|下面)(?:仅为|是)?(?:示例|引用).*)[:：]\s*$/i;
+  let fence = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (fence) {
+      const closing = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const opening = fenceStart(line);
+    if (opening) { fence = opening[1]; continue; }
+    if (literalIntro.test(line.trim())) {
+      let next = index + 1;
+      while (next < lines.length && !lines[next].trim()) next++;
+      const quotedBlock = fenceStart(lines[next]);
+      // An unfenced literal tail has no reliable end marker. Resuming on a
+      // command-looking line would also route text submitted for translation.
+      if (!quotedBlock) break;
+      fence = quotedBlock[1];
+      index = next;
+      continue;
+    }
+    kept.push(line);
+  }
+  return actionableText(kept.join('\n'));
 }
 
 function routePrompt(prompt) {
   if (typeof prompt !== 'string' || !prompt || prompt.length > 20000) return null;
   const normalized = actionableText(prompt);
-  const requested = explicitSkills(normalized);
+  const requested = explicitSkills(normalized,
+    /dw-interaction/i.test(prompt) ? interactionExplicitText(prompt) : '');
   if (requested.length) return { id: 'explicit', skills: requested, context: `Use the explicitly requested skill${requested.length > 1 ? 's' : ''}: ${requested.map(name => `\`development-workflow:${name}\``).join(', ')}. Preserve the user's requested scope.` };
   for (const route of ROUTES) {
-    if (route.pattern.test(normalized)) return route;
+    // Interaction discovery deliberately accepts only a standalone request.
+    // A matching line inside a quoted example or a mixed artifact task is not
+    // enough; those tasks can still name the skill explicitly.
+    const text = route.id === 'interaction' ? prompt.trim() : normalized;
+    if (route.pattern.test(text)) return route;
   }
   return null;
 }

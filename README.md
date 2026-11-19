@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.10.2 | 按任务风险调整计划、实现、验证与协作，含方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、14个 Skill（1个总纲 + 13个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.11.0 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 2.0.2 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.11.0**：新增 [dw-interaction](./plugins/development-workflow/skills/dw-interaction/SKILL.md)，整理人机协作中的目标对齐、有效提问、授权续接、失败恢复、解释与交付验收，并提供从历史对话提炼经验和逐段回查的方法。复用现有规划、写作、验证、协作和交接职责；同步导航、按需路由与包清单。路由只给建议，真实宿主安装与验证继续暂缓。
 
 **development-workflow 5.10.2 / gpt-bridge 2.0.2**：清理初次 marketplace 迁移、gpt-bridge v2 和 DW 5.2.0 的三份已完成实施计划；配套设计、验证记录与 Git 历史继续保留。同步发布元数据与 MCP 握手版本，插件功能未变。
 
@@ -128,7 +130,7 @@ claude mcp add gpt-bridge -- node \
 
 1. 替换 `extraKnownMarketplaces` 中的 marketplace source 为 `JocuperDARY/dw-marketplace`
 2. 替换 `enabledPlugins` 键为 `development-workflow@dw-marketplace`
-3. 将插件更新到当前的 5.10.0 版本
+3. 将插件更新到上方版本表列出的当前版本
 
 5.1.0 新增 `dw-collaboration`。它先检查当前工具是否能够创建子 agent、收集结果、双向通信和管理资源，再选择协作方式。
 
@@ -165,7 +167,7 @@ npm run check:skills
 
 它校验 Skill 元数据、导航与本地引用、显式路由目标、发布清单及全部 `.test.js` 的入口登记。不会修改源码、替用户作授权决定或检查写作风格。`npm run test:package` 另外生成实际 npm 归档，在隔离目录离线安装后运行包内测试，防止清单存在但文件未实际发布。
 
-路由只给出建议，保留两个 advisory hooks。全部 14 个 Skill 支持显式名称；总纲与快速参考主要通过显式调用使用。领域提示资料已归入 [dw-reference](./plugins/development-workflow/skills/dw-reference/references/domains.json)，不再声明为运行中的 Layer 3 自动注入。
+路由只给出建议，保留两个 advisory hooks。全部 15 个 Skill 支持显式名称；总纲与快速参考主要通过显式调用使用。领域提示资料已归入 [dw-reference](./plugins/development-workflow/skills/dw-reference/references/domains.json)，不再声明为运行中的 Layer 3 自动注入。
 
 旧版 `prune-rules.js` 已移除。运行时选择器不会修改用户规则；若需要把活跃语言规则
 移出自动加载目录，必须先审阅只读迁移计划：

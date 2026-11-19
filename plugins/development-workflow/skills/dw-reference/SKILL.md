@@ -22,6 +22,7 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 文档/注释 | 适用结构、链接或示例检查与 diff 复核；简单措辞可仅做 diff 复核 | [总纲路由](../development-workflow/SKILL.md#阶段路由模型) |
 | 只读审查 | 可定位发现、证据、影响与残余风险 | [验证](../dw-verification/SKILL.md) |
 | 任务交接 | 当前状态、已有授权、未完成事项、恢复来源与首项动作 | [交接](../dw-handoff/SKILL.md) |
+| 人机协作复盘 | 可定位的用户要求与响应、导致返工的差异、适用条件及改进后的行为 | [人机配合](../dw-interaction/SKILL.md) |
 | 团队协作 | 责任范围、依赖、回传渠道与可核验结果；规模按实际需要 | [协作](../dw-collaboration/references/ordinary-collaboration.md) |
 | 进度汇报 | 已知状态、结果依据、实际限制与下一步 | [表述](../dw-writing/SKILL.md#让进度和决定可追溯) |
 | 复杂技术文档与交互流程图 | 阅读框架与正文对应、术语就近可懂、受影响入口的实际阅读检查 | [写作](../dw-writing/SKILL.md)、[交互流程说明](../dw-writing/references/interactive-html.md) |

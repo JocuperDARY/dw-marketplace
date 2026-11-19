@@ -7,7 +7,7 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 
 **方法论版本**: 3.13 | **适用范围**: 通用（不限于本项目）
 
-> 本 skill 已拆分为 **1 个总纲 + 13 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
+> 本 skill 已拆分为 **1 个总纲 + 14 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
 
 ---
 
@@ -22,6 +22,7 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 | 📦 收尾 | [dw-wrapup](../dw-wrapup/SKILL.md) | 文档更新、知识持久化、基线对比 | 收尾、提交、知识持久化、基线对比 |
 | 📤 交接 | [dw-handoff](../dw-handoff/SKILL.md) | 任务重审、参考盘点、TODO 对账、接手文档 | 交接、接手文档、handoff、任务移交 |
 | ✍️ 表述 | [dw-writing](../dw-writing/SKILL.md) | 进度与决策说明、证据表达、任务名称与代号 | 进度汇报、润色说明、说人话、任务命名 |
+| 💬 人机配合 | [dw-interaction](../dw-interaction/SKILL.md) | 明确用户决定、吸收纠正、持续推进与经验复盘 | 人机协作经验、沟通方式、反复确认、目标偏移 |
 | 🤝 协作 | [dw-collaboration](../dw-collaboration/SKILL.md) | 角色、依赖、通信、调度与可选资源协议 | 子agent、多智能体、协作、分派、资源回收 |
 | ⚡ 优化 | [dw-optimization](../dw-optimization/SKILL.md) | 优化原则、决策树、六类优化详解 | 优化、性能、profiling、加速 |
 | 🐛 调试 | [dw-debugging](../dw-debugging/SKILL.md) | 信号诊断、闭环验证、生命周期排查 | 调试、信号诊断、管道排查 |
