@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'assert';
 import { spawnSync } from 'child_process';
-import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join, relative, isAbsolute, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -127,7 +127,7 @@ test('new Codex exec calls use --sandbox instead of old -p profile misuse', asyn
   process.env.CODEX_PATH = bin;
   const result = await runCodex({
     prompt: 'Summarize this.',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     mode: 'workspace',
     cwd,
     timeout: 5,
@@ -137,7 +137,7 @@ test('new Codex exec calls use --sandbox instead of old -p profile misuse', asyn
   assert.deepStrictEqual(argv.slice(0, 3), ['exec', '--sandbox', 'workspace-write']);
   assert(!argv.includes('-p'), `did not expect old -p profile flag in ${argv.join(' ')}`);
   assert(argv.includes('-m'));
-  assert(argv.includes('gpt-6.1-sol'));
+  assert(argv.includes('gpt-6.2-sol'));
   assert(argv.includes('--json'));
   assert(argv.includes('-o'));
   assert.strictEqual(readFileSync(join(cwd, 'stdin.txt'), 'utf8').includes('## Task'), true);
@@ -150,10 +150,12 @@ for (const sessionId of [undefined, 'previous-session']) {
     const result = await runCodex({ prompt: 'Test default.', sessionId, cwd, timeout: 5 });
     assert.strictEqual(result.success, true, result.error);
     const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
-    assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.1-sol');
+    assert.deepStrictEqual(argv.slice(0, 3), ['exec', '--sandbox', 'workspace-write']);
+    assert(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+    assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.2-sol');
     assert.strictEqual(argv[argv.indexOf('-c') + 1], 'model_reasoning_effort=medium');
     assert.strictEqual(result.modelSelection, 'bridge_default');
-    assert.strictEqual(result.requestedModel, 'gpt-6.1-sol');
+    assert.strictEqual(result.requestedModel, 'gpt-6.2-sol');
     assert.strictEqual(result.requestedEffort, 'medium');
     assert.strictEqual(result.actualModel, 'unknown');
     assert.strictEqual(result.actualEffort, 'unknown');
@@ -164,7 +166,7 @@ for (const sessionId of [undefined, 'previous-session']) {
 test('explicit model and effort override defaults without claiming observed identity', async () => {
   const cwd = makeDir();
   process.env.CODEX_PATH = makeFakeCodex(cwd);
-  const result = await runCodex({ prompt: 'Test explicit.', model: ' gpt-6.1-terra ', effort: 'low', mode: 'strict', cwd, timeout: 5 });
+  const result = await runCodex({ prompt: 'Test explicit.', model: ' GPT-6.1-TERRA ', effort: 'low', mode: 'strict', cwd, timeout: 5 });
   assert.strictEqual(result.success, true, result.error);
   const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
   assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.1-terra');
@@ -177,8 +179,8 @@ test('explicit model and effort override defaults without claiming observed iden
 
 for (const [profile, model, effort, sandbox] of [
   ['fast', 'gpt-6.1-terra', 'low', ['--sandbox', 'read-only']],
-  ['balanced', 'gpt-6.1-sol', 'medium', ['--sandbox', 'workspace-write']],
-  ['max', 'gpt-6-astra', 'high', ['--dangerously-bypass-approvals-and-sandbox']],
+  ['balanced', 'gpt-6.2-sol', 'medium', ['--sandbox', 'workspace-write']],
+  ['max', 'gpt-6.2-astra', 'high', ['--dangerously-bypass-approvals-and-sandbox']],
 ]) {
   test(`MCP ${profile} profile sends its model, effort and documented permission mode`, () => {
     const cwd = makeDir();
@@ -202,12 +204,30 @@ for (const [profile, model, effort, sandbox] of [
 
 test('MCP effort override and resume retain explicit requested metadata', () => {
   const cwd = makeDir();
-  const result = callMcpTool({ profile: 'fast', effort: 'high', sessionId: 'prior' }, cwd);
+  const result = callMcpTool({ profile: 'balanced', effort: 'high', sessionId: 'prior' }, cwd);
   assert(!result.isError, result.content[0].text);
   const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
   assert(argv.includes('resume'));
+  assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.2-sol');
   assert.strictEqual(argv[argv.indexOf('-c') + 1], 'model_reasoning_effort=high');
   assert.strictEqual(result._meta['gpt-bridge/requestedEffort'], 'high');
+});
+
+test('MCP resume canonicalizes an explicit model without selecting its full-access profile', () => {
+  const cwd = makeDir();
+  const result = callMcpTool({ model: ' GPT-6.2-ASTRA ', effort: 'high', sessionId: 'prior' }, cwd);
+  assert(!result.isError, result.content[0].text);
+  const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
+  assert.deepStrictEqual(argv.slice(0, 4), ['exec', '--sandbox', 'workspace-write', 'resume']);
+  assert(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.strictEqual(argv.at(-2), 'prior');
+  assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.2-astra');
+  assert.strictEqual(argv[argv.indexOf('-c') + 1], 'model_reasoning_effort=high');
+  assert.strictEqual(result._meta['gpt-bridge/modelSelection'], 'explicit_request');
+  assert.strictEqual(result._meta['gpt-bridge/requestedModel'], 'gpt-6.2-astra');
+  assert.strictEqual(result._meta['gpt-bridge/requestedEffort'], 'high');
+  assert.strictEqual(result._meta['gpt-bridge/actualModel'], 'unknown');
+  assert.strictEqual(result._meta['gpt-bridge/actualEffort'], 'unknown');
 });
 
 test('invalid selection arguments fail before direct or MCP Codex launch', async () => {
@@ -217,7 +237,7 @@ test('invalid selection arguments fail before direct or MCP Codex launch', async
     { effort: '' }, { effort: 'unsupported' }, { effort: 5 },
     { profile: '' }, { profile: '__proto__' }, { profile: 'constructor' },
     { profile: 'fast', model: '' }, { profile: 'fast', mode: '' },
-    { profile: 'fast', model: 'gpt-6.1-sol' }, { profile: 'fast', mode: 'workspace' },
+    { profile: 'fast', model: 'gpt-6.2-sol' }, { profile: 'fast', mode: 'workspace' },
   ];
   for (const args of invalid) {
     const cwd = makeDir();
@@ -231,6 +251,29 @@ test('invalid selection arguments fail before direct or MCP Codex launch', async
   }
 });
 
+const retiredModels = ['gpt-5.5', 'gpt-5.6', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-astra'];
+const unsupportedModels = [
+  ...retiredModels.flatMap(model => [model, ` ${model.toUpperCase()}-TEST `]),
+  ' unverified-provider-alias ', 'gpt-6.2-sol-preview',
+];
+for (const sessionId of [undefined, 'previous-session']) {
+  test(`unsupported models fail before project I/O or launch for ${sessionId ? 'resume' : 'new exec'}`, async () => {
+    const cwd = makeDir();
+    process.env.CODEX_PATH = makeFakeCodex(cwd);
+    for (const model of unsupportedModels) {
+      const args = { model, sessionId, outputFile: 'unexpected/result.txt' };
+      const direct = await runCodex({ prompt: 'Reject.', cwd, timeout: 5, files: ['missing.txt'], ...args });
+      assert.strictEqual(direct.success, false, JSON.stringify(args));
+      assert.match(direct.error, /Unsupported model ID/, JSON.stringify(args));
+      const mcp = callMcpTool(args, cwd);
+      assert.strictEqual(mcp.isError, true, JSON.stringify(args));
+      assert.match(mcp.content[0].text, /Unsupported model ID/, JSON.stringify(args));
+      assert(!existsSync(join(cwd, 'argv.json')), JSON.stringify(args));
+      assert(!existsSync(join(cwd, 'unexpected')), JSON.stringify(args));
+    }
+  });
+}
+
 test('unsupported provider selection returns its error without a model fallback', async () => {
   const cwd = makeDir();
   process.env.CODEX_PATH = makeFakeCodex(cwd, 'unsupported');
@@ -239,16 +282,19 @@ test('unsupported provider selection returns its error without a model fallback'
   assert.match(result.error, /Unsupported model: requested model or reasoning effort/);
   assert.doesNotMatch(result.error, /OpenAI Codex test|reasoning effort: medium/);
   assert.deepStrictEqual(readFileSync(join(cwd, 'attempts.txt'), 'utf8').trim().split('\n'), ['attempt']);
+  const argv = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
+  assert.strictEqual(argv[argv.indexOf('-m') + 1], 'gpt-6.2-sol');
+  assert.strictEqual(argv[argv.indexOf('-c') + 1], 'model_reasoning_effort=medium');
 });
 
 test('model metadata is available without a session and preserves structured JSON', () => {
   const response = buildToolResponse({
     result: '{"ok":true}', structuredContent: { ok: true },
-    modelSelection: 'bridge_default', requestedModel: 'gpt-6.1-sol', requestedEffort: 'medium',
+    modelSelection: 'bridge_default', requestedModel: 'gpt-6.2-sol', requestedEffort: 'medium',
     actualModel: 'unknown', actualEffort: 'unknown',
   }, { preserveRawText: true });
   assert.deepStrictEqual(JSON.parse(response.content[0].text), { ok: true });
-  assert.strictEqual(response._meta['gpt-bridge/requestedModel'], 'gpt-6.1-sol');
+  assert.strictEqual(response._meta['gpt-bridge/requestedModel'], 'gpt-6.2-sol');
   assert.strictEqual(response._meta['gpt-bridge/actualModel'], 'unknown');
   assert(!('gpt-bridge/sessionId' in response._meta));
 });
@@ -273,6 +319,23 @@ test('resume Codex exec puts exec-level flags before the resume subcommand', asy
   assert.strictEqual(argv.at(-2), 'session-123');
   assert.strictEqual(argv.at(-1), '-');
   assert(!argv.includes('--ephemeral'), 'resume should persist by default so future calls can continue the Codex thread');
+});
+
+test('invalid resume IDs fail before project I/O or CLI launch', async () => {
+  const cwd = makeDir();
+  process.env.CODEX_PATH = makeFakeCodex(cwd);
+  const invalidIds = ['--model=gpt-5.5', '  --model=gpt-5.5', '--', '-', '', '   ', null, 42, 'session\0id'];
+  for (const sessionId of invalidIds) {
+    const args = { sessionId, outputFile: 'unexpected/result.txt' };
+    const direct = await runCodex({ prompt: 'Reject.', cwd, timeout: 5, files: ['missing.txt'], ...args });
+    assert.strictEqual(direct.success, false, JSON.stringify(sessionId));
+    assert.strictEqual(direct.error, 'Invalid sessionId', JSON.stringify(sessionId));
+    const mcp = callMcpTool(args, cwd);
+    assert.strictEqual(mcp.isError, true, JSON.stringify(sessionId));
+    assert.strictEqual(mcp.content[0].text, 'Invalid sessionId', JSON.stringify(sessionId));
+    assert(!existsSync(join(cwd, 'argv.json')), JSON.stringify(sessionId));
+    assert(!existsSync(join(cwd, 'unexpected')), JSON.stringify(sessionId));
+  }
 });
 
 test('ephemeral opt-in is passed to Codex resume', async () => {
@@ -446,6 +509,10 @@ test('outputSchema responses preserve raw JSON and move session data to metadata
   assert.deepStrictEqual(response.structuredContent, { ok: true });
   assert.strictEqual(response._meta['gpt-bridge/sessionId'], 'abc-session');
   assert.deepStrictEqual(response._meta['gpt-bridge/continueWith'], { sessionId: 'abc-session' });
+  assert.strictEqual(response._meta['gpt-bridge/requestedModel'], 'gpt-6.2-sol');
+  assert.strictEqual(response._meta['gpt-bridge/requestedEffort'], 'medium');
+  assert.strictEqual(response._meta['gpt-bridge/actualModel'], 'unknown');
+  assert.strictEqual(response._meta['gpt-bridge/actualEffort'], 'unknown');
 });
 
 test('outputSchema forces root additionalProperties false for Codex compatibility', async () => {
@@ -496,7 +563,19 @@ test('MCP server exposes gpt tool over stdio', () => {
   });
   assert.ifError(child.error);
   assert.strictEqual(child.status, 0, child.stderr);
-  assert.match(child.stdout, /"name":"gpt"/);
+  const messages = child.stdout.trim().split('\n').map(line => JSON.parse(line));
+  const manifest = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'));
+  assert.strictEqual(messages.find(message => message.id === 1).result.serverInfo.version, manifest.version);
+  const tool = messages.find(message => message.id === 2).result.tools.find(({ name }) => name === 'gpt');
+  assert(tool);
+  const { model, profile } = tool.inputSchema.properties;
+  assert.strictEqual(model.type, 'string');
+  assert(!model.enum, 'literal enum would reject normalized inputs');
+  assert.match(model.description, /case-insensitive/i);
+  for (const id of ['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6.2-astra']) {
+    assert(model.description.includes(id));
+    assert(profile.description.includes(id));
+  }
 });
 
 let passed = 0;

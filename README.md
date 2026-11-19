@@ -7,8 +7,10 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 | 插件 | 版本 | 说明 |
 |------|------|------|
 | [development-workflow](./plugins/development-workflow/) | 5.11.1 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
-| [gpt-bridge](./plugins/gpt-bridge/) | 2.0.2 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
+| [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**gpt-bridge 3.0.0**：默认新请求、续接和 balanced 预设改为 `gpt-6.2-sol/medium`，max 预设改为 `gpt-6.2-astra/high`。不兼容变化：`model` 仅接受当前三个规范 ID，去除首尾空白并忽略大小写；退休模型、其他 ID 和未解析别名均在启动前拒绝，不自动改写为新模型。原有权限档位保留，安装说明集中在 README，实际宿主与 provider 验证继续暂缓。
 
 **development-workflow 5.11.1**：更新自动子任务模型政策为 `gpt-6.1-terra`、`gpt-6.2-sol`、`gpt-6.2-astra`，统一检查原始名称、可信宿主解析结果与 fallback，排除已退休模型及其别名。保留根会话模型选择，补齐路由证据绑定和合成宿主回归；契约检查不代表真实模型分派或宿主验收。
 
@@ -103,24 +105,30 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 ### gpt-bridge MCP 注册
 
+在实际安装或升级的执行窗口中，先从安装结果定位 gpt-bridge 目录，读取该目录的 `package.json`，确认版本与上方版本表一致。注册时使用同目录 `index.js` 的绝对路径；下方路径是占位示例，须替换为已核对的安装路径。不要用通配符匹配缓存版本，也不要假定不同宿主具有相同的缓存层级。
+
 ```bash
 claude mcp add gpt-bridge -- node \
-  ~/.claude/plugins/cache/dw-marketplace/gpt-bridge/*/plugins/gpt-bridge/index.js
+  "/absolute/path/to/installed-gpt-bridge/index.js"
 ```
+
+升级已有服务时，通过宿主的 MCP 配置管理更新原有 `gpt-bridge` 注册项，确认其执行参数指向新目录。下一次启动后核对 MCP 初始化返回的 `serverInfo.version` 与安装包版本；旧进程不会因下载新包自动切换。此处说明恢复执行窗口后的步骤，当前真实安装、重注册与启动验证仍暂缓。
 
 ### gpt-bridge 模型与权限
 
-省略 `model` 和 `profile` 时，bridge 显式发送 `gpt-6.1-sol` 与 `medium`，权限默认为 `workspace-write`；续接也使用这组默认值。显式 `model` 会去除首尾空格后传递，调用方负责核对该模型的使用授权及当前 Codex/provider 支持；显式 `effort` 可覆盖默认值或预设档位。bridge 保留 `low`、`medium`、`high` 三档，不探测或自动回退到其他模型。
+省略 `model` 和 `profile` 时，bridge 显式发送 `gpt-6.2-sol` 与 `medium`，权限默认为 `workspace-write`；续接也使用这组默认值。所有入口统一接受 `gpt-6.1-terra`、`gpt-6.2-sol`、`gpt-6.2-astra`，去除首尾空白并转换为小写。退休模型、其他 ID 和未解析别名在读取任务文件、写临时输出或启动 CLI 前拒绝。调用方仍负责核对模型使用授权及目标 Codex/provider 对所选组合的支持。显式 `effort` 可覆盖默认值或预设档位；bridge 保留 `low`、`medium`、`high` 三档，不探测或自动回退到其他模型。
 
 启用前需确认目标 Codex CLI/provider 支持所选配对。若其不支持默认值，在每次调用（包括续接）中显式传入已获授权且受支持的 `model` 与 `effort`；例如目标接口确实支持时使用 `model: "gpt-6.1-terra", effort: "low"`。无法确认支持范围时保留安装暂缓状态。不受支持的调用会返回错误并保留所捕获的具体错误信息，不改用宿主默认模型或尝试其他模型。本版本没有经过真实用户环境的兼容验收。
 
 | profile | 请求模型 | 默认 effort | 权限模式 |
 |---|---|---|---|
 | fast | gpt-6.1-terra | low | read-only |
-| balanced | gpt-6.1-sol | medium | workspace-write |
-| max | gpt-6-astra | high | danger-full-access，绕过审批与沙箱 |
+| balanced | gpt-6.2-sol | medium | workspace-write |
+| max | gpt-6.2-astra | high | danger-full-access，绕过审批与沙箱 |
 
-`profile` 与 `model`/`mode` 互斥。预设保留历史权限含义，使用 `max` 需已有对应权限授权；单独指定模型不会增加权限。例如，使用 Astra 并保留工作区权限可传 `model: "gpt-6-astra", effort: "high", mode: "workspace"`。自动调用仍须遵守调用方当前的允许模型与实际接口能力限制，显式模型参数不是绕过该限制的许可。
+`profile` 与 `model`/`mode` 互斥。预设保留历史权限含义，使用 `max` 需已有对应权限授权；这里的 max 是预设名称，默认推理档位仍为 `high`。单独指定模型不会增加权限。例如，使用 Astra 并保留工作区权限可传 `model: "gpt-6.2-astra", effort: "high", mode: "workspace"`。允许列表是 bridge 的输入约束，不证明实际 provider 支持或使用了该模型。
+
+从 2.x 迁移时，将其他模型 ID 或 provider 别名替换为已获授权且目标接口支持的规范 ID；bridge 不猜测别名含义。`sessionId` 用于续接此前的 bridge 子任务，须为非空字符串，不含 NUL，且去除前导空白后不能以 `-` 开头，以免作为 CLI 选项传入。若需保持其非默认组合，应每次显式传入相应模型和 effort；bridge 不读取旧会话配置来推断组合，也不核验任意传入会话 ID 的归属，调用方须避免把根会话 ID 当作子任务续接。
 
 工具成功结果的 `_meta` 包含 `gpt-bridge/modelSelection`（`bridge_default`、`profile` 或 `explicit_request`）、`requestedModel`、`requestedEffort`、`actualModel` 和 `actualEffort`，后四项使用同一 `gpt-bridge/` 前缀。当前 CLI 解析只确认请求参数，实际模型和档位均为 `unknown`；导出的 `runCodex` 也返回这些字段，旧 `model` 字段为 `unknown`。模型生成的文字、启动横幅和退出成功均不能替代 provider 身份证据。结构化 JSON 正文保持原样。
 

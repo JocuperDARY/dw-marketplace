@@ -11,7 +11,7 @@ import { mkdir, writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { pathToFileURL } from 'url';
-import { existsSync, createWriteStream } from 'fs';
+import { existsSync, createWriteStream, readFileSync } from 'fs';
 import { glob } from 'glob';
 
 // Resolve codex binary: prefer CODEX_PATH env, then PATH, then common locations
@@ -36,15 +36,17 @@ function normalizeProjectPath(filePath) {
   return String(filePath || '').replace(/\\/g, '/');
 }
 
+const DEFAULT_MODEL = 'gpt-6.2-sol';
+const DEFAULT_EFFORT = 'medium';
+const SUPPORTED_MODELS = new Set(['gpt-6.1-terra', DEFAULT_MODEL, 'gpt-6.2-astra']);
+const SUPPORTED_MODEL_IDS = [...SUPPORTED_MODELS].join(', ');
+const EFFORTS = new Set(['low', 'medium', 'high']);
+
 const PROFILES = {
   fast:     { model: 'gpt-6.1-terra', mode: 'strict',    effort: 'low' },
-  balanced: { model: 'gpt-6.1-sol',   mode: 'workspace', effort: 'medium' },
-  max:      { model: 'gpt-6-astra',   mode: 'full',      effort: 'high' },
+  balanced: { model: DEFAULT_MODEL,  mode: 'workspace', effort: DEFAULT_EFFORT },
+  max:      { model: 'gpt-6.2-astra', mode: 'full',      effort: 'high' },
 };
-
-const DEFAULT_MODEL = 'gpt-6.1-sol';
-const DEFAULT_EFFORT = 'medium';
-const EFFORTS = new Set(['low', 'medium', 'high']);
 
 const SANDBOX_BY_MODE = {
   strict: 'read-only',
@@ -59,7 +61,7 @@ const SANDBOX_BY_MODE = {
 
 const TOOL_DEF = {
   name: 'gpt',
-  description: `Delegate a task to GPT via Codex CLI. v2: persistent session resume, profiles (fast/balanced/max), effort control, auto-context file collection. v1 params fully supported. GPT excels at: long-form text generation, code translation between languages, creative brainstorming, and independent sub-module creation. Returns the complete GPT response and exposes Codex session data as MCP metadata when available. Codex sessions cannot be imported as native Claude Code conversation turns; the tool result is the synchronization boundary.`,
+  description: 'Delegate a task to GPT via Codex CLI with session resume, profiles, effort control, and auto-context file collection. Returns the GPT response and exposes Codex session data as MCP metadata when available. The tool result is the synchronization boundary for Claude Code.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -69,11 +71,11 @@ const TOOL_DEF = {
       },
       sessionId: {
         type: 'string',
-        description: 'Resume a previous Codex/GPT session by id. Omit to start a new session. Successful tool output includes the session id when Codex exposes one.',
+        description: 'Resume a previous session delegated through this bridge. Omit to start a new session. Successful tool output includes the session ID when Codex exposes one.',
       },
       model: {
         type: 'string',
-        description: 'Explicit model ID. Default: gpt-6.1-sol, also on resume. The caller must verify that an explicit ID is permitted and supported by its Codex provider. Mutually exclusive with profile.',
+        description: `Allowed model IDs: ${SUPPORTED_MODEL_IDS}. Matching is case-insensitive and ignores leading and trailing whitespace. Default: ${DEFAULT_MODEL}, also on resume. Check provider support for the model and effort. Mutually exclusive with profile.`,
       },
       mode: {
         type: 'string',
@@ -142,7 +144,7 @@ const TOOL_DEF = {
       profile: {
         type: 'string',
         enum: ['fast', 'balanced', 'max'],
-        description: 'Preset model, effort and sandbox: fast = gpt-6.1-terra/low/read-only; balanced = gpt-6.1-sol/medium/workspace-write; max = gpt-6-astra/high/danger-full-access (bypasses approvals and sandbox). Use max only with authorization for that permission mode. Mutually exclusive with model/mode.',
+        description: 'Preset model, effort and sandbox: fast = gpt-6.1-terra/low/read-only; balanced = gpt-6.2-sol/medium/workspace-write; max = gpt-6.2-astra/high/danger-full-access (bypasses approvals and sandbox). Use max only with authorization for that permission mode. Mutually exclusive with model/mode.',
       },
     },
     required: ['prompt'],
@@ -272,10 +274,14 @@ function selectInvocation({ model, mode, effort, profile }) {
     throw new Error(`Invalid effort: ${effort}`);
   }
   const preset = profile === undefined ? undefined : PROFILES[profile];
+  const selectedModel = (model ?? preset?.model ?? DEFAULT_MODEL).trim().toLowerCase();
+  if (!SUPPORTED_MODELS.has(selectedModel)) {
+    throw new Error(`Unsupported model ID. Use one of: ${SUPPORTED_MODEL_IDS}.`);
+  }
   const selectedMode = preset?.mode ?? (mode === undefined ? 'workspace' : mode);
   codexSandboxArgs(selectedMode);
   return {
-    model: model === undefined ? (preset?.model ?? DEFAULT_MODEL) : model.trim(),
+    model: selectedModel,
     mode: selectedMode,
     effort: effort ?? preset?.effort ?? DEFAULT_EFFORT,
     modelSelection: preset ? 'profile' : model === undefined ? 'bridge_default' : 'explicit_request',
@@ -383,6 +389,12 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
     selection = selectInvocation({ model, mode, effort, profile });
   } catch (error) {
     return { success: false, error: error.message };
+  }
+  if (sessionId !== undefined && (
+    typeof sessionId !== 'string' || !sessionId.trim() ||
+    sessionId.trimStart().startsWith('-') || sessionId.includes('\0')
+  )) {
+    return { success: false, error: 'Invalid sessionId' };
   }
   ({ model, mode, effort } = selection);
   // CLI arguments identify the request, not the model actually used by a provider.
@@ -619,8 +631,9 @@ async function runCodex({ prompt, model, mode, files, images, outputSchema, outp
   });
 }
 
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const server = new Server(
-  { name: 'gpt-bridge', version: '2.0.2' },
+  { name: 'gpt-bridge', version },
   { capabilities: { tools: {} } }
 );
 
