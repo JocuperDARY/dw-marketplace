@@ -36,9 +36,14 @@ test('routing ignores negated actions, explanations, quoted requests and word su
     '解释 debug 和 code review 的区别', '请解释这段日志：debug parser failed',
     '下面是待翻译的句子："please fix this bug"', '请翻译：修复这个 bug',
     '不要写交接文档，先解释现状', 'do not write a handoff; explain the current state',
-    '我们不要写交接文档', '你先别写交接文档',
+    '我们不要写交接文档', '我们不写交接文档', '我不想写交接文档',
+    '我们不修复这个 bug', '你先别写交接文档',
     '这轮我们暂时不要写交接文档', '本次任务不需要写交接文档',
     '请勿写交接文档', '交接文档不要写了',
+    '今天的交接文档不要写', '这个模块的 bug 先不要修',
+    '代码审查先不要做', '实现方案先不要写', '重构先不要做',
+    '如果不需要停机就不要写交接文档', '如果不需要写交接文档，就先解释现状',
+    'If we do not need a handoff, explain the current state',
     '这个 bug 先不要修复', '我们不要管这个模块的 bug',
     '日志看完了，但我们不要写交接文档', '只看日志但我们不要写交接文档',
     '请解释 debug 而不是 code review', 'Please explain debug but not code review',
@@ -55,15 +60,32 @@ test('routing preserves explicit actions after explanatory or negated clauses', 
   assert.strictEqual(route('请盘点当前可用工具和 MCP 能力'), 'tooling');
   assert.strictEqual(route('我们需要写交接文档'), 'handoff');
   assert.strictEqual(route('把当前任务整理成交接文档但不要做代码审查'), 'handoff');
+  assert.strictEqual(route('请整理交接文档而不是做代码审查'), 'handoff');
+  assert.strictEqual(route('整理交接文档不要做代码审查'), 'handoff');
+  assert.strictEqual(route('如果不需要做代码审查就整理交接文档'), 'handoff');
+  assert.strictEqual(route('别忘了写交接文档'), 'handoff');
+  assert.strictEqual(route('我们不得不写交接文档'), 'handoff');
+  assert.strictEqual(route('做代码审查而非写交接文档'), 'verification');
+  assert.strictEqual(route('不是写交接文档而是做代码审查'), 'verification');
   assert.strictEqual(route('我们不要做代码审查而是整理交接文档'), 'handoff');
   assert.strictEqual(route('我们不要写交接文档，请给出迁移方案'), 'planning');
   assert.strictEqual(route('我们不要写交接文档但请给出迁移方案'), 'planning');
   assert.strictEqual(route('如果不需要停机就给出迁移方案'), 'planning');
   assert.strictEqual(route('请给出不需要停机的迁移方案'), 'planning');
   assert.strictEqual(route('别的模块报错了'), 'repair');
+  assert.strictEqual(route('别名解析报错了'), 'repair');
+  assert.strictEqual(route('语音识别模块报错了'), 'repair');
+  assert.strictEqual(route('类别筛选有 bug'), 'repair');
   assert.strictEqual(route('测试通不过报错了'), 'repair');
   assert.strictEqual(route('这个不需要登录的模块报错了'), 'repair');
+  assert.strictEqual(route('这个不需要登录的模块有 bug'), 'repair');
+  assert.strictEqual(route('不需要鉴权的接口存在 bug'), 'repair');
+  assert.strictEqual(route('这个不写日志的模块有 bug'), 'repair');
+  assert.strictEqual(route('这个不需要做代码审查的模块有 bug'), 'repair');
+  assert.strictEqual(route('报错的模块不需要登录'), 'repair');
+  assert.strictEqual(route('服务不启动报错了'), 'repair');
   assert.strictEqual(route('我们不确定这个报错的根因'), 'repair');
+  assert.strictEqual(route('特别慢的查询需要优化'), 'optimization');
 });
 test('progress requests route to reporting without treating script repairs as reports', () => {
   for (const prompt of ['请汇报当前任务进度和剩余工作', '给我一份进度汇报', '现在进展如何？',

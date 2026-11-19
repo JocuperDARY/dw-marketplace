@@ -582,12 +582,17 @@ test('dw-handoff re-examines the task and keeps TODO reconciliation authoritativ
   const skillRouter = require('../hooks/skill-router.js');
   for (const negatedPrompt of [
     '我们不要写交接文档',
+    '我们不写交接文档',
+    '我不想写交接文档',
     '请你先不要写交接文档',
     '这轮我们暂时不要写交接文档',
     '本次任务不需要写交接文档',
     '交接文档先不要写',
+    '今天的交接文档不要写',
     '交接记录暂时不用整理',
     '请勿写交接文档',
+    '如果不需要停机就不要写交接文档',
+    '如果不需要写交接文档，就先解释现状',
     '日志看完了，但我们不要写交接文档',
     '只看日志但我们不要写交接文档',
     '我们不要使用 `development-workflow:dw-handoff`',
@@ -600,6 +605,10 @@ test('dw-handoff re-examines the task and keeps TODO reconciliation authoritativ
     '请帮我们写一份交接文档',
     '把当前任务整理成交接文档',
     '把当前任务整理成交接文档但不要做代码审查',
+    '请整理交接文档而不是做代码审查',
+    '写交接文档而非代码审查',
+    '别忘了写交接文档',
+    '我们不得不写交接文档',
     '我们不要做代码审查而是整理交接文档',
   ]) {
     const matched = skillRouter.routePrompt(affirmativePrompt);

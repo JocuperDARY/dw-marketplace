@@ -10,7 +10,7 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 | [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
 
-**development-workflow 5.11.2**：修正提示路由在主语、话题或转折前置时的中文否定分句识别（如“我们不要写交接文档”保持静默），保留“我们需要写交接文档”、肯定转折和定语从句等正常触发；补充路由、CLI 与打包回归，真实宿主安装与激活验证继续暂缓。
+**development-workflow 5.11.2**：修正提示路由在主语、描述性话题、条件前件或转折/对比分句中的中文否定识别（如“我们不要写交接文档”“今天的交接文档不要写”保持静默），保留“我们需要写交接文档”、肯定替代（“而不是/而非”）和定语从句故障描述等正常触发；补充路由、CLI 与打包回归，真实宿主安装与激活验证继续暂缓。
 
 **gpt-bridge 3.0.0**：默认新请求、续接和 balanced 预设改为 `gpt-6.2-sol/medium`，max 预设改为 `gpt-6.2-astra/high`。不兼容变化：`model` 仅接受当前三个规范 ID，去除首尾空白并忽略大小写；退休模型、其他 ID 和未解析别名均在启动前拒绝，不自动改写为新模型。原有权限档位保留，安装说明集中在 README，实际宿主与 provider 验证继续暂缓。
 

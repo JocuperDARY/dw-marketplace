@@ -146,14 +146,26 @@ function isDefinitionQuestion(prompt) {
   return new RegExp(`^(?:${patterns.join('|')})$`, 'i').test(text);
 }
 const POLITENESS_PREFIX_RE = /^(?:(?:please|can\s+you|could\s+you|would\s+you|help\s+me)\s+|(?:请(?!问)|帮我)\s*)+/i;
-const DISCOURSE_PREFIX_RE = /^(?:所以|因此|而且|并且|另外|同时|那么|那(?=\s*(?:我们|咱们|我|你|您|大家|先|暂|不|别|无|切)))\s*/;
-const LEAD_NEGATION_TOKEN_RE = /^(?:请(?!问)|麻烦|我们|咱们|我|你们|你|您|大家|双方|助手|AI|智能体|模型|这里|此处|这儿|今天|现在|当前|目前|眼下|现阶段|本阶段|暂且|暂时|先|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话|对话|项目|分支|版本)|还|也|就|都)\s*/i;
-const CN_NEGATION_RE = /(?:而不是|而非|不要|别(?![的处人])|无需|无须|不需要|不必|不用|切?勿|暂不|(?:先|暂时)\s*不(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动))/;
-const EN_NEGATION_RE = /^(?:please\s+)?(?:rather\s+than\b|instead\s+of\b|let'?s\s+not\b|no\s+need\s+(?:to|for)\b|(?:(?:we|you|i)\s+)?(?:should\s+not|shouldn't|must\s+not|need\s+not)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:need\s+to|want\s+to)\b|(?:(?:we|you)\s+)?(?:do\s+not|don't|dont)\s+(?:write|create|generate|make|prepare|produce|do|run|use|call|invoke|fix|debug|repair|diagnose|troubleshoot|review|plan|implement|optimi[sz]e|refactor|build|manage|reclaim|supervise|report|summarize|check|wrap\s+up)\b|do\s+not\b|don't\b|dont\b|without\b)/i;
-const AFFIRMATIVE_VERB_RE = /(?:修复|解决|排查|诊断|定位|调试|制定|编写|给出|设计|规划|整理|总结|复盘|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|给我|润色|改写|简化|收尾|准备|分派|委派|派出|安排|使用|调用|启动|管理|回收|停止|监管|补齐|接入|接通|写|生成|输出|\b(?:fix|debug|repair|diagnose|troubleshoot|write|create|give|implement|build|review|check|optimi[sz]e|refactor|report|explain|describe|translate|use|spawn|delegate|manage|reclaim|supervise)\b)/i;
-const CONDITIONAL_PREFIX_RE = /^(?:如果|若|要是|假如|倘若|只要|除非|当|万一)/;
-const IMMEDIATE_ACTION_RE = /^\s*(?:直接\s*)?(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动|修复|解决|排查|诊断|定位|调试|润色|改写|优化|重构|实现|搭建|检查|审查|汇报|报告|分派|委派|回收|管理|停止)/;
+const DISCOURSE_PREFIX_RE = /^(?:所以|因此|而且|并且|另外|同时|此外|否则|不然|要不然|那么|那(?=\s*(?:我们|咱们|我|你|您|大家|先|暂|不|别|无|切|没|既|如果|若|要是)))\s*/;
+const LEAD_CONSEQUENT_RE = /^(?:就|则|便|那么)\s*/;
+const LEAD_NEGATION_TOKEN_RE = /^(?:请(?!问)|麻烦|我们|咱们|我|你们|你|您|大家|双方|助手|AI|智能体|模型|这里|此处|这儿|(?:今天|现在|当前|目前|眼下|现阶段|本阶段|我们|咱们|我|你|您)(?:的)?|暂且|暂时|先|本来|原本|根本|压根|既|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话|对话|项目|分支|版本)(?:的|里|中)?|还|也|就|都|只)\s*/i;
+const TRAIL_NEGATION_TOKEN_RE = /\s*(?:我们|咱们|我|你们|你|您|大家|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话)|暂且|暂时|目前|当前|今天|现在|眼下|现阶段|本阶段|这里|此处|先|还|也|就|都|只)+$/;
+const CN_ACTION_VERB_SOURCE = '(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动|进行|执行|继续|修复|解决|排查|诊断|定位|调试|润色|改写|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|复盘|总结|设计|规划|制定|编写|给出|分派|委派|派出|安排|管理|回收|停止|监管|补齐|接入|接通|收尾|接手|移交|交接|管|(?<!启)动|碰|搭理|理会|弄|搞)';
+const CN_NEGATION_RE = new RegExp(
+  `(?:不要(?!忘)|(?<![识级类特个区判鉴甄性错派国版告道离分永诀惜阔])别(?![名称号样致字扭针墅离的处人忘])(?:\\s*(?:再|先|去|把|用|对|替|帮|乱|瞎))?\\s*(?:${CN_ACTION_VERB_SOURCE}|[a-z]{2,})|无需|无须|不需要|不必|不用|切?勿|暂不|并非|(?<!是)不是(?!不)|不想(?!不)|不打算|不准备|不考虑|不再|不能(?!不)|(?<!不[得能可会是])不(?!得不|能不|可不|会不|是不|仅|但|只|光|单|止)\\s*${CN_ACTION_VERB_SOURCE})`,
+  'i'
+);
+const EN_NEGATION_RE = /^(?:please\s+)?(?:let'?s\s+not\b|no\s+need\s+(?:to|for)\b|(?:(?:we|you|i)\s+)?(?:should\s+not|shouldn't|must\s+not|need\s+not|would\s+rather\s+not)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:need(?:\s+to)?|want\s+to)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:write|create|generate|make|prepare|produce|do|run|use|call|invoke|fix|debug|repair|diagnose|troubleshoot|review|plan|implement|optimi[sz]e|refactor|build|manage|reclaim|supervise|report|summarize|check|wrap\s+up)\b|do\s+not\b|don't\b|dont\b|without\b)/i;
+const LEADING_REQUEST_VERB_RE = /^(?:修复|解决|排查|诊断|定位|调试|制定|编写|给出|设计|规划|整理|总结|复盘|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|给我|润色|改写|简化|准备|分派|委派|派出|安排|使用|调用|启动|管理|回收|停止|监管|补齐|接入|接通|写|生成|输出|\b(?:fix|debug|repair|diagnose|troubleshoot|write|create|give|implement|build|review|check|optimi[sz]e|refactor|report|explain|describe|translate|use|spawn|delegate|manage|reclaim|supervise)\b)/i;
+const BARE_DETERMINER_OBJECT_RE = /^(?:(?:一(?:个|份|套|版|项|条)|这(?:个|份|段|套|项|条)|那(?:个|份|段)|该|此)\s*)?$/;
+const TOPIC_NOUN_PHRASE_RE = /^(?:实现方案|技术方案|迁移方案|回退方案|架构设计|整理交付|检查更新|代码审查|代码评审|安全审查|最终验证|回归验证|性能分析|进度汇报)$/;
+const CONDITIONAL_PREFIX_RE = /^(?:如果|若|要是|假如|倘若|只要|除非|当|万一)\s*|^if\s+/i;
+const CONSEQUENT_SPLIT_RE = /(?<![本来原本一直向来根本压根])(?:就|则|便|那么)|(?<!不)请(?!问)|\bthen\b/gi;
+const ALTERNATIVE_SPLIT_RE = /而不是|而非(?![凡常])|\brather\s+than\b|\binstead\s+of\b/i;
 const CONTRAST_SPLIT_RE = /\bbut\b|(?<![不非])但是?(?![愿凡])|(?<![通看忙打信说再好只熬躲瞒喘改绕逃比争斗])不过(?![来去])/gi;
+const FAILURE_SYMPTOM_RE = /(?:\bbug\b|\bbuggy\b|报错|崩溃|异常|故障|挂了|failed|crashed|broke|root\s+cause|根因)/i;
+const REPAIR_OR_META_VERB_RE = /(?:修|改|查|管|(?<!启)动|碰|看|处理|解决|排查|诊断|定位|调试|做|搞|弄|推进|进行|执行|继续|检查|审查|验证|搭理|理会)/;
+const PRENOMINAL_PREDICATE_RE = /^(?!(?:管|关心|在意|理会|搭理))([^，,;；\n。的]{0,16}?)的\s*(\S{1,12}?\s*(?:报错|崩溃|异常|挂了|失败|(?:有|存在|出现|触发|发生|遇到)\s*(?:一个\s*|个\s*|些\s*)?(?:\bbug\b|问题|故障|异常|报错)|\bis\s+buggy\b|\bhas\s+(?:a\s+|an\s+)?bug\b|\bfailed\b|\bcrashed\b|\bbroke\b|(?:需要|请|得|要)\s*(?:修复|排查|解决|诊断|调试|优化|重构|检查|审查))(?!\s*的\S))/i;
 
 function stripRepeatedPrefix(value, prefixRe) {
   let rest = value.trim();
@@ -165,25 +177,81 @@ function stripRepeatedPrefix(value, prefixRe) {
   return rest;
 }
 
+function stripNegatedPrenominalModifier(clause) {
+  const body = stripRepeatedPrefix(clause, DISCOURSE_PREFIX_RE).replace(POLITENESS_PREFIX_RE, '').trim();
+  const cnMatch = CN_NEGATION_RE.exec(body);
+  if (!cnMatch) return body;
+  const prefix = body.slice(0, cnMatch.index).trim();
+  const suffix = body.slice(cnMatch.index + cnMatch[0].length);
+  if (LEADING_REQUEST_VERB_RE.test(prefix) && !TOPIC_NOUN_PHRASE_RE.test(prefix)) {
+    const afterVerb = prefix.replace(LEADING_REQUEST_VERB_RE, '').trim();
+    const relEnd = suffix.indexOf('的');
+    if (BARE_DETERMINER_OBJECT_RE.test(afterVerb) && relEnd !== -1 && relEnd <= 20) {
+      const headAfterDe = suffix.slice(relEnd + 1).trim();
+      if (headAfterDe) return `${prefix} ${headAfterDe}`.trim();
+    }
+  }
+  if (!/^(?:不要|别|切?勿)/.test(cnMatch[0]) && prefix.length <= 12 && !/[：:]/.test(prefix) && !LEADING_REQUEST_VERB_RE.test(prefix)) {
+    const predMatch = PRENOMINAL_PREDICATE_RE.exec(suffix);
+    if (predMatch) return `${prefix} ${predMatch[2]}`.trim();
+  }
+  return body;
+}
+
 function isNegatedClause(text) {
-  const body = stripRepeatedPrefix(text, DISCOURSE_PREFIX_RE);
+  const body = stripNegatedPrenominalModifier(text);
   if (!body) return false;
   if (EN_NEGATION_RE.test(body)) return true;
   const cnMatch = CN_NEGATION_RE.exec(body);
   if (!cnMatch) return false;
   const prefix = body.slice(0, cnMatch.index).trim();
   const suffix = body.slice(cnMatch.index + cnMatch[0].length);
-  if (CONDITIONAL_PREFIX_RE.test(prefix) && /(?:就|则|便|请|需要|要)/.test(suffix)) return false;
-  const remainingPrefix = stripRepeatedPrefix(prefix, LEAD_NEGATION_TOKEN_RE);
-  const validNegatedPrefix = remainingPrefix === ''
-    || (remainingPrefix.length <= 16 && !AFFIRMATIVE_VERB_RE.test(remainingPrefix) && !/[的:：]/.test(remainingPrefix) && !CONDITIONAL_PREFIX_RE.test(remainingPrefix));
-  if (!validNegatedPrefix) return false;
-  if (/^(?:不需要|无需|无须|不用|不必)$/.test(cnMatch[0])
-    && /^[^，,;；\n。]{1,12}?的\s*[^，,;；\n。\s]{1,12}?(?:报错|崩溃|异常|failed|crashed|broke)/i.test(suffix)
-    && !IMMEDIATE_ACTION_RE.test(suffix)) {
+  if (CONDITIONAL_PREFIX_RE.test(prefix)) return false;
+  if (/^不(?!要|想|需|必|用|再|打算|准备|考虑|能|是)/.test(cnMatch[0])
+    && !REPAIR_OR_META_VERB_RE.test(cnMatch[0])
+    && FAILURE_SYMPTOM_RE.test(suffix)) {
     return false;
   }
+  const remainingPrefix = stripRepeatedPrefix(prefix, LEAD_NEGATION_TOKEN_RE);
+  const topic = remainingPrefix.replace(TRAIL_NEGATION_TOKEN_RE, '').trim();
+  const hadTrailingToken = topic.length !== remainingPrefix.length;
+  if (topic === '') return true;
+  if (topic.length > 24 || /[：:]/.test(topic) || CONDITIONAL_PREFIX_RE.test(topic)) return false;
+  if (FAILURE_SYMPTOM_RE.test(topic) && !REPAIR_OR_META_VERB_RE.test(cnMatch[0] + suffix) && suffix.trim() !== '' && suffix.trim() !== '了') {
+    return false;
+  }
+  if (LEADING_REQUEST_VERB_RE.test(topic) && !TOPIC_NOUN_PHRASE_RE.test(topic)) {
+    const afterVerb = topic.replace(LEADING_REQUEST_VERB_RE, '').trim();
+    const proVerbSuffix = /^(?:做|写|跑|搞|弄|处理|推进|进行|执行|启动|管|动)?\s*了?[。！？!?]*$/.test(suffix.trim());
+    if (afterVerb && !BARE_DETERMINER_OBJECT_RE.test(afterVerb) && (!hadTrailingToken || !proVerbSuffix)) return false;
+  }
   return true;
+}
+
+function splitConditionalClause(clause) {
+  const clean = stripRepeatedPrefix(clause, DISCOURSE_PREFIX_RE).replace(POLITENESS_PREFIX_RE, '').trim();
+  const condMatch = CONDITIONAL_PREFIX_RE.exec(clean);
+  if (!condMatch) return [clause];
+  const afterCond = clean.slice(condMatch[0].length).trim();
+  if (!afterCond) return [];
+  for (const match of afterCond.matchAll(CONSEQUENT_SPLIT_RE)) {
+    const antecedent = afterCond.slice(0, match.index).trim();
+    const consequent = afterCond.slice(match.index + match[0].length).trim();
+    if (!antecedent || !consequent) continue;
+    if (isNegatedClause(antecedent)) return [consequent];
+    return [antecedent, consequent];
+  }
+  if (isNegatedClause(afterCond)) return [];
+  return [clause];
+}
+
+function splitAlternativeClause(clause) {
+  const trimmed = clause.trim();
+  if (!trimmed) return [];
+  const altMatch = ALTERNATIVE_SPLIT_RE.exec(trimmed);
+  if (!altMatch) return [trimmed];
+  const left = stripRepeatedPrefix(trimmed.slice(0, altMatch.index), DISCOURSE_PREFIX_RE).trim();
+  return left ? [left] : [];
 }
 
 function splitContrastClause(clause, depth = 0) {
@@ -195,7 +263,21 @@ function splitContrastClause(clause, depth = 0) {
     const cleanLeft = left.replace(POLITENESS_PREFIX_RE, '').trim();
     const cleanRight = right.replace(POLITENESS_PREFIX_RE, '').trim();
     if (cleanLeft && isNegatedClause(cleanLeft)) return right ? splitContrastClause(right, depth + 1) : [];
-    if (cleanRight && (isNegatedClause(cleanRight) || /^(?:not\b|不)/i.test(cleanRight))) return left ? splitContrastClause(left, depth + 1) : [];
+    if (cleanRight && (isNegatedClause(cleanRight) || /^(?:not\b|不(?!得不|能不|可不|会不|是不))/i.test(cleanRight))) return left ? splitContrastClause(left, depth + 1) : [];
+  }
+  const clean = trimmed.replace(POLITENESS_PREFIX_RE, '').trim();
+  const negMatch = CN_NEGATION_RE.exec(clean);
+  if (negMatch && negMatch.index > 0) {
+    const left = clean.slice(0, negMatch.index).trim();
+    const right = clean.slice(negMatch.index).trim();
+    if (LEADING_REQUEST_VERB_RE.test(left) && !TOPIC_NOUN_PHRASE_RE.test(left)) {
+      const afterVerb = left.replace(LEADING_REQUEST_VERB_RE, '').trim();
+      const afterNeg = right.slice(negMatch[0].length).trim();
+      const proVerbSuffix = /^(?:做|写|跑|搞|弄|处理|推进|进行|执行|启动|管|动)?\s*了?[。！？!?]*$/.test(afterNeg);
+      if (afterVerb && !BARE_DETERMINER_OBJECT_RE.test(afterVerb) && !TRAIL_NEGATION_TOKEN_RE.test(left) && !proVerbSuffix) {
+        return [left];
+      }
+    }
   }
   return [trimmed];
 }
@@ -212,13 +294,15 @@ function actionableText(prompt) {
   // Normalize request politeness before distinguishing explanations from
   // invocations. The same prefix must not change either intent's meaning.
   return unquoted.split(/[，,;；\n。!！?？]|\bthen\b|然后|而是(?!不)/i)
+    .flatMap(clause => splitConditionalClause(clause))
+    .flatMap(clause => splitAlternativeClause(clause))
     .flatMap(clause => splitContrastClause(clause))
-    .map(clause => clause.trim().replace(POLITENESS_PREFIX_RE, ''))
+    .map(clause => stripNegatedPrenominalModifier(clause.trim().replace(POLITENESS_PREFIX_RE, '').replace(LEAD_CONSEQUENT_RE, '')))
     .filter(clause => {
       const text = clause.trim();
       if (!text || isNegatedClause(text)) return false;
       if (isDefinitionQuestion(text)) return false;
-      if (!hasExplicitRepairIntent(text) && /^(?:请\s*|please\s+)?(?:只?解释|说明|翻译|描述|理解|介绍|explain\b|describe\b|translate\b|what\s+(?:is|does)\b|下面是待翻译)/i.test(text)) return false;
+      if (!hasExplicitRepairIntent(text) && /^(?:请\s*|please\s+)?(?:(?:先|暂时|只)\s*)*(?:解释|说明|翻译|描述|理解|介绍|explain\b|describe\b|translate\b|what\s+(?:is|does)\b|下面是待翻译)/i.test(text)) return false;
       if (!hasExplicitRepairIntent(text) && /(?:是什么意思|的含义|什么区别|means\s+what|definition)\s*[?？]?$/i.test(text)) return false;
       return true;
     }).join('\n');
