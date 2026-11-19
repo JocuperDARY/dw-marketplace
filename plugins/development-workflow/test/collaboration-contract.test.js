@@ -290,6 +290,18 @@ const nonDefaultLane = routePolicy({ trustedLanePolicyResolver: (input) => input
   : trustedLanePolicyResolver(input) });
 assert.deepStrictEqual(api.selectRoute(fallbackLanes, lowRiskAxes, routeMatrix, nonDefaultLane).fallbacks, [],
   'the ordinary fallback uses the designated model');
+const fallbackRequestAxes = { ...lowRiskAxes, requested_model: 'gpt-6.2-sol', requested_effort: 'medium' };
+const acceptedFallback = api.selectRoute([fallbackLane], fallbackRequestAxes, routeMatrix, routePolicy());
+assert.strictEqual(acceptedFallback.status, 'SELECTED');
+assert.strictEqual(acceptedFallback.selected_model, 'gpt-6.2-sol');
+assert.strictEqual(acceptedFallback.selected_effort, 'medium');
+assert.strictEqual(api.validateRouteDecision(acceptedFallback, [fallbackLane], fallbackRequestAxes, routeMatrix, routePolicy()), true);
+const remappedRoute = api.selectRoute([fallbackLane], fallbackRequestAxes, routeMatrix, nonDefaultLane);
+assert.strictEqual(remappedRoute.status, 'SELECTED');
+assert.strictEqual(remappedRoute.requested_model, 'gpt-6.2-sol');
+assert.strictEqual(remappedRoute.selected_model, 'gpt-6.2-astra');
+assert.strictEqual(api.validateRouteDecision(acceptedFallback, [fallbackLane], fallbackRequestAxes, routeMatrix, nonDefaultLane), false,
+  'a stale Sol/medium decision fails revalidation when the same lane now resolves to Astra');
 
 for (const retired of [
   'gpt-5.5', ' GPT-5.5-legacy ', 'gpt-5.6', ' GPT-5.6-legacy ',
