@@ -36,6 +36,13 @@ test('routing ignores negated actions, explanations, quoted requests and word su
     '解释 debug 和 code review 的区别', '请解释这段日志：debug parser failed',
     '下面是待翻译的句子："please fix this bug"', '请翻译：修复这个 bug',
     '不要写交接文档，先解释现状', 'do not write a handoff; explain the current state',
+    '我们不要写交接文档', '你先别写交接文档',
+    '这轮我们暂时不要写交接文档', '本次任务不需要写交接文档',
+    '请勿写交接文档', '交接文档不要写了',
+    '这个 bug 先不要修复', '我们不要管这个模块的 bug',
+    '日志看完了，但我们不要写交接文档', '只看日志但我们不要写交接文档',
+    '请解释 debug 而不是 code review', 'Please explain debug but not code review',
+    'we do not need to write a handoff', 'let\'s not write a handoff',
   ]) assert.strictEqual(route(prompt), null, prompt);
 });
 test('routing preserves explicit actions after explanatory or negated clauses', () => {
@@ -46,6 +53,17 @@ test('routing preserves explicit actions after explanatory or negated clauses', 
   assert.strictEqual(route('请润色这段说明：修复这个 bug 后性能恢复'), 'writing');
   assert.strictEqual(route('请分派两个子 agent 分别审查两个模块'), 'collaboration');
   assert.strictEqual(route('请盘点当前可用工具和 MCP 能力'), 'tooling');
+  assert.strictEqual(route('我们需要写交接文档'), 'handoff');
+  assert.strictEqual(route('把当前任务整理成交接文档但不要做代码审查'), 'handoff');
+  assert.strictEqual(route('我们不要做代码审查而是整理交接文档'), 'handoff');
+  assert.strictEqual(route('我们不要写交接文档，请给出迁移方案'), 'planning');
+  assert.strictEqual(route('我们不要写交接文档但请给出迁移方案'), 'planning');
+  assert.strictEqual(route('如果不需要停机就给出迁移方案'), 'planning');
+  assert.strictEqual(route('请给出不需要停机的迁移方案'), 'planning');
+  assert.strictEqual(route('别的模块报错了'), 'repair');
+  assert.strictEqual(route('测试通不过报错了'), 'repair');
+  assert.strictEqual(route('这个不需要登录的模块报错了'), 'repair');
+  assert.strictEqual(route('我们不确定这个报错的根因'), 'repair');
 });
 test('progress requests route to reporting without treating script repairs as reports', () => {
   for (const prompt of ['请汇报当前任务进度和剩余工作', '给我一份进度汇报', '现在进展如何？',

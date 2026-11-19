@@ -578,6 +578,49 @@ test('dw-handoff re-examines the task and keeps TODO reconciliation authoritativ
   assert.match(handoff, /脱敏|敏感信息/);
   assert.match(handoff, /建议技能|suggested skills/i);
   assert.match(handoff, /临时目录/);
+
+  const skillRouter = require('../hooks/skill-router.js');
+  for (const negatedPrompt of [
+    '我们不要写交接文档',
+    '请你先不要写交接文档',
+    '这轮我们暂时不要写交接文档',
+    '本次任务不需要写交接文档',
+    '交接文档先不要写',
+    '交接记录暂时不用整理',
+    '请勿写交接文档',
+    '日志看完了，但我们不要写交接文档',
+    '只看日志但我们不要写交接文档',
+    '我们不要使用 `development-workflow:dw-handoff`',
+  ]) {
+    assert.strictEqual(skillRouter.routePrompt(negatedPrompt), null, `negated handoff prompt must stay quiet: ${negatedPrompt}`);
+  }
+  for (const affirmativePrompt of [
+    '我们需要写交接文档',
+    '我们要写交接文档',
+    '请帮我们写一份交接文档',
+    '把当前任务整理成交接文档',
+    '把当前任务整理成交接文档但不要做代码审查',
+    '我们不要做代码审查而是整理交接文档',
+  ]) {
+    const matched = skillRouter.routePrompt(affirmativePrompt);
+    assert.strictEqual(matched && matched.id, 'handoff', `affirmative handoff prompt must route to handoff: ${affirmativePrompt}`);
+  }
+  const negatedCli = childProcess.spawnSync(node, [path.join(pluginRoot, 'hooks', 'skill-router.js')], {
+    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: '我们不要写交接文档' }),
+    encoding: 'utf8',
+    timeout: 10000,
+    windowsHide: true,
+  });
+  assert.strictEqual(negatedCli.status, 0, negatedCli.stderr);
+  assert.strictEqual(negatedCli.stdout, '');
+  const affirmativeCli = childProcess.spawnSync(node, [path.join(pluginRoot, 'hooks', 'skill-router.js')], {
+    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: '我们需要写交接文档' }),
+    encoding: 'utf8',
+    timeout: 10000,
+    windowsHide: true,
+  });
+  assert.strictEqual(affirmativeCli.status, 0, affirmativeCli.stderr);
+  assert.match(affirmativeCli.stdout, /dw-handoff/);
 });
 
 

@@ -27,7 +27,7 @@
       "path": "hooks/skill-router.js",
       "owner": "development-workflow",
       "enforcement": "advisory",
-      "tests": ["test/hook-maintenance.test.js", "test/runtime-v5.test.js"],
+      "tests": ["test/hooks.test.js", "test/hook-maintenance.test.js", "test/runtime-v5.test.js"],
       "limits": "Suggests registered skills from prompt signals; routing text is not an execution gate."
     },
     {

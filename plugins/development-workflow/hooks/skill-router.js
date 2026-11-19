@@ -145,6 +145,61 @@ function isDefinitionQuestion(prompt) {
   ];
   return new RegExp(`^(?:${patterns.join('|')})$`, 'i').test(text);
 }
+const POLITENESS_PREFIX_RE = /^(?:(?:please|can\s+you|could\s+you|would\s+you|help\s+me)\s+|(?:请(?!问)|帮我)\s*)+/i;
+const DISCOURSE_PREFIX_RE = /^(?:所以|因此|而且|并且|另外|同时|那么|那(?=\s*(?:我们|咱们|我|你|您|大家|先|暂|不|别|无|切)))\s*/;
+const LEAD_NEGATION_TOKEN_RE = /^(?:请(?!问)|麻烦|我们|咱们|我|你们|你|您|大家|双方|助手|AI|智能体|模型|这里|此处|这儿|今天|现在|当前|目前|眼下|现阶段|本阶段|暂且|暂时|先|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话|对话|项目|分支|版本)|还|也|就|都)\s*/i;
+const CN_NEGATION_RE = /(?:而不是|而非|不要|别(?![的处人])|无需|无须|不需要|不必|不用|切?勿|暂不|(?:先|暂时)\s*不(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动))/;
+const EN_NEGATION_RE = /^(?:please\s+)?(?:rather\s+than\b|instead\s+of\b|let'?s\s+not\b|no\s+need\s+(?:to|for)\b|(?:(?:we|you|i)\s+)?(?:should\s+not|shouldn't|must\s+not|need\s+not)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:need\s+to|want\s+to)\b|(?:(?:we|you)\s+)?(?:do\s+not|don't|dont)\s+(?:write|create|generate|make|prepare|produce|do|run|use|call|invoke|fix|debug|repair|diagnose|troubleshoot|review|plan|implement|optimi[sz]e|refactor|build|manage|reclaim|supervise|report|summarize|check|wrap\s+up)\b|do\s+not\b|don't\b|dont\b|without\b)/i;
+const AFFIRMATIVE_VERB_RE = /(?:修复|解决|排查|诊断|定位|调试|制定|编写|给出|设计|规划|整理|总结|复盘|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|给我|润色|改写|简化|收尾|准备|分派|委派|派出|安排|使用|调用|启动|管理|回收|停止|监管|补齐|接入|接通|写|生成|输出|\b(?:fix|debug|repair|diagnose|troubleshoot|write|create|give|implement|build|review|check|optimi[sz]e|refactor|report|explain|describe|translate|use|spawn|delegate|manage|reclaim|supervise)\b)/i;
+const CONDITIONAL_PREFIX_RE = /^(?:如果|若|要是|假如|倘若|只要|除非|当|万一)/;
+const IMMEDIATE_ACTION_RE = /^\s*(?:直接\s*)?(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动|修复|解决|排查|诊断|定位|调试|润色|改写|优化|重构|实现|搭建|检查|审查|汇报|报告|分派|委派|回收|管理|停止)/;
+const CONTRAST_SPLIT_RE = /\bbut\b|(?<![不非])但是?(?![愿凡])|(?<![通看忙打信说再好只熬躲瞒喘改绕逃比争斗])不过(?![来去])/gi;
+
+function stripRepeatedPrefix(value, prefixRe) {
+  let rest = value.trim();
+  for (let index = 0; index < 8 && rest; index++) {
+    const next = rest.replace(prefixRe, '').trim();
+    if (next === rest) break;
+    rest = next;
+  }
+  return rest;
+}
+
+function isNegatedClause(text) {
+  const body = stripRepeatedPrefix(text, DISCOURSE_PREFIX_RE);
+  if (!body) return false;
+  if (EN_NEGATION_RE.test(body)) return true;
+  const cnMatch = CN_NEGATION_RE.exec(body);
+  if (!cnMatch) return false;
+  const prefix = body.slice(0, cnMatch.index).trim();
+  const suffix = body.slice(cnMatch.index + cnMatch[0].length);
+  if (CONDITIONAL_PREFIX_RE.test(prefix) && /(?:就|则|便|请|需要|要)/.test(suffix)) return false;
+  const remainingPrefix = stripRepeatedPrefix(prefix, LEAD_NEGATION_TOKEN_RE);
+  const validNegatedPrefix = remainingPrefix === ''
+    || (remainingPrefix.length <= 16 && !AFFIRMATIVE_VERB_RE.test(remainingPrefix) && !/[的:：]/.test(remainingPrefix) && !CONDITIONAL_PREFIX_RE.test(remainingPrefix));
+  if (!validNegatedPrefix) return false;
+  if (/^(?:不需要|无需|无须|不用|不必)$/.test(cnMatch[0])
+    && /^[^，,;；\n。]{1,12}?的\s*[^，,;；\n。\s]{1,12}?(?:报错|崩溃|异常|failed|crashed|broke)/i.test(suffix)
+    && !IMMEDIATE_ACTION_RE.test(suffix)) {
+    return false;
+  }
+  return true;
+}
+
+function splitContrastClause(clause, depth = 0) {
+  const trimmed = clause.trim();
+  if (!trimmed || depth >= 3) return trimmed ? [trimmed] : [];
+  for (const match of trimmed.matchAll(CONTRAST_SPLIT_RE)) {
+    const left = trimmed.slice(0, match.index).trim();
+    const right = trimmed.slice(match.index + match[0].length).trim();
+    const cleanLeft = left.replace(POLITENESS_PREFIX_RE, '').trim();
+    const cleanRight = right.replace(POLITENESS_PREFIX_RE, '').trim();
+    if (cleanLeft && isNegatedClause(cleanLeft)) return right ? splitContrastClause(right, depth + 1) : [];
+    if (cleanRight && (isNegatedClause(cleanRight) || /^(?:not\b|不)/i.test(cleanRight))) return left ? splitContrastClause(left, depth + 1) : [];
+  }
+  return [trimmed];
+}
+
 function actionableText(prompt) {
   const unquoted = prompt.replace(/^\s*>[^\n]*$/gm, '').replace(/```[\s\S]*?```|`[^`]*`|"[^"\n]*"|“[^”]*”|‘[^’]*’|(?<!\w)'[^'\n]*'(?!\w)/g, quoted => {
     // Inline code commonly marks the skill name in an actual invocation. Keep
@@ -156,11 +211,12 @@ function actionableText(prompt) {
   });
   // Normalize request politeness before distinguishing explanations from
   // invocations. The same prefix must not change either intent's meaning.
-  return unquoted.split(/[，,;；\n。]|\bthen\b|然后/i)
-    .map(clause => clause.trim().replace(/^(?:(?:please|can\s+you|could\s+you|would\s+you|help\s+me)\s+|(?:请(?!问)|帮我)\s*)+/i, ''))
+  return unquoted.split(/[，,;；\n。!！?？]|\bthen\b|然后|而是(?!不)/i)
+    .flatMap(clause => splitContrastClause(clause))
+    .map(clause => clause.trim().replace(POLITENESS_PREFIX_RE, ''))
     .filter(clause => {
       const text = clause.trim();
-      if (!text || /^(?:请\s*|please\s+)?(?:先|暂时|现在|这次|本次)?\s*(?:不要|别|无需|不需要|do\s+not\b|don't\b|dont\b|without\b)/i.test(text)) return false;
+      if (!text || isNegatedClause(text)) return false;
       if (isDefinitionQuestion(text)) return false;
       if (!hasExplicitRepairIntent(text) && /^(?:请\s*|please\s+)?(?:只?解释|说明|翻译|描述|理解|介绍|explain\b|describe\b|translate\b|what\s+(?:is|does)\b|下面是待翻译)/i.test(text)) return false;
       if (!hasExplicitRepairIntent(text) && /(?:是什么意思|的含义|什么区别|means\s+what|definition)\s*[?？]?$/i.test(text)) return false;
@@ -215,6 +271,7 @@ function routePrompt(prompt) {
   const requested = explicitSkills(normalized,
     /dw-interaction/i.test(prompt) ? interactionExplicitText(prompt) : '');
   if (requested.length) return { id: 'explicit', skills: requested, context: `Use the explicitly requested skill${requested.length > 1 ? 's' : ''}: ${requested.map(name => `\`development-workflow:${name}\``).join(', ')}. Preserve the user's requested scope.` };
+  if (!normalized) return null;
   for (const route of ROUTES) {
     // Interaction discovery deliberately accepts only a standalone request.
     // A matching line inside a quoted example or a mixed artifact task is not
@@ -239,4 +296,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { ROUTES, SKILL_IDS, SKILL_REGISTRY, actionableText, explicitSkills, readPrompt, routePrompt };
+module.exports = { ROUTES, SKILL_IDS, SKILL_REGISTRY, actionableText, explicitSkills, isNegatedClause, readPrompt, routePrompt };

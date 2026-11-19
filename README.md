@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.11.1 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.11.2 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.11.2**：修正提示路由在主语、话题或转折前置时的中文否定分句识别（如“我们不要写交接文档”保持静默），保留“我们需要写交接文档”、肯定转折和定语从句等正常触发；补充路由、CLI 与打包回归，真实宿主安装与激活验证继续暂缓。
 
 **gpt-bridge 3.0.0**：默认新请求、续接和 balanced 预设改为 `gpt-6.2-sol/medium`，max 预设改为 `gpt-6.2-astra/high`。不兼容变化：`model` 仅接受当前三个规范 ID，去除首尾空白并忽略大小写；退休模型、其他 ID 和未解析别名均在启动前拒绝，不自动改写为新模型。原有权限档位保留，安装说明集中在 README，实际宿主与 provider 验证继续暂缓。
 
