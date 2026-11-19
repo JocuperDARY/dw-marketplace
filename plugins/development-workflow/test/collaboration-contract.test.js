@@ -234,7 +234,7 @@ const validResult = validateArtifact(validMatrix, { now: fixedNow, expectedSessi
 assert.strictEqual(validResult.valid, true, JSON.stringify(validResult.errors));
 assert.strictEqual(validResult.schema, 'CapabilityMatrix1');
 
-// Task 4 RED: route decisions must use runtime-discovered lanes, not vendor names or a silent fallback.
+// Route decisions require a current host mapping and a verified model-effort pair.
 const routeLanes = [
   { lane_id: 'lane-light', capability_class: 'light', supported_task_types: ['classification'], supported_efforts: ['low'], latency_class: 'interactive', cost_rank: 1, availability_evidence_ref: 'available-light', request_control_support: 'supported', actual_metadata_support: 'unsupported' },
   { lane_id: 'lane-standard', capability_class: 'standard', supported_task_types: ['classification'], supported_efforts: ['medium'], latency_class: 'interactive', cost_rank: 2, availability_evidence_ref: 'available-standard', request_control_support: 'supported', actual_metadata_support: 'unsupported' },
@@ -243,9 +243,9 @@ const routeLanes = [
 ];
 // Synthetic host policy only; these mappings never call a model or a provider.
 const trustedLanePolicyResolver = ({ lane }) => ({
-  canonicalModel: ({ 'lane-light': 'gpt-6.1-terra', 'lane-standard': 'gpt-6.1-sol',
-    'lane-engineering': 'gpt-6.1-sol', 'lane-professional': 'gpt-6.1-sol',
-    'lane-assurance': 'gpt-6-astra' })[lane.lane_id] || lane.lane_id,
+  canonicalModel: ({ 'lane-light': 'gpt-6.1-terra', 'lane-standard': 'gpt-6.2-sol',
+    'lane-engineering': 'gpt-6.2-sol', 'lane-professional': 'gpt-6.2-sol',
+    'lane-assurance': 'gpt-6.2-astra' })[lane.lane_id] || lane.lane_id,
   supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
 });
 const routePolicy = (fields = {}) => ({ now: fixedNow, trustedLanePolicyResolver, ...fields });
@@ -265,14 +265,58 @@ const lowRiskAxes = {
 };
 assert.strictEqual(api.selectRoute(routeLanes, lowRiskAxes, routeMatrix, { now: fixedNow }).status, 'HOLD_ROUTE_UNAVAILABLE');
 const lowRiskRoute = api.selectRoute(routeLanes, lowRiskAxes, routeMatrix, routePolicy());
-for (const model of ['gpt-5.5', ' GPT-5.6-legacy ', 'gpt-6-sol', 'gpt-6-sol-fallback']) {
-  const lane = { ...routeLanes[0], lane_id: model };
-  assert.strictEqual(api.selectRoute([lane], lowRiskAxes, routeMatrix, routePolicy({
-    trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['low'] }),
-  })).status, 'HOLD_ROUTE_UNAVAILABLE', 'a forbidden literal cannot be rescued by alias mapping');
-  assert.strictEqual(api.selectRoute([routeLanes[0]], lowRiskAxes, routeMatrix, routePolicy({
-    trustedLanePolicyResolver: () => ({ canonicalModel: model, supportedEfforts: ['low'] }),
-  })).status, 'HOLD_ROUTE_UNAVAILABLE', 'a forbidden alias target must be rejected');
+const fallbackLane = { ...routeLanes[1], supported_efforts: ['low', 'medium'] };
+const fallbackLanes = [routeLanes[0], fallbackLane];
+const allowedFallback = api.selectRoute(fallbackLanes, lowRiskAxes, routeMatrix, routePolicy());
+assert.strictEqual(allowedFallback.selected_model, 'gpt-6.1-terra');
+assert.deepStrictEqual(allowedFallback.fallbacks, ['gpt-6.2-sol']);
+const fallbackOnly = api.selectRoute([fallbackLane], lowRiskAxes, routeMatrix, routePolicy());
+assert.strictEqual(fallbackOnly.selected_model, 'gpt-6.2-sol');
+assert.strictEqual(fallbackOnly.selected_effort, 'medium');
+assert.strictEqual(api.validateRouteDecision({ ...fallbackOnly, selected_effort: 'low' },
+  [fallbackLane], lowRiskAxes, routeMatrix, routePolicy()), false, 'a fallback does not inherit the initial effort');
+assert.strictEqual(api.validateRouteDecision(allowedFallback, fallbackLanes, lowRiskAxes, routeMatrix, routePolicy()), true);
+const hostWithoutMedium = routePolicy({ trustedLanePolicyResolver: (input) => ({
+  ...trustedLanePolicyResolver(input), supportedEfforts: ['low'],
+}) });
+assert.deepStrictEqual(api.selectRoute(fallbackLanes, lowRiskAxes, routeMatrix, hostWithoutMedium).fallbacks, []);
+assert.strictEqual(api.selectRoute([fallbackLane], lowRiskAxes, routeMatrix, hostWithoutMedium).status, 'HOLD_ROUTE_UNAVAILABLE');
+assert.strictEqual(api.validateRouteDecision(allowedFallback, fallbackLanes, lowRiskAxes, routeMatrix, hostWithoutMedium), false,
+  'a retry or continuation must revalidate the effective pair with current host support');
+assert.deepStrictEqual(api.selectRoute([routeLanes[0], { ...fallbackLane, supported_efforts: ['low'] }],
+  lowRiskAxes, routeMatrix, routePolicy()).fallbacks, [], 'the ordinary fallback requires medium in the lane and host');
+const nonDefaultLane = routePolicy({ trustedLanePolicyResolver: (input) => input.lane.lane_id === fallbackLane.lane_id
+  ? { canonicalModel: 'gpt-6.2-astra', supportedEfforts: ['low', 'medium'] }
+  : trustedLanePolicyResolver(input) });
+assert.deepStrictEqual(api.selectRoute(fallbackLanes, lowRiskAxes, routeMatrix, nonDefaultLane).fallbacks, [],
+  'the ordinary fallback uses the designated model');
+
+for (const retired of [
+  'gpt-5.5', ' GPT-5.5-legacy ', 'gpt-5.6', ' GPT-5.6-legacy ',
+  'gpt-6-luna', ' GPT-6-LUNA-legacy ', 'gpt-6-sol', 'gpt-6-sol-fallback',
+  'gpt-6.1-sol', ' GPT-6.1-SOL-compat ', 'gpt-6-astra', ' GPT-6-ASTRA-compat ',
+]) {
+  // Exercise both a retired lane remapped to an eligible model and an alias resolving to a retired model.
+  for (const [laneId, canonicalModel] of [[retired, 'gpt-6.2-sol'], [fallbackLane.lane_id, retired]]) {
+    const lane = { ...fallbackLane, lane_id: laneId };
+    const matrix = clone(routeMatrix);
+    matrix.capabilities[1] = laneAvailabilityCapability(lane.availability_evidence_ref, laneId.trim().toLowerCase());
+    seal(matrix, computeContentSha256);
+    assert.strictEqual(validateArtifact(matrix, { now: fixedNow, expectedSessionId: 'sess-A' }).valid, true);
+    const policy = routePolicy({ trustedLanePolicyResolver: (input) => (
+      input.lane.lane_id === laneId
+        ? { canonicalModel, supportedEfforts: ['low', 'medium'] }
+        : trustedLanePolicyResolver(input)
+    ) });
+    const alone = api.selectRoute([lane], lowRiskAxes, matrix, policy);
+    assert.strictEqual(alone.status, 'HOLD_ROUTE_UNAVAILABLE', `primary: ${laneId} -> ${canonicalModel}`);
+    assert.deepStrictEqual(alone.fallbacks, []);
+    const mixed = api.selectRoute([routeLanes[0], lane], lowRiskAxes, matrix, policy);
+    assert.strictEqual(mixed.selected_model, 'gpt-6.1-terra');
+    assert.deepStrictEqual(mixed.fallbacks, [], `fallback: ${laneId} -> ${canonicalModel}`);
+  }
+  const forged = { ...allowedFallback, fallbacks: [...allowedFallback.fallbacks, retired] };
+  assert.strictEqual(api.validateRouteDecision(forged, fallbackLanes, lowRiskAxes, routeMatrix, routePolicy()), false);
 }
 for (const resolver of [undefined, () => true, () => { throw new Error('synthetic refusal'); },
   () => Promise.reject(new Error('synthetic asynchronous refusal')),
@@ -283,12 +327,15 @@ for (const resolver of [undefined, () => true, () => { throw new Error('syntheti
   assert.strictEqual(api.selectRoute([routeLanes[0]], lowRiskAxes, routeMatrix,
     routePolicy({ trustedLanePolicyResolver: resolver })).status, 'HOLD_ROUTE_UNAVAILABLE');
 }
-const forbiddenFallback = { ...routeLanes[1], lane_id: 'gpt-5.6', capability_class: 'light', supported_efforts: ['low'] };
-assert.deepStrictEqual(api.selectRoute([routeLanes[0], forbiddenFallback], lowRiskAxes, routeMatrix,
-  routePolicy({ trustedLanePolicyResolver: () => ({ canonicalModel: 'gpt-6.1-terra', supportedEfforts: ['low'] }) })).fallbacks, []);
 assert.strictEqual(lowRiskRoute.status, 'SELECTED');
 assert.strictEqual(lowRiskRoute.selected_model, 'gpt-6.1-terra');
 assert.strictEqual(lowRiskRoute.selected_effort, 'low');
+assert.deepStrictEqual(lowRiskRoute.fallbacks, ['gpt-6.2-sol']);
+const additionalHostEfforts = api.selectRoute([fallbackLane], lowRiskAxes, routeMatrix, routePolicy({
+  trustedLanePolicyResolver: () => ({ canonicalModel: ' GPT-6.2-SOL ', supportedEfforts: ['low', 'medium', 'ultra'] }),
+}));
+assert.strictEqual(additionalHostEfforts.selected_model, 'gpt-6.2-sol');
+assert.strictEqual(additionalHostEfforts.selected_effort, 'medium');
 assert.strictEqual(Object.hasOwn(lowRiskRoute, 'actual_model'), false, 'route selection must never invent actual model metadata');
 assert.strictEqual(
   api.selectRoute(routeLanes, lowRiskAxes, {}, routePolicy()).status,
@@ -300,14 +347,18 @@ const engineeringRoute = api.selectRoute(routeLanes, {
   task_type: 'implementation', scope: 'bounded_single_module', risk: 'medium', reversibility: 'reversible', phase_kind: 'implementation', latency_cost: 'interactive', validation_failure_cost: 'focused_tests',
 }, routeMatrix, routePolicy());
 assert.strictEqual(engineeringRoute.status, 'SELECTED');
-assert.strictEqual(engineeringRoute.selected_model, 'gpt-6.1-sol');
+assert.strictEqual(engineeringRoute.selected_model, 'gpt-6.2-sol');
 assert.strictEqual(engineeringRoute.selected_effort, 'high');
+const engineeringMediumOnly = { ...routeLanes[2], supported_efforts: ['medium'] };
+assert.strictEqual(api.selectRoute([engineeringMediumOnly], {
+  task_type: 'implementation', scope: 'bounded_single_module', risk: 'medium', reversibility: 'reversible', phase_kind: 'implementation', latency_cost: 'interactive', validation_failure_cost: 'focused_tests',
+}, routeMatrix, routePolicy()).status, 'HOLD_ROUTE_UNAVAILABLE', 'the ordinary fallback cannot weaken an engineering floor');
 
 const testGateRoute = api.selectRoute(routeLanes, {
   task_type: 'classification', scope: 'single_unit', risk: 'low', reversibility: 'reversible', phase_kind: 'test_gates', latency_cost: 'interactive', validation_failure_cost: 'automatic_check',
 }, routeMatrix, routePolicy());
 assert.strictEqual(testGateRoute.status, 'SELECTED');
-assert.strictEqual(testGateRoute.selected_model, 'gpt-6.1-sol');
+assert.strictEqual(testGateRoute.selected_model, 'gpt-6.2-sol');
 assert.strictEqual(testGateRoute.capability_class, 'standard');
 
 const unavailableAssuranceRoute = api.selectRoute(routeLanes, {
@@ -344,8 +395,10 @@ const assuranceBinding = { actor_id: 'user-A', action: 'select_assurance_route',
 const assuranceEvidence = sealSource({ evidence_id: 'assurance-approval-A', evidence_class: 'explicit_human_approval', actor_id: 'user-A', observed_at: '2026-08-26T03:00:00Z', evidence_refs: ['host-approval-handle-A'], source_sha256: '0'.repeat(64) });
 const assuranceAuthorization = sealSource({ authorization_id: 'auth-assurance-A', actor_id: 'user-A', actor_kind: 'human', scope: 'assurance-route:phase-assurance', action: 'select_assurance_route', resource_ids: clone(assuranceAxes.resource_scope), issued_at: '2026-08-26T03:00:00Z', expires_at: '2026-08-26T03:10:00Z', plan_ref: clone(assuranceAxes.plan_ref), source_evidence_ref: assuranceEvidence.evidence_id, source_sha256: '0'.repeat(64) });
 const validAssurancePolicy = { ...routePolicy(), assurance_binding: clone(assuranceBinding), assurance_authorization: assuranceAuthorization, assurance_lease: clone(assuranceBinding), authorizationEvidenceIndex: { [assuranceEvidence.evidence_id]: assuranceEvidence }, allowedSourceEvidenceClasses: ['explicit_human_approval'], trustedAuthorizationResolver: ({ purpose }) => purpose === 'authorization' };
-assert.strictEqual(api.selectRoute([...routeLanes, assuranceLane], assuranceAxes, assuranceRouteMatrix, validAssurancePolicy).status, 'SELECTED');
-assert.strictEqual(api.selectRoute([...routeLanes, assuranceLane], assuranceAxes, assuranceRouteMatrix, validAssurancePolicy).selected_effort, 'high');
+const authorizedAssuranceRoute = api.selectRoute([...routeLanes, assuranceLane], assuranceAxes, assuranceRouteMatrix, validAssurancePolicy);
+assert.strictEqual(authorizedAssuranceRoute.status, 'SELECTED');
+assert.strictEqual(authorizedAssuranceRoute.selected_model, 'gpt-6.2-astra');
+assert.strictEqual(authorizedAssuranceRoute.selected_effort, 'high');
 for (const [field, value] of [['actor_id', 'other-user'], ['action', 'different_action'], ['phase_id', 'other-phase'], ['plan_hash', 'b'.repeat(64)], ['resource_scope', ['logical:other']], ['expires_at', '2026-08-26T03:09:00Z'], ['exit_condition', 'different_exit']]) {
   const mismatchedPolicy = clone(validAssurancePolicy);
   mismatchedPolicy.trustedAuthorizationResolver = validAssurancePolicy.trustedAuthorizationResolver;
@@ -545,7 +598,7 @@ authorizedPlan.capability_matrix_ref = { artifact_id: routeMatrix.artifact_id, c
 authorizedPlan.phases[0].phase_kind = 'diagnosis';
 authorizedPlan.phases[0].route = {
   requested_model: 'unspecified', requested_effort: 'unspecified', selected_model: 'gpt-6.1-terra', selected_effort: 'low',
-  selection_evidence: 'available-light', allowed_fallbacks: [],
+  selection_evidence: 'available-light', allowed_fallbacks: ['gpt-6.2-sol'],
 };
 const authorizedPlanOptions = bindPlanAuthorization(authorizedPlan);
 const authorizedPlanArtifacts = new Map([[routeMatrix.artifact_id, routeMatrix], [taskPacketArtifact.artifact_id, taskPacketArtifact]]);
@@ -567,6 +620,10 @@ const authorizedExpectedRoute = api.selectRoute(routeLanes, {
   requested_effort: authorizedPlan.phases[0].route.requested_effort,
 }, routeMatrix, routePolicy());
 const authorizedPlanResult = api.validateCollaborationPlan(authorizedPlan, authorizedPlanArtifacts, authorizedPlanOptions);
+const mismatchedAuthorizedEvidence = clone(authorizedPlan);
+mismatchedAuthorizedEvidence.phases[0].route.selection_evidence = 'available-standard';
+expectError(api.validateCollaborationPlan(mismatchedAuthorizedEvidence, authorizedPlanArtifacts,
+  bindPlanAuthorization(mismatchedAuthorizedEvidence)), 'PLAN_ROUTE_EVIDENCE_REQUIRED');
 assert.strictEqual(
   authorizedPlanResult.valid,
   true,
