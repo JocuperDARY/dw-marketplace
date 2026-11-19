@@ -97,7 +97,7 @@ test('new routes match actionable clauses after context without routing quoted o
 });
 
 test('human-agent interaction requests preserve adjacent routes and quoted scope', () => {
-  for (const prompt of ['请总结人机协作经验', '复盘这些对话中的人机协作问题',
+  for (const prompt of ['请总结人机协作经验', '请帮我复盘人机协作经验', '复盘这些对话中的人机协作问题',
     '设计人与 AI 的沟通流程', 'Please improve our human-AI collaboration',
     'Could you please review our human-AI collaboration?', '请总结人机协作经验。']) {
     const result = router.routePrompt(prompt);
