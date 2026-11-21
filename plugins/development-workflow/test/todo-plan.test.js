@@ -734,6 +734,115 @@ async function main() {
     );
   });
 
+  // Group 6: Security, Authorization & Packaging Hardening Regressions
+  await test('CLI entrypoint ships with LF-only shebang and pre-commit view/size caps', async (tmpDir) => {
+    const cliSrc = fs.readFileSync(cliPath, 'utf8');
+    assert(cliSrc.startsWith('#!/usr/bin/env node\n'), 'todo-plan.js must start with LF shebang');
+    assert(!cliSrc.includes('\r'), 'todo-plan.js must not contain CRLF carriage returns');
+
+    const sandbox = path.join(tmpDir, 'sandbox');
+    fs.mkdirSync(sandbox);
+    const planFile = path.join(sandbox, 'plan.json');
+
+    mustFailJson(
+      ['init', '--file', planFile, '--root', sandbox, '--title', 'Bad View', '--goal', 'Escape', '--sync-md', '../escape.md'],
+      4,
+      'PATH_SECURITY_VIOLATION',
+    );
+    assert(!fs.existsSync(planFile), 'pre-commit view validation must reject before writing plan.json');
+
+    mustJson(['init', '--file', planFile, '--root', sandbox, '--title', 'Bounded', '--goal', 'Size cap']);
+    mustFailJson(
+      ['configure-views', '--file', planFile, '--root', sandbox, '--sync-md', '../escape.md'],
+      4,
+      'PATH_SECURITY_VIOLATION',
+    );
+    assert.strictEqual(readPlanJson(planFile).views.markdownPath, null);
+
+    mustJson(['add-phase', '--file', planFile, '--id', 'P1', '--title', 'P1', '--goal', 'G1']);
+    mustJson(['add-task', '--file', planFile, '--id', 'T1', '--phase', 'P1', '--title', 'Task 1']);
+
+    const oversized = 'X'.repeat(2 * 1024 * 1024 + 32768);
+    const overStdin = runCliSync(['--json=1', 'update-task', 'T1', '--file', planFile, '--stdin'], {
+      input: JSON.stringify({ note: oversized }),
+    });
+    assert.strictEqual(overStdin.status, 2);
+    assert.strictEqual(overStdin.json && overStdin.json.code, 'INVALID_ARGUMENT');
+
+    assert.throws(
+      () => store.updateTask({ file: planFile, taskId: 'T1', role: 'verifier', actor: 'v1', note: oversized }),
+      (err) => err instanceof store.TodoPlanError && err.code === 'INVALID_ARGUMENT' && err.exitCode === 2,
+    );
+    assert.strictEqual(store.statusPlan({ file: planFile }).summary.counts.totalTasks, 1);
+  });
+
+  await test('author authorization blocks truthy purge, foreign assignment, and phase move; verifier/author cannot silently reset error', async (tmpDir) => {
+    const planFile = path.join(tmpDir, 'plan.json');
+    mustJson(['init', '--file', planFile, '--title', 'Authz Hardening', '--goal', 'Strict boundaries']);
+    mustJson(['add-phase', '--file', planFile, '--id', 'P1', '--title', 'P1', '--goal', 'G1']);
+    mustJson(['add-phase', '--file', planFile, '--id', 'P2', '--title', 'P2', '--goal', 'G2', '--depends-on', 'P1']);
+    mustJson(['add-task', '--file', planFile, '--id', 'T1', '--phase', 'P1', '--title', 'T1', '--owner', 'w1']);
+    mustJson(['add-task', '--file', planFile, '--id', 'T2', '--phase', 'P2', '--title', 'T2']);
+
+    mustFailJson(
+      ['apply', '--file', planFile, '--role', 'author', '--actor', 'w1', '--stdin'],
+      3,
+      'ROLE_FORBIDDEN',
+      { input: JSON.stringify({ ops: [{ op: 'remove_task', taskId: 'T1', reason: 'try purge', purge: 1 }] }) },
+    );
+    assert.strictEqual(readPlanJson(planFile).archived.length, 0);
+
+    mustFailJson(
+      ['add-task', '--file', planFile, '--phase', 'P1', '--title', 'Steal', '--owner', 'w2', '--role', 'author', '--actor', 'w1'],
+      3,
+      'ROLE_FORBIDDEN',
+    );
+    mustFailJson(
+      ['split-task', 'T1', '--file', planFile, '--role', 'author', '--actor', 'w1', '--reason', 'split', '--stdin'],
+      3,
+      'ROLE_FORBIDDEN',
+      { input: JSON.stringify({ into: [{ title: 'C1', owner: 'w2' }, { title: 'C2', owner: 'w1' }] }) },
+    );
+    mustFailJson(
+      ['update-task', 'T1', '--file', planFile, '--move-to-phase', 'P2', '--role', 'author', '--actor', 'w1'],
+      3,
+      'ROLE_FORBIDDEN',
+    );
+
+    mustJson(['mark-error', 'T1', '--file', planFile, '--role', 'verifier', '--actor', 'v1', '--reason', 'failing check']);
+    mustFailJson(['set-status', 'T1', '--file', planFile, '--status', 'pending', '--role', 'author', '--actor', 'w1'], 2, 'REASON_REQUIRED');
+    mustFailJson(['update-task', 'T1', '--file', planFile, '--reset-status', '--role', 'author', '--actor', 'w1'], 2, 'REASON_REQUIRED');
+
+    mustJson(['set-status', 'T1', '--file', planFile, '--status', 'pending', '--role', 'author', '--actor', 'w1', '--reason', 'fixed regression']);
+    const mdOut = runCliSync(['render', '--file', planFile, '--format', 'markdown']);
+    assert.strictEqual(mdOut.status, 0);
+    assert(mdOut.stdout.includes('error -> pending'), 'markdown history must include prevStatus -> nextStatus');
+    assert(mdOut.stdout.includes('原原因: failing check'), 'markdown history must include previousStatusReason');
+  });
+
+  await test('init --force honors requestId replay/conflict and validatePlan checks recentRequests entries', async (tmpDir) => {
+    const planFile = path.join(tmpDir, 'plan.json');
+    const first = mustJson(['init', '--file', planFile, '--title', 'Init Alpha', '--goal', 'Original', '--force', '--request-id', 'init-req-1']);
+    const originalPlanId = first.planId;
+    mustJson(['add-phase', '--file', planFile, '--id', 'P1', '--title', 'P1', '--goal', 'G1']);
+
+    const replay = mustJson(['init', '--file', planFile, '--title', 'Init Alpha', '--goal', 'Original', '--force', '--request-id', 'init-req-1']);
+    assert.strictEqual(replay.idempotentReplay, true);
+    assert.strictEqual(replay.planId, originalPlanId);
+    assert.strictEqual(readPlanJson(planFile).phases.length, 1, 'idempotent init --force replay must not wipe later phases');
+
+    mustFailJson(
+      ['init', '--file', planFile, '--title', 'Init Beta', '--goal', 'Original', '--force', '--request-id', 'init-req-1'],
+      2,
+      'REQUEST_ID_CONFLICT',
+    );
+
+    const crafted = readPlanJson(planFile);
+    crafted.recentRequests = [null];
+    fs.writeFileSync(planFile, JSON.stringify(crafted, null, 2), 'utf8');
+    mustFailJson(['validate', '--file', planFile], 2, 'INVALID_SCHEMA');
+  });
+
   if (!process.exitCode) {
     console.log(`${passed}/${total} todo-plan tests passed`);
   }

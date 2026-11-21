@@ -618,8 +618,10 @@ function withPlanLock(resolvedPlanPath, options, fn) {
     }
 
     let fd = null;
+    let createdByUs = false;
     try {
       fd = fs.openSync(lockPath, 'wx', 0o600);
+      createdByUs = true;
       const buf = Buffer.from(`${JSON.stringify(holderPayload, null, 2)}\n`, 'utf8');
       let offset = 0;
       while (offset < buf.length) {
@@ -637,6 +639,13 @@ function withPlanLock(resolvedPlanPath, options, fn) {
           fs.closeSync(fd);
         } catch (_) {
           // ignore
+        }
+      }
+      if (createdByUs) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (_) {
+          // best-effort cleanup of our own incomplete lock file
         }
       }
       if (err && err.code === 'EEXIST') {
@@ -885,6 +894,21 @@ function validatePlan(plan) {
   }
   if (!Array.isArray(plan.recentRequests)) {
     throw new TodoPlanError('INVALID_SCHEMA', 'plan.recentRequests must be an array');
+  }
+  for (let i = 0; i < plan.recentRequests.length; i += 1) {
+    const reqEntry = plan.recentRequests[i];
+    if (!reqEntry || typeof reqEntry !== 'object' || Array.isArray(reqEntry)) {
+      throw new TodoPlanError('INVALID_SCHEMA', `recentRequests[${i}] must be an object`);
+    }
+    if (typeof reqEntry.requestId !== 'string' || !reqEntry.requestId.trim()) {
+      throw new TodoPlanError('INVALID_SCHEMA', `recentRequests[${i}].requestId must be a non-empty string`);
+    }
+    if (typeof reqEntry.payloadSha256 !== 'string' || !reqEntry.payloadSha256.trim()) {
+      throw new TodoPlanError('INVALID_SCHEMA', `recentRequests[${i}].payloadSha256 must be a non-empty string`);
+    }
+    if (!reqEntry.response || typeof reqEntry.response !== 'object' || Array.isArray(reqEntry.response)) {
+      throw new TodoPlanError('INVALID_SCHEMA', `recentRequests[${i}].response must be an object`);
+    }
   }
 
   const globalSeenIds = new Set();
@@ -1660,6 +1684,9 @@ function extractRequestParams(action, options) {
     excluded.add('syncMd');
     excluded.add('syncHtml');
   }
+  if (action === 'init') {
+    excluded.add('force');
+  }
   const params = {};
   const keys = Object.keys(options || {}).sort();
   for (let i = 0; i < keys.length; i += 1) {
@@ -1776,8 +1803,11 @@ function opRemovePhase(plan, opts, ctx) {
     }
   }
 
+  const purge = Boolean(opts.purge);
+  const unlinkDeps = Boolean(opts.unlinkDeps);
+
   if (externalPhaseRefs.length > 0 || externalTaskRefs.length > 0) {
-    if (!opts.unlinkDeps) {
+    if (!unlinkDeps) {
       throw new TodoPlanError(
         'DEPENDENCY_IN_USE',
         `Phase "${phase.id}" or its tasks are referenced by active dependencies`,
@@ -1796,7 +1826,7 @@ function opRemovePhase(plan, opts, ctx) {
 
   plan.phases.splice(index, 1);
 
-  if (!opts.purge) {
+  if (!purge) {
     plan.archived.push({
       kind: 'phase',
       id: phase.id,
@@ -1819,13 +1849,13 @@ function opRemovePhase(plan, opts, ctx) {
     role: ctx.role,
     duringTaskId,
     reason,
-    purged: Boolean(opts.purge),
-    unlinkedDeps: Boolean(opts.unlinkDeps),
-    summary: `${opts.purge ? 'Purged' : 'Archived'} phase ${phase.id}`,
+    purged: purge,
+    unlinkedDeps: unlinkDeps,
+    summary: `${purge ? 'Purged' : 'Archived'} phase ${phase.id}`,
   };
   return {
     mutated: true,
-    extra: { removedPhaseId: phase.id, purged: Boolean(opts.purge) },
+    extra: { removedPhaseId: phase.id, purged: purge },
     historyEntry,
   };
 }
@@ -1885,6 +1915,13 @@ function opAddTask(plan, opts, ctx) {
   const title = normalizeNonEmptyString(opts.title, 'title');
   const acceptance = normalizeOptionalText(opts.acceptance, 'acceptance');
   const owner = normalizeNullableString(opts.owner, 'owner');
+  if (ctx.role === 'author' && owner !== null && owner !== ctx.actor) {
+    throw new TodoPlanError(
+      'ROLE_FORBIDDEN',
+      `Author "${ctx.actor}" cannot assign new task to "${owner}"`,
+      { role: ctx.role, actor: ctx.actor, owner }
+    );
+  }
   const dependsOn = normalizeIdArray(opts.dependsOn, 'dependsOn');
   const id = allocateTaskId(plan, phase.id, opts.id);
 
@@ -1975,6 +2012,13 @@ function opUpdateTask(plan, opts, ctx) {
         );
       }
     }
+    if (opts.moveToPhase !== undefined && opts.moveToPhase !== null && opts.moveToPhase !== '') {
+      throw new TodoPlanError(
+        'ROLE_FORBIDDEN',
+        `Author "${ctx.actor}" cannot move task "${task.id}" to another phase`,
+        { role: ctx.role, actor: ctx.actor, action: 'update_task', taskId: task.id }
+      );
+    }
   }
 
   let targetPhase = phase;
@@ -2006,8 +2050,22 @@ function opUpdateTask(plan, opts, ctx) {
       targetPhase = dest.phase;
     }
   }
+  let previousStatus = null;
   let previousStatusReason = null;
-  if (opts.resetStatus === true) {
+  const resetStatus = Boolean(opts.resetStatus);
+  const explicitReason = normalizeNullableString(opts.reason, 'reason');
+  if (resetStatus) {
+    if (
+      (task.status === 'completed' || task.status === 'impossible' || task.status === 'error') &&
+      !explicitReason
+    ) {
+      throw new TodoPlanError(
+        'REASON_REQUIRED',
+        `Resetting task "${task.id}" from status "${task.status}" requires a non-empty reason`,
+        { taskId: task.id, currentStatus: task.status, field: 'reason' }
+      );
+    }
+    previousStatus = task.status;
     previousStatusReason = task.statusReason;
     task.status = 'pending';
     task.statusUpdatedAt = ctx.now;
@@ -2015,16 +2073,17 @@ function opUpdateTask(plan, opts, ctx) {
     task.claimedAt = null;
   }
 
-  const reason = normalizeNullableString(opts.reason, 'reason');
   const historyEntry = {
     at: ctx.now,
     action: 'update_task',
     phaseId: targetPhase.id,
     taskId: task.id,
+    prevStatus: previousStatus || undefined,
+    nextStatus: resetStatus ? 'pending' : undefined,
     actor: ctx.actor,
     role: ctx.role,
     duringTaskId,
-    reason,
+    reason: explicitReason,
     previousStatusReason: previousStatusReason || undefined,
     summary: `Updated task ${task.id}`,
   };
@@ -2077,6 +2136,19 @@ function opSplitTask(plan, opts, ctx) {
       field: 'into',
     });
   });
+
+  if (ctx.role === 'author') {
+    for (let i = 0; i < normalizedItems.length; i += 1) {
+      const targetOwner = normalizedItems[i].owner !== undefined ? normalizedItems[i].owner : task.owner;
+      if (targetOwner !== null && targetOwner !== ctx.actor) {
+        throw new TodoPlanError(
+          'ROLE_FORBIDDEN',
+          `Author "${ctx.actor}" cannot assign split child task to "${targetOwner}"`,
+          { role: ctx.role, actor: ctx.actor, owner: targetOwner }
+        );
+      }
+    }
+  }
 
   const used = collectAllUsedIds(plan);
   const children = [];
@@ -2194,7 +2266,9 @@ function opRemoveTask(plan, opts, ctx) {
       action: 'remove_task',
     });
   }
-  if (ctx.role === 'author' && opts.purge === true) {
+  const purge = Boolean(opts.purge);
+  const unlinkDeps = Boolean(opts.unlinkDeps);
+  if (ctx.role === 'author' && purge) {
     throw new TodoPlanError('ROLE_FORBIDDEN', 'Role "author" cannot purge tasks', {
       role: ctx.role,
       action: 'remove_task',
@@ -2217,7 +2291,7 @@ function opRemoveTask(plan, opts, ctx) {
   }
 
   if (referencedBy.length > 0) {
-    if (!opts.unlinkDeps) {
+    if (!unlinkDeps) {
       throw new TodoPlanError(
         'DEPENDENCY_IN_USE',
         `Task "${task.id}" is referenced by active task dependencies: ${referencedBy.join(', ')}`,
@@ -2234,7 +2308,7 @@ function opRemoveTask(plan, opts, ctx) {
 
   phase.tasks.splice(taskIndex, 1);
 
-  if (!opts.purge) {
+  if (!purge) {
     plan.archived.push({
       kind: 'task',
       ...deepClone(task),
@@ -2255,13 +2329,13 @@ function opRemoveTask(plan, opts, ctx) {
     role: ctx.role,
     duringTaskId,
     reason,
-    purged: Boolean(opts.purge),
-    unlinkedDeps: Boolean(opts.unlinkDeps),
-    summary: `${opts.purge ? 'Purged' : 'Archived'} task ${task.id}`,
+    purged: purge,
+    unlinkedDeps: unlinkDeps,
+    summary: `${purge ? 'Purged' : 'Archived'} task ${task.id}`,
   };
   return {
     mutated: true,
-    extra: { removedTaskId: task.id, phaseId: phase.id, purged: Boolean(opts.purge) },
+    extra: { removedTaskId: task.id, phaseId: phase.id, purged: purge },
     historyEntry,
   };
 }
@@ -2793,14 +2867,14 @@ function opSetTaskStatus(plan, opts, ctx) {
 
   // rawStatus === 'pending'
   const { task, phase } = findTask(plan, opts.taskId ?? opts.id);
+  if (task.status === 'in_progress') {
+    return opPauseTask(plan, opts, ctx);
+  }
+  if (task.status === 'completed' || task.status === 'impossible' || task.status === 'error') {
+    return opReopenTask(plan, opts, ctx);
+  }
+
   assertAuthorOwnership(ctx.role, ctx.actor, task, 'set_status');
-
-  const prevStatus = task.status;
-  const prevReason = task.statusReason;
-
-  task.status = 'pending';
-  task.statusUpdatedAt = ctx.now;
-  task.statusReason = null;
   if (opts.note !== undefined) {
     task.note = normalizeNullableString(opts.note, 'note');
   }
@@ -2814,13 +2888,12 @@ function opSetTaskStatus(plan, opts, ctx) {
     action: 'set_status',
     phaseId: phase.id,
     taskId: task.id,
-    prevStatus,
+    prevStatus: 'pending',
     nextStatus: 'pending',
-    previousStatusReason: prevReason || undefined,
     actor: ctx.actor,
     role: ctx.role,
     reason,
-    summary: `Set task ${task.id} status to pending`,
+    summary: `Updated pending task ${task.id}`,
   };
   return { mutated: true, extra: { task: deepClone(task), phaseId: phase.id }, historyEntry };
 }
@@ -2859,6 +2932,29 @@ function dispatchPatchOp(plan, rawOp, defaults, ctx) {
 }
 
 // ---------------- Locked Transaction Driver ----------------
+
+function serializeAndCheckPlanSize(plan) {
+  const serialized = `${JSON.stringify(plan, null, 2)}\n`;
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes > MAX_FILE_BYTES) {
+    throw new TodoPlanError(
+      'INVALID_ARGUMENT',
+      `Serialized plan size (${bytes} bytes) exceeds maximum allowed (${MAX_FILE_BYTES} bytes)`,
+      { size: bytes, maxFileBytes: MAX_FILE_BYTES }
+    );
+  }
+  return serialized;
+}
+
+function validateConfiguredViewsPreCommit(views, resolvedPlanPath, root) {
+  const baseDir = path.dirname(resolvedPlanPath);
+  if (views.markdownPath) {
+    resolveSidecarPath(views.markdownPath, { baseDir, root });
+  }
+  if (views.htmlPath) {
+    resolveSidecarPath(views.htmlPath, { baseDir, root });
+  }
+}
 
 function mutatePlan(action, options, mutator) {
   assertSafeOptions(options);
@@ -2924,7 +3020,7 @@ function mutatePlan(action, options, mutator) {
 
     const now = new Date().toISOString();
     const draft = deepClone(plan);
-    const ctx = { role, actor, now };
+    const ctx = { role, actor, now, resolvedPlanPath: resolved.resolvedPlanPath, root: options.root };
     const result = mutator(draft, ctx);
     const code = result.code || 'OK';
     const exitCode = hasOwn(EXIT_CODES, code) ? EXIT_CODES[code] : 0;
@@ -2977,7 +3073,8 @@ function mutatePlan(action, options, mutator) {
       recordRecentRequest(draft, requestId, payloadSha256, buildCompactResponse(fullResponse));
     }
 
-    atomicWriteFile(resolved.resolvedPlanPath, `${JSON.stringify(draft, null, 2)}\n`);
+    const serialized = serializeAndCheckPlanSize(draft);
+    atomicWriteFile(resolved.resolvedPlanPath, serialized);
     syncSidecarViews(draft, summary, resolved.resolvedPlanPath, options, warnings);
 
     return fullResponse;
@@ -3022,34 +3119,37 @@ function initPlan(options = {}) {
       exists = false;
     }
 
-    if (exists && !options.force) {
-      if (requestId) {
-        try {
-          const existingPlan = readPublishedPlan(resolved.resolvedPlanPath);
-          validatePlan(existingPlan);
-          const match = existingPlan.recentRequests.find((r) => r.requestId === requestId);
-          if (match) {
-            if (match.payloadSha256 !== payloadSha256) {
-              throw new TodoPlanError(
-                'REQUEST_ID_CONFLICT',
-                `requestId "${requestId}" was already used with a different payload`,
-                { requestId }
-              );
-            }
-            const summary = getSummary(existingPlan);
-            return {
-              ...match.response,
-              resolvedPlanPath: resolved.resolvedPlanPath,
-              idempotentReplay: true,
-              summary,
-              plan: existingPlan,
-              warnings: [...warnings, ...(match.response.warnings || [])],
-            };
+    if (exists && requestId) {
+      try {
+        const existingPlan = readPublishedPlan(resolved.resolvedPlanPath);
+        validatePlan(existingPlan);
+        const match = existingPlan.recentRequests.find((r) => r.requestId === requestId);
+        if (match) {
+          if (match.payloadSha256 !== payloadSha256) {
+            throw new TodoPlanError(
+              'REQUEST_ID_CONFLICT',
+              `requestId "${requestId}" was already used with a different payload`,
+              { requestId }
+            );
           }
-        } catch (err) {
-          if (err instanceof TodoPlanError && err.code === 'REQUEST_ID_CONFLICT') throw err;
+          const summary = getSummary(existingPlan);
+          return {
+            ...match.response,
+            resolvedPlanPath: resolved.resolvedPlanPath,
+            idempotentReplay: true,
+            summary,
+            plan: existingPlan,
+            warnings: [...warnings, ...(match.response.warnings || [])],
+          };
+        }
+      } catch (err) {
+        if (err instanceof TodoPlanError && (err.code === 'REQUEST_ID_CONFLICT' || err.code === 'PATH_SECURITY_VIOLATION')) {
+          throw err;
         }
       }
+    }
+
+    if (exists && !options.force) {
       throw new TodoPlanError(
         'DUPLICATE_ID',
         `Plan file already exists at "${resolved.resolvedPlanPath}". Use --force to overwrite.`,
@@ -3178,6 +3278,7 @@ function initPlan(options = {}) {
     });
 
     validatePlan(plan);
+    validateConfiguredViewsPreCommit(plan.views, resolved.resolvedPlanPath, options.root);
     const summary = getSummary(plan);
 
     const fullResponse = {
@@ -3197,7 +3298,8 @@ function initPlan(options = {}) {
       recordRecentRequest(plan, requestId, payloadSha256, buildCompactResponse(fullResponse));
     }
 
-    atomicWriteFile(resolved.resolvedPlanPath, `${JSON.stringify(plan, null, 2)}\n`);
+    const serialized = serializeAndCheckPlanSize(plan);
+    atomicWriteFile(resolved.resolvedPlanPath, serialized);
     syncSidecarViews(plan, summary, resolved.resolvedPlanPath, options, warnings);
 
     return fullResponse;
@@ -3223,6 +3325,8 @@ function configureViews(options = {}) {
     if (rawHtml !== undefined) {
       draft.views.htmlPath = normalizeViewSetting(rawHtml);
     }
+
+    validateConfiguredViewsPreCommit(draft.views, ctx.resolvedPlanPath, ctx.root);
 
     return {
       mutated: true,

@@ -115,6 +115,15 @@ function readStdinJson(io = {}) {
     throw makeError('IO_ERROR', `Failed to read stdin: ${err.message}`);
   }
   const cleaned = raw.replace(/^\uFEFF/, '');
+  const maxBytes = 2 * 1024 * 1024;
+  const cleanedBytes = Buffer.byteLength(cleaned, 'utf8');
+  if (cleanedBytes > maxBytes) {
+    throw makeError(
+      'INVALID_ARGUMENT',
+      `Stdin JSON payload size (${cleanedBytes} bytes) exceeds maximum allowed (${maxBytes} bytes)`,
+      { size: cleanedBytes, maxBytes }
+    );
+  }
   if (!cleaned.trim()) {
     throw makeError('INVALID_ARGUMENT', 'Expected JSON payload on stdin, received empty input');
   }
@@ -633,12 +642,13 @@ async function runWatchRender({ format, outPath, allowNonTty, maxSeconds, maxEve
 
 async function runCli(argv, io = {}) {
   const args = Array.isArray(argv) ? argv : [];
-  const jsonRequested = args.includes('--json') || args.some((a) => String(a).startsWith('--json=true'));
+  let jsonRequested = args.includes('--json') || args.some((a) => /^--json=(?:true|1)$/i.test(String(a)));
 
   try {
     const { command, rest, flags, provided } = parseArgs(args);
     const env = io.env || process.env;
     const jsonMode = Boolean(flags['--json']);
+    jsonRequested = jsonMode;
     const noColor = Boolean(flags['--no-color']) || (env && env.NO_COLOR !== undefined && env.NO_COLOR !== '');
 
     if (!command || command === 'help' || flags['--help'] || flags['-h']) {

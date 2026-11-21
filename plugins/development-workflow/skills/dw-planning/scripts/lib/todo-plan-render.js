@@ -241,13 +241,17 @@ function formatHistoryLine(entry) {
   const actor = entry.actor ? ` by ${entry.actor}` : '';
   const rev = entry.revision !== undefined && entry.revision !== null ? ` #${entry.revision}` : '';
   const detailParts = [];
-  if (entry.fromStatus && entry.toStatus) {
-    detailParts.push(`${entry.fromStatus} -> ${entry.toStatus}`);
+  const fromStatus = entry.prevStatus ?? entry.fromStatus;
+  const toStatus = entry.nextStatus ?? entry.toStatus;
+  if (fromStatus && toStatus) {
+    detailParts.push(`${fromStatus} -> ${toStatus}`);
   }
   if (entry.reason) detailParts.push(`原因: ${entry.reason}`);
-  if (entry.previousReason) detailParts.push(`原原因: ${entry.previousReason}`);
+  const prevReason = entry.previousStatusReason ?? entry.previousReason;
+  if (prevReason) detailParts.push(`原原因: ${prevReason}`);
   if (entry.note) detailParts.push(`备注: ${entry.note}`);
-  if (entry.message) detailParts.push(entry.message);
+  const summaryText = entry.summary ?? entry.message;
+  if (summaryText) detailParts.push(summaryText);
   const head = [time, `${action}${rev}`, target, actor.trim()].filter(Boolean).join(' ');
   return detailParts.length > 0 ? `${head} — ${detailParts.join(' | ')}` : head;
 }
