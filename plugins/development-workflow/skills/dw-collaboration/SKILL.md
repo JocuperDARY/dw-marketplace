@@ -25,6 +25,8 @@ cover coordination, implementation or integration; arrange independent review
 when the risk or project requires it. Do not require a fixed number of roles,
 rounds, model names, dashboards or persistent task records for every task.
 
+When assembling a multi-agent team for complex multi-module work, keep the root session as the single coordinator and final acceptance authority, and choose each delegated worker's model and reasoning effort explicitly rather than inheriting the root model across all roles. Because available model pools vary widely (fewer than three, three, four, or more options), prefer user-specified model lineups first after verifying live interface support. When the user is unsure how to assign models, offer an automatic selection flow: inspect the live available model list, ask the user which models are usable and permitted, research current capability/cost/latency tradeoffs to derive a Pareto-optimal lineup, and assign roles by subtask difficulty across at least three general capability tiers—high-assurance decision/audit/escalation, core design/implementation/independent-verification, and low-cost routine execution/retrieval—expanding to more tiers or collapsing conservatively as the frontier allows and tuning effort within a tier when supported. Parallelize writers only on disjoint write domains inside isolated working copies or branches, keep read-only researchers, auditors, and independent verifiers on a shared read-only view without editing business files, stop retrying after two consecutive identical failure signatures to escalate for replanning, and merge plus verify an isolated writer's work before destroying its worker or workspace; see [ordinary collaboration](references/ordinary-collaboration.md).
+
 For incremental work, use the [work-package guidance](../dw-planning/references/method-integration.md#增量工作包): share exact interface decisions and evidence locations, then verify the returned change against its acceptance criteria. Related failures may share a cause; establish independence before splitting them. A narrower fix review checks the original findings and new risks in the fix, with review depth determined by the remaining uncertainty.
 
 ## Optional managed resource protocol
@@ -74,7 +76,7 @@ Read only the reference needed:
 - Windows command execution, trust and limits: [windows-command-adapter.md](references/windows-command-adapter.md)
 - Prepared commands, queue dispatch and verified capacity release: [resource-command-dispatcher.md](references/resource-command-dispatcher.md)
 - Opt-in POSIX process-group execution: [posix-command-backend.md](references/posix-command-backend.md)
-- Ordinary roles, communication and capability mapping: [ordinary-collaboration.md](references/ordinary-collaboration.md)
+- Ordinary roles, layered model tiers, isolation discipline and capability mapping: [ordinary-collaboration.md](references/ordinary-collaboration.md)
 - Run/child/resource transitions: [state-machines.md](references/state-machines.md)
 - Process, storage, progress, retry: [resource-lifecycle.md](references/resource-lifecycle.md)
 - Task tracker, loop exit, queue, work levels: [resource-control.md](references/resource-control.md)
