@@ -133,6 +133,7 @@ description: Use when 需要发现、选择或组合当前可用工具，盘点�
 | `hooks/session-rules.js` | SessionStart 使用的规则选择库；活跃目录存在时优先，空目录也保留为空。链接目录不跟随，超过预算的完整规则列为 deferred。 |
 | `hooks/rules-migrate.js --dry-run` | 预览全局规则迁移；`--apply` 按已有明确授权执行并保留恢复档案。检查路径组件链接，不能代替操作系统的原子防竞态能力。 |
 | `skills/dw-tooling/scripts/check-skill-structure.js --json` | 只读检查元数据、导航与本地链接、路由目标、发布清单和全部测试入口；发现不一致时返回非零退出码。也可运行 `npm run check:skills`。 |
+| `skills/dw-planning/scripts/todo-plan.js` | 可选的跨宿主分层 TODO 与计划管理 CLI（支持 `init`/`status`/`check-complete`/`render` 与加锁原子事务，详见 [分层 TODO 与计划管理器](../dw-planning/references/todo-plan-manager.md)）。仅维护所声明的任务状态与本地派生视图，不替代外部运行验证、代码审查或宿主钩子。 |
 | [check-updates](../check-updates/SKILL.md) | 检查工具版本与可用更新，沿用该 Skill 的网络、报告和子进程管理说明；不会升级工具。 |
 
 结构检查适合维护本插件。它检查确定性引用和清单，不评价文字质量、不增加审批步骤，也不证明真实宿主发现或加载。实际 npm 归档由包测试另行检查。Skill 路由是提示；总纲和快速参考主要通过显式调用使用，其他技能仅在高置信意图下提示。
