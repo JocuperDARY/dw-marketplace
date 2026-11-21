@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.11.2 | 按任务风险调整计划、实现、验证与协作，含人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.12.0 | 按任务风险调整计划、实现、验证与协作，含分层 TODO 计划管理、泛化团队选模、人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.12.0**：新增可选的跨宿主[分层 TODO 与计划管理器](./plugins/development-workflow/skills/dw-planning/references/todo-plan-manager.md)（`dw-planning/scripts/todo-plan.js`），支持阶段与任务两级 5 态追踪（`pending`/`in_progress`/`completed`/`impossible`/`error`）、跨层级 DAG 与动态拆改（`split-task`/`apply`）、终端/简报/Markdown/静态 HTML 派生视图、以及独占 `.lock` 事务、`claim-next` 并发认领与角色隔离防护；同步将 [dw-collaboration](./plugins/development-workflow/skills/dw-collaboration/SKILL.md) 与[普通协作](./plugins/development-workflow/skills/dw-collaboration/references/ordinary-collaboration.md)的团队选模收敛为厂商中立的 ≥3 能力层级、帕累托最优自动选型与 Author/Verifier 隔离规范。`check-complete` 仅核对所声明 TODO 状态，真实宿主与外部 provider 验证继续暂缓。
 
 **development-workflow 5.11.2**：修正提示路由在主语、描述性话题、条件前件或转折/对比分句中的中文否定识别（如“我们不要写交接文档”“今天的交接文档不要写”保持静默），保留“我们需要写交接文档”、肯定替代（“而不是/而非”）和定语从句故障描述等正常触发；补充路由、CLI 与打包回归，真实宿主安装与激活验证继续暂缓。
 

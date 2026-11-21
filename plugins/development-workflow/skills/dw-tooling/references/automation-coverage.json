@@ -197,6 +197,27 @@
       "enforcement": "opt-in-runtime",
       "tests": ["test/posix-command-backend.test.js"],
       "limits": "Controller/guardian enforce deadlines and output limits for their newly created process group. No adoption of old PIDs; no Windows Job equivalent or native acceptance inferred from mocks."
+    },
+    {
+      "path": "skills/dw-planning/scripts/todo-plan.js",
+      "owner": "dw-planning",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/todo-plan.test.js"],
+      "limits": "CLI entry point for cross-harness TODO and plan management; tracks declared task states and local derived views without replacing host hooks or independent verification."
+    },
+    {
+      "path": "skills/dw-planning/scripts/lib/todo-plan-store.js",
+      "owner": "dw-planning",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/todo-plan.test.js"],
+      "limits": "Locked atomic JSON store and DAG/role validator for opt-in callers; crash recovery requires explicit expected nonce and local file evidence does not establish host acceptance."
+    },
+    {
+      "path": "skills/dw-planning/scripts/lib/todo-plan-render.js",
+      "owner": "dw-planning",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/todo-plan.test.js"],
+      "limits": "Read-only terminal, brief, Markdown and self-contained HTML snapshot renderers; rendered views reflect saved JSON state and perform no write actions."
     }
   ]
 }
