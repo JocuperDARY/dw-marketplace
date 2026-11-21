@@ -24,7 +24,8 @@
         { "name": "collaboration safety", "command": "node", "args": ["test/collaboration-safety.test.js"] },
         { "name": "test runner behavior", "command": "node", "args": ["test/test-runner.test.js"] },
         { "name": "resource command dispatcher", "command": "node", "args": ["test/resource-command-dispatcher.test.js"], "timeoutMs": 120000 },
-        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 }
+        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 },
+        { "name": "todo plan manager", "command": "node", "args": ["test/todo-plan.test.js"], "timeoutMs": 120000 }
       ]
     },
     "process": {
@@ -86,7 +87,8 @@
         { "name": "hook and package contracts", "command": "node", "args": ["test/hooks.test.js"], "timeoutMs": 900000 },
         { "name": "test entry point behavior", "command": "node", "args": ["test/test-entry-points.test.js"], "timeoutMs": 360000 },
         { "name": "resource command dispatcher", "command": "node", "args": ["test/resource-command-dispatcher.test.js"], "timeoutMs": 120000 },
-        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 }
+        { "name": "POSIX command backend contracts", "command": "node", "args": ["test/posix-command-backend.test.js"], "timeoutMs": 120000 },
+        { "name": "todo plan manager", "command": "node", "args": ["test/todo-plan.test.js"], "timeoutMs": 120000 }
       ]
     }
   }

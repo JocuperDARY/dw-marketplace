@@ -958,9 +958,51 @@ test('documentation states evidence boundaries and manager entry points', () => 
   assert.match(hub, /TaskResourceManager/);
   assert.match(checker, /spawnSync/);
 });
+
+test('collaboration guidance defines vendor-neutral model tiers and team isolation', () => {
+  const collabSkill = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-collaboration', 'SKILL.md'), 'utf8');
+  const ordinary = fs.readFileSync(path.join(pluginRoot, 'skills', 'dw-collaboration', 'references', 'ordinary-collaboration.md'), 'utf8');
+
+  assert.match(ordinary, /^## 模型与思考深度$/m, 'runtime-adapters.md anchor must remain intact');
+  assert.match(ordinary, /优先由用户显式指定/);
+  assert.match(ordinary, /调查可用模型列表/);
+  assert.match(ordinary, /询问用户/);
+  assert.match(ordinary, /帕累托最优/);
+  assert.match(ordinary, /按分工内容难度/);
+  assert.match(ordinary, /至少三类能力层级/);
+  assert.match(ordinary, /\*\*高层[^\n]*\*\*/);
+  assert.match(ordinary, /\*\*中层[^\n]*\*\*/);
+  assert.match(ordinary, /\*\*低层[^\n]*\*\*/);
+  assert.match(ordinary, /不默认全员继承/);
+  assert.match(ordinary, /同层(?:级内|思考深度)/);
+  assert.match(ordinary, /Author/);
+  assert.match(ordinary, /Verifier/);
+  assert.match(ordinary, /2[–-]4/);
+  assert.match(ordinary, /严禁直接修改业务文件/);
+  assert.match(ordinary, /连续两次出现同一失败特征/);
+  assert.match(ordinary, /合入其改动并通过集成验证/);
+
+  assert.match(collabSkill, /prefer user-specified model lineups/i);
+  assert.match(collabSkill, /Pareto-optimal/i);
+  assert.match(collabSkill, /three general capability tiers/i);
+  assert.match(collabSkill, /isolated working copies or branches/i);
+  assert.match(collabSkill, /without editing business files/i);
+  assert.match(collabSkill, /two consecutive identical failure signatures/i);
+  assert.match(collabSkill, /merge plus verify/i);
+
+  for (const [label, text] of [['dw-collaboration/SKILL.md', collabSkill], ['ordinary-collaboration.md', ordinary]]) {
+    assert.doesNotMatch(
+      text,
+      /Orchestrator\s*\(Carbon\)|gemini-4-|workspace:\s*["'](?:share|inherit)["']|gpt-6\.|6\.2\s*(?:Astra|Sol)|6\.1\s*Terra|6\s*Luna|\b(?:carbon|neon|hydrogen)\b/i,
+      `${label} must keep generic capability tiers without hardcoded vendor models or single-host enum syntax`,
+    );
+  }
+});
+
 const retainedContractTests = new Set([
   'development-workflow package includes check-updates skill assets',
   'documentation states evidence boundaries and manager entry points',
+  'collaboration guidance defines vendor-neutral model tiers and team isolation',
   'check-updates defaults to remote checking and has explicit local-only opt-out',
   'task-utils does not export an automatic git commit helper',
   'hook self-check covers every JavaScript command in hooks.json',
