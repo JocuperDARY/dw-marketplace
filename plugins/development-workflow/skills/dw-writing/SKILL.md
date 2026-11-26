@@ -1,11 +1,11 @@
 ---
 name: dw-writing
-description: Use when 需要撰写或改写面向用户的技术说明、推导解释、进度汇报、交接摘要或审查结论，或需要让术语与任务名称更直接易懂。
+description: Use when 需要撰写或改写面向用户的技术说明、推导解释、进度汇报、交接摘要或审查结论，或需要让术语与任务名称更直接易懂 (clear technical prose, progress reporting, evidence calibration, and task naming).
 ---
 
-# 清楚、自然的文字表述
+# 清楚、自然的文字表述（Technical Writing & Evidence Clarity）
 
-可单独用于说明和改写，也可供开发工作流的其他 Skill 引用。围绕读者当前需要理解或执行的事，使用具体事实、清楚的条件和可执行的下一步。按用户指定的语言、格式和篇幅写作。
+> 本 skill 隶属 [development-workflow](../development-workflow/SKILL.md) **L3 横切沟通层**：聚焦读者视角的表达与清晰度（人机协作流程决策仍由 [dw-interaction](../dw-interaction/SKILL.md) 维护）。围绕读者当前需要理解或执行的事，使用具体事实、清楚的条件和可执行的下一步，按用户指定的语言、格式和篇幅写作。
 
 本 Skill 处理文字表述。任务的事实、执行步骤、授权和验收要求仍由用户指令与对应流程确定；润色时保留原意及证据范围。
 
@@ -89,3 +89,12 @@ description: Use when 需要撰写或改写面向用户的技术说明、推导�
 - “严格消除、始终成立、百分百、保证、恢复”等断言是否有同等范围和强度的证据；数值下降、未检出和严格为零是否区分，未知、失败和暂缓是否仍然可见。
 - 限制后的允许或恢复条件是否来自当前用户指令及有效记录，用户尚未提供的决定是否明确保留。
 - 有交互或多格式交付时，是否从实际交付入口验证受影响的阅读路径；生成文件成功与读者能使用分别记录。
+
+---
+
+## 相关子Skill
+
+- [dw-interaction](../dw-interaction/SKILL.md) — 协作过程中何时澄清决定、应用用户纠正与推进节奏
+- [dw-handoff](../dw-handoff/SKILL.md) — 跨对话/跨智能体交接清单、TODO 对账与恢复提示词
+- [dw-verification](../dw-verification/SKILL.md) — 为表述提供核验后的证据状态（三 C 与偏差分级）
+- [development-workflow](../development-workflow/SKILL.md) — 返回总纲（含中英双语分工原则）

@@ -1,35 +1,67 @@
 ---
 name: development-workflow
-description: Use when 任务横跨诊断、规划、实现、验证、收尾中的两个以上阶段，或用户明确要求完整开发工作流、风险门控和闭环方法论。
+description: Use when 任务横跨诊断、规划、实现、验证、收尾中的两个以上阶段，或需要跨阶段风险门控与闭环工作流 (multi-stage development workflow, risk-scaled gates, and closed-loop verification).
 ---
 
-# 开发工作准则与操作流程（总纲）
+# 开发工作准则与操作流程（总纲 / Development Workflow Hub）
 
-**方法论版本**: 3.14 | **适用范围**: 通用（不限于本项目）
+**方法论版本**: 3.15 | **适用范围**: 通用（不限于本项目）
 
-> 本 skill 已拆分为 **1 个总纲 + 15 个子模块**，按对话领域自动选择对应子 skill。总纲定义铁律体系和阶段门控——所有子 skill 共享的上下文。
+> 本 skill 已组织为 **1 个总纲 + 15 个子模块（共 16 个 Skill，L0–L4 四层架构）**，按对话领域自动选择对应子 skill。总纲定义铁律体系、风险门控与中英双语分工原则——所有子 skill 共享的上下文。
 
 ---
 
-## 子Skill 导航
+## 子Skill 导航（4-Layer Architecture）
 
-| 领域 | Skill | 说明 | 典型触发词 |
-|------|-------|------|-----------|
-| 🔍 诊断 | [dw-diagnosis](../dw-diagnosis/SKILL.md) | 多维度证据收集、根因分类、修复优先级 | 诊断、根因、bug分析、问题排查 |
-| 📋 方案 | [dw-planning](../dw-planning/SKILL.md) | 操作指引模板、方案探索、回退策略 | 方案设计、操作指引、技术方案 |
-| 🔧 实现 | [dw-implementation](../dw-implementation/SKILL.md) | TDD、哨兵值、测试闸门 | TDD、实现、哨兵值、测试闸门 |
-| ✅ 验证 | [dw-verification](../dw-verification/SKILL.md) | 三C判定、偏差修复、功能等价验证 | 验证、三C、偏差、正确性 |
-| 📦 收尾 | [dw-wrapup](../dw-wrapup/SKILL.md) | 文档更新、知识持久化、基线对比 | 收尾、提交、知识持久化、基线对比 |
-| 🗂️ 文件治理 | [dw-file-governance](../dw-file-governance/SKILL.md) | 目录分类、双层临时区租约、无损脱水与冷归档核验 | 文件治理、临时目录、清理、无损脱水、冷归档 |
-| 📤 交接 | [dw-handoff](../dw-handoff/SKILL.md) | 任务重审、参考盘点、TODO 对账、接手文档 | 交接、接手文档、handoff、任务移交 |
-| ✍️ 表述 | [dw-writing](../dw-writing/SKILL.md) | 进度与决策说明、证据表达、任务名称与代号 | 进度汇报、润色说明、说人话、任务命名 |
-| 💬 人机配合 | [dw-interaction](../dw-interaction/SKILL.md) | 明确用户决定、吸收纠正、持续推进与经验复盘 | 人机协作经验、沟通方式、反复确认、目标偏移 |
-| 🤝 协作 | [dw-collaboration](../dw-collaboration/SKILL.md) | 角色、依赖、通信、调度与可选资源协议 | 子agent、多智能体、协作、分派、资源回收 |
-| ⚡ 优化 | [dw-optimization](../dw-optimization/SKILL.md) | 优化原则、决策树、六类优化详解 | 优化、性能、profiling、加速 |
-| 🐛 调试 | [dw-debugging](../dw-debugging/SKILL.md) | 信号诊断、闭环验证、生命周期排查 | 调试、信号诊断、管道排查 |
-| 🛠️ 工具 | [dw-tooling](../dw-tooling/SKILL.md) | 工具发现、能力映射、只读监控台与入口维护 | 工具、MCP、编排、只读监控台 |
-| 📖 参考 | [dw-reference](../dw-reference/SKILL.md) | 检查清单、反模式、快速参考、附录 | 检查清单、反模式、快速参考 |
-| 🔄 更新 | [check-updates](../check-updates/SKILL.md) | Claude/Codex/MCP/CodeGraph/OpenSpec 更新与健康检查 | 检查更新、升级、Codex、CodeGraph、OpenSpec |
+### L0 总控与速查索引（Hub & Quick Reference）
+
+| Skill | 职责定位 | 适用场景 / Trigger |
+|-------|----------|-------------------|
+| 本总纲（`development-workflow`） | 铁律 A1-A4 / B1-B6、风险分级、阶段路由、授权与证据统一契约 | 跨阶段闭环开发、风险门控决策 |
+| [dw-reference](../dw-reference/SKILL.md) | 按场景最小证据表、跨阶段 [方法整合说明](../dw-reference/references/method-integration.md)、合成数据与 GPU 速查 | 快速定位主规范入口与附录检查 |
+
+### L1 研发主生命周期（Core Engineering Lifecycle）
+
+| 阶段 | Skill | 核心职责 | 典型触发 / Trigger |
+|------|-------|----------|-------------------|
+| 🔍 诊断 | [dw-diagnosis](../dw-diagnosis/SKILL.md) | 多维证据收集、因果分类（影响/原因层/置信度）、修复优先级 | 诊断、根因定位、bug 分析、root-cause analysis |
+| 📋 规划 | [dw-planning](../dw-planning/SKILL.md) | 风险匹配操作指引、方案取舍、回退策略与可选 `todo-plan` 跟踪 | 方案设计、操作指引、TODO 计划、rollback plan |
+| 🔧 实现 | [dw-implementation](../dw-implementation/SKILL.md) | TDD（RED-GREEN-REFACTOR）、哨兵值、元数据落盘、分层测试闸门 | TDD、功能实现、数据完整性、gated checks |
+| ✅ 验证 | [dw-verification](../dw-verification/SKILL.md) | 计划逐项对照、三 C（Consistency/Completeness/Correctness）、功能等价 | 完成前验证、三 C、偏差分级、functional equivalence |
+| 📦 收尾 | [dw-wrapup](../dw-wrapup/SKILL.md) | 必要文档同步、知识持久化、基线对比、自有资源清理与提交准备 | 收尾、提交准备、知识持久化、baseline comparison |
+
+### L2 专项技术深潜（Technical Deep-Dives）
+
+| 领域 | Skill | 核心职责 | 典型触发 / Trigger |
+|------|-------|----------|-------------------|
+| 🐛 调试 | [dw-debugging](../dw-debugging/SKILL.md) | 最小独立复现、中间态信号插桩、反向验证、全生命周期逐级排查 | 信号诊断、管道未激活、pipeline debugging |
+| ⚡ 优化 | [dw-optimization](../dw-optimization/SKILL.md) | 五条优化原则、决策树、六类优化层级、本地同口径基准与库选型 | 性能优化、profiling、加速、benchmarking |
+
+### L3 横切沟通、多智能体与续接（Communication, Multi-Agent & Continuity）
+
+| 领域 | Skill | 核心职责 | 典型触发 / Trigger |
+|------|-------|----------|-------------------|
+| 💬 人机配合 | [dw-interaction](../dw-interaction/SKILL.md) | 目标对齐、证据优先追问、授权续接、连续推进与交付验收 | 人机协作、反复确认澄清、目标偏移对齐 |
+| ✍️ 表述 | [dw-writing](../dw-writing/SKILL.md) | 阅读框架、结果与证据强度表达、任务命名/代号与交互流程图 | 进度汇报、技术说明润色、说人话、clear writing |
+| 🤝 协作 | [dw-collaboration](../dw-collaboration/SKILL.md) | 角色写域隔离、厂商中立三层选模、`TaskResourceManager` 与进程状态机 | 子 agent、Agent Teams、model tiering、managed resources |
+| 📤 交接 | [dw-handoff](../dw-handoff/SKILL.md) | 复审五问、TODO 对账、参考盘点、防篡改归档与续接提示词 | 交接、接手文档、session handoff、TODO reconciliation |
+
+### L4 工作区、工具与环境治理（Workspace, Tooling & Environment Governance）
+
+| 领域 | Skill | 核心职责 | 典型触发 / Trigger |
+|------|-------|----------|-------------------|
+| 🛠️ 工具 | [dw-tooling](../dw-tooling/SKILL.md) | 运行时能力发现、插件结构/覆盖率校验与只读监控台规范 | 工具发现、MCP 路由、只读监控台、structure check |
+| 🗂️ 文件治理 | [dw-file-governance](../dw-file-governance/SKILL.md) | 工作区路径边界、八类目录分类、双层临时区租约、六门控脱水与冷归档 | 文件治理、临时目录租约、根目录清理、无损脱水、冷归档 |
+| 🔄 环境检查 | [check-updates](../check-updates/SKILL.md) | Claude Code / Codex / MCP / CodeGraph / OpenSpec 版本与健康只读审计 | 检查更新、环境诊断、registry audit |
+
+### 相邻 Skill 边界速辨（Boundary Disambiguation）
+
+| 易混淆组合 | 职责边界划分 |
+|-----------|-------------|
+| `dw-diagnosis` vs `dw-debugging` | `dw-diagnosis` 偏宏观定位：收集多维证据、划分原因层与置信度、排列修复优先级；`dw-debugging` 偏微观执行：构造最小复现、设计中间态信号、反向验证并沿数据链路逐级定位缺陷。 |
+| `dw-wrapup` vs `dw-handoff` | `dw-wrapup` 面向当前任务圆满收尾：同步文档、清理本任务资源、整理提交与基线记录；`dw-handoff` 面向未完结或需跨对话/跨智能体移交：五问重审、TODO 对账、参考失效清单与恢复提示词。 |
+| `dw-interaction` vs `dw-writing` | `dw-interaction` 管协作流程决策：何时提问、如何应用授权与纠正、何时暂停/推进；`dw-writing` 管文字与可视化呈现：阅读框架、证据强度措辞、术语符号一致性与图表规范。 |
+| `dw-file-governance` vs `dw-collaboration` | `dw-file-governance` 管工作区与磁盘资产：路径白名单、目录分类、轻量临时目录租约（`TempLease1`）、六门控脱水与冷归档；`dw-collaboration` 管多智能体调度与受管后台进程/端口/配额生命周期（`TaskResourceManager`）。 |
 
 ---
 
@@ -145,6 +177,14 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 
 事实、授权、安全要求和机器可读状态由对应流程确定，文字调整须准确保留其语义。
 
+### 中英双语分工原则（Domain-Aligned Bilingual Policy）
+
+为让不同模型在各自擅长领域发挥最高精度，本插件采用**按领域分工的中英双语策略**，不强制单语化：
+
+- **形式化契约与系统原语保持英文主叙事**：多智能体状态机、OS 进程/Job/进程组监管、JSON Schema 契约（如 `TempLease1`、`DehydratedBundle1`、`ArchiveManifest1`、`DwTodoPlan1`）、CLI 参数与机器状态标识（`HOLD`、`UNVERIFIED`、`PASS_STATIC`、`PASS_FOCUSED`、`NOT_RUN`、`FAIL`、`TaskResourceManager`）及常驻规则 [rules/development-workflow.md](../../rules/development-workflow.md) 以**英文**作为权威锚点，并在入口处附中文导航说明，避免翻译漂移削弱形式化推理精度。
+- **研发流转、沟通与文档表达采用中文加英文标准术语**：阶段路由、诊断定位、规划取舍、人机协作（`dw-interaction`）、技术写作（`dw-writing`）与交接（`dw-handoff`）以**中文**为主体，同时在标题与触发描述中嵌入规范英文术语锚点（如 `Root-Cause Diagnosis`、`Minimal Reproducer`、`RED-GREEN-REFACTOR`、`3C: Consistency / Completeness / Correctness`、`Fail-Closed`）。
+- **面向用户的最终答复**：始终跟随用户当前提问所使用的语言（遵循 `dw-writing`）。
+
 ## 授权、资源与内部前置条件
 
 这是各子 Skill 共用的执行原则；角色分工、进度模板、平台适配器或任务板不另外产生审批要求。
@@ -163,7 +203,7 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 
 报告实现状态时分别说明：规则是否写明、实现是否存在、真实入口是否调用、测试使用真实对象还是替身、目标宿主是否验证。缺少生产适配器、进程身份或终态证据时保留未完成/未知，不能凭测试通过推定已经接管全部任务或进程。DW 的对应入口及限制见[自动化覆盖清单](../dw-tooling/references/automation-coverage.md)；该清单的静态校验只证明登记与引用完整。
 
-方案追问与外部方法取舍见[方法整合说明](../dw-planning/references/method-integration.md)。按当前问题选择有用步骤，沿用已有授权，不恢复固定阶段审批或固定审查人数。
+方案追问与外部方法取舍见[方法整合说明](../dw-reference/references/method-integration.md)。按当前问题选择有用步骤，沿用已有授权，不恢复固定阶段审批或固定审查人数。
 
 ## 阶段路由模型
 
@@ -237,32 +277,14 @@ description: Use when 任务横跨诊断、规划、实现、验证、收尾中�
 
 ## 版本记录
 
-历史条目说明当时的设计；当前执行规则以本版本正文为准。
+历史条目说明当时的设计；当前执行规则以本版本正文为准。早期 `1.0–3.12` 完整演进历史见 [references/changelog.md](references/changelog.md)。
 
 | 版本 | 日期 | 变更说明 |
 |------|------|---------|
-| 1.0 | 2026-06-03 | 初始版本 |
-| 1.1 | 2026-06-05 | [新增] 工具普查与编排 |
-| 1.2 | 2026-06-05 | [新增] 铁律 3 + 闭环反馈回路 + 全生命周期排查 |
-| 1.3 | 2026-06-05 | [合并] 优化决策树、功能等价验证 L1-L3 |
-| 1.4 | 2026-06-07 | [新增] 归因优先级 + 铁律4；[融入] OPTIMIZATION_GUIDE |
-| 2.0 | 2026-06-12 | **[重大合并]** 融合 `AI 辅助软件开发方法论`：<br>- 铁律体系重构：工具使用铁律 A1-A4（原铁律 1-4）+ 流程铁律 B1-B5（新增）<br>- 扩展为 7 阶段：新增诊断（阶段 1）、数据完整性防护（阶段 4）、分层测试闸门（阶段 5）<br>- 新增：阶段门控模型、偏差严重度分级 P0-P3、实测驱动调试、测试阈值校准<br>- 新增：哨兵值策略、元数据落盘、自检哨兵<br>- 新增：附录 A（合成测试数据设计原则）、附录 B（GPU 计算开发专项注意事项）<br>- 新增：工具速查目录（MCP/Skills/Agents 完整目录 + 场景速查）<br>- 保留：所有原有内容（优化核心原则×5、决策树×9、能力分层框架×6层、编排模板×3、编排铁律×4、信号诊断、闭环验证、生命周期排查等）<br>- 反模式清单重组织为按阶段分类 + 新增方法论反模式<br>- 检查清单扩充（新增诊断检查清单） |
-| 2.1 | 2026-06-12 | **[合并]** 完整吸收 `OPTIMIZATION_GUIDE`：<br>- 新增：优化方法详解（算法/库/JIT/IO/并发并行/GPU 六类，含代码示例和检查清单）<br>- 新增：JIT 性能对比参考表（Python原生/Numpy/Numba/C DLL）<br>- 新增：性能分析流程（cProfile Hot Path 识别 + Benchmark 方法论）<br>- 新增：附录 C（库选型性能参考：Polars/Pandas/Dask、XGBoost/LightGBM/sklearn、OpenCV/Pillow/imageio、orjson/ujson/json、tqdm/rich、pathlib/os.path）<br>- 新增：优化文档命名规范（OPT_{date}_{desc}.md） |
 | 3.0 | 2026-06-15 | **[架构重构]** 拆分为 1 总纲 + 9 子模块。完整继承 v2.1 全部内容 |
-| 3.1 | 2026-06-26 | **[新增]** `check-updates` 子模块：覆盖 Claude/Codex/MCP/CodeGraph/OpenSpec 环境更新与健康检查 |
-| 3.2 | 2026-07-15 | **[优化]** 跨运行时编辑规范、风险分级计划与验证、条件化工具发现、证据驱动阈值 |
-| 3.3 | 2026-09-11 | **[新增]** `dw-handoff` 子模块：任务全程重新审视、参考内容盘点、TODO 对账与接手文档产出 |
-| 3.4 | 2026-09-11 | **[新增]** 铁律 B6《重要文件增删治理》：重要文件增删完整留痕（含被删内容原文与耐久落点）、旧版本保留、关键文件子 agent 审议 / 用户新对话审核 / 多轮异向自审的审批流程 |
-| 3.5 | 2026-09-17 | [集成候选] 同时保留 dw-handoff/B6 治理与 dw-collaboration 能力优先资源协议；候选未表示已发布或已装载 |
-| 3.6 | 2026-09-22 | [集成候选] 纳入 W 已有的对外表达与正向状态说明；保留 B6、handoff 和 collaboration；源码候选与实际装载分别验收 |
-| 3.7 | 2026-09-27 | [新增] 面向用户的中文说明规则：先写状态、证据、缺口和下一步；减少否定句及普通说明中的抽象词；保留正式状态和安全语义 |
-| 3.8 | 2026-10-06 | [新增] master 合并后的版本迭代规则：补丁、功能和不兼容变更分别递增 PATCH、MINOR、MAJOR；受影响插件的发布面、测试断言和变更记录保持同版本 |
-| 3.9 | 2026-10-16 | [简化] 复用已有授权、Git 历史和相关测试；按具体风险选择审查；支持持久交接与归档恢复 |
-| 3.10 | 2026-10-16 | [拆分] 既有文字表述、中文说明和任务命名规范集中到 dw-writing；总纲与参考规则保留引用 |
-| 3.11 | 2026-10-16 | [整理] 统一证据驱动诊断与适用性判定，收敛参考页和资源协议重复内容；通用工作流与仓库发布策略分别维护 |
-| 3.12 | 2026-11-10 | [整合] 团队职责与能力适配归入协作，进度与决定归入表述，只读监控台归入工具；总纲统一已有授权、资源等待与证据复用，不引入固定团队、重复审批或普遍哈希要求 |
 | 3.13 | 2026-11-17 | [整合] 有边界的方案追问、反例测试与技术审查方法；区分规则、校验库、执行入口及真实宿主验证，维护全部生产源码的约束与测试登记 |
 | 3.14 | 2026-11-25 | **[新增]** `dw-file-governance` 子模块：统一工作区路径边界、八类目录分类、轻量双层临时区租约、六门控无损脱水与不可变冷归档，并与 `dw-wrapup`、`dw-collaboration` 明确职责分层 |
+| 3.15 | 2026-11-26 | **[架构优化]** 将子技能导航重组为四层架构（L0–L4）与四组相邻边界速辨；确立按模型擅长领域分工的中英双语策略；将 `method-integration.md` 迁入 `dw-reference`，并按渐进式披露精简 `dw-planning`、`dw-optimization`、`dw-debugging` 入口 |
 
 ---
 

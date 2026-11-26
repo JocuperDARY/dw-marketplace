@@ -1,11 +1,14 @@
 ---
 name: dw-tooling
-description: Use when 需要发现、选择或组合当前可用工具，盘点配置中的能力，维护技能入口、规则选择与迁移，检查技能和脚本结构，或设计和维护只读监控台时。
+description: Use when 需要发现、选择或组合当前可用工具，盘点配置中的能力，维护技能入口、规则选择与迁移，检查技能和脚本结构，或设计和维护只读监控台时 (runtime capability discovery, skill/hook structure gates, and read-only dashboard design).
 ---
 
-# 工具普查与编排
+# 工具普查与编排（Capability Discovery, Structure Gates & Read-Only Dashboard）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **工具发现、选择、组合与入口维护**。遵循铁律 A4（最小充分工具集）；多 Agent 分派和资源生命周期由 [dw-collaboration](../dw-collaboration/SKILL.md) 维护。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L4 工作区与环境治理** 子模块，覆盖三项互不混淆的职责：
+> 1. **运行时能力发现与路由（Runtime Capability Discovery）**：按当前声明挑选最小充分工具集（铁律 A4）。
+> 2. **插件结构与自动化覆盖校验（Plugin Structure & Coverage Gates）**：维护 `check-skill-structure.js`、`automation-coverage.md` 与规则迁移辅助脚本。
+> 3. **只读观测与监控台规范（Read-Only Monitoring Dashboard）**：维护 [readonly-dashboard.md](references/readonly-dashboard.md)；多 Agent 分派与受管资源生命周期仍由 [dw-collaboration](../dw-collaboration/SKILL.md) 维护。
 
 ---
 
@@ -147,7 +150,7 @@ description: Use when 需要发现、选择或组合当前可用工具，盘点�
 
 新增脚本应解决可确定、反复出现且人工容易遗漏的问题，例如引用漏入发布包、数据解析错误或资源身份校验。需要判断用户意图、文字质量或风险取舍的内容保留为指引；避免用统一字段、固定轮次或新的审批文件替代判断。
 
-维护 Skill 时，按缺陷选择验证方式：结构遗漏用解析/链接检查，输出形状用正向示例，条件误用用正例与反例，压力下的行为偏差用获准的有界场景演练。自动计数命中后仍核对上下文，区分真实行为、引文和示例；不把措辞命中当成遵循规则。方法来源与取舍见 [技能验证与自动化边界](../dw-planning/references/method-integration.md#技能验证与自动化边界)。
+维护 Skill 时，按缺陷选择验证方式：结构遗漏用解析/链接检查，输出形状用正向示例，条件误用用正例与反例，压力下的行为偏差用获准的有界场景演练。自动计数命中后仍核对上下文，区分真实行为、引文和示例；不把措辞命中当成遵循规则。方法来源与取舍见 [技能验证与自动化边界](../dw-reference/references/method-integration.md#技能验证与自动化边界)。
 
 ---
 

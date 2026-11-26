@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.13.0 | 按任务风险调整计划、实现、验证与协作，含文件治理与无损归档、分层 TODO 计划管理、泛化团队选模、人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、16个 Skill（1个总纲 + 15个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.13.1 | 按任务风险调整计划、实现、验证与协作，含四层技能架构、文件治理与无损归档、分层 TODO 计划管理、泛化团队选模、人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、16个 Skill（1个总纲 + 15个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.13.1**：重构 [development-workflow](./plugins/development-workflow/skills/development-workflow/SKILL.md) 四层技能架构导航（L0–L4）、四组相邻边界速辨与按领域优势分工的中英双语规范；将跨阶段 [方法整合说明](./plugins/development-workflow/skills/dw-reference/references/method-integration.md) 迁入 `dw-reference`，并将 `dw-planning`、`dw-optimization`、`dw-debugging` 的长示例与代码清单拆入按需 `references/`，补齐跨模块互链与架构契约回归。技能 ID、路由与脚本契约完全兼容，真实宿主安装与激活验证继续暂缓。
 
 **development-workflow 5.13.0**：新增跨项目[文件治理与无损归档](./plugins/development-workflow/skills/dw-file-governance/SKILL.md)（`dw-file-governance/scripts/workspace_governance.py`），覆盖路径边界与保留设备名门禁、八类目录分类、轻量双层临时区租约（`TempLease1`）及重解析点断路回收、物理 inode 去重空间审计、六道 Fail-Closed 无损脱水（`DehydratedBundle1`）、双格式脱水包校验与不可变冷归档封存（`ArchiveManifest1`）；明确普通开发文件治理与 [dw-collaboration](./plugins/development-workflow/skills/dw-collaboration/references/resource-lifecycle.md) 受管后台进程资源协议的职责分层。治理 CLI 按需显式运行，真实宿主安装与激活验证继续暂缓。
 

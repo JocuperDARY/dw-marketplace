@@ -1,11 +1,11 @@
 ---
 name: dw-handoff
-description: Use when 需要把任务交给下一段对话或其他 Agent，核对目标、项目现状、未完成工作与已有授权，并提供可恢复的接手资料。
+description: Use when 需要把任务交给下一段对话或其他 Agent，核对目标、项目现状、未完成工作与已有授权，并提供可恢复的接手资料 (session handoff, task re-examination, TODO reconciliation, and resumable prompts).
 ---
 
-# 任务交接（Handoff）
+# 任务交接（Session Handoff & Task Reconciliation）
 
-本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块。目标是让接手者理解现状，保护已有工作，并直接推进下一步。
+本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L3 横切沟通与续接** 子模块。目标是让接手者理解现状，保护已有工作，并直接推进下一步。已完成且无需继续推进的圆满收尾见 [dw-wrapup](../dw-wrapup/SKILL.md)。
 
 用户指定下一段对话的用途或重点时，围绕它组织交接，开头写明续接目标、第一项具体动作和完成或停止条件。其他未完成要求仍保留在 TODO 中；调整续接重点本身不代表撤回原要求。
 
@@ -109,3 +109,13 @@ description: Use when 需要把任务交给下一段对话或其他 Agent，核�
 - 已有授权准确保留，新的用户决策明确指出。
 - 文件、参考链接和恢复资料可读；敏感信息已处理。
 - 接手者能从提示词确定续接重点、第一项具体操作和完成或停止条件。
+
+---
+
+## 相关子Skill
+
+- [dw-wrapup](../dw-wrapup/SKILL.md) — 已完成且闭环任务的文档同步、资源清理与提交准备
+- [dw-writing](../dw-writing/SKILL.md) — 交接摘要的结论对齐、证据范围与术语规范
+- [dw-interaction](../dw-interaction/SKILL.md) — 交接后在用户已有授权与重点范围内连续推进
+- [dw-file-governance](../dw-file-governance/SKILL.md) — 本地长期归档与无损脱水校验（`SHA256SUMS`）
+- [development-workflow](../development-workflow/SKILL.md) — 返回总纲

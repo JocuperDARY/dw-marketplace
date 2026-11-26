@@ -1,11 +1,11 @@
 ---
 name: dw-file-governance
-description: Use when 规范项目目录分类、分配或回收临时工作区、清理根目录杂物、对可复算大产物做无损脱水归档、或核验产物完整性与空间账本。
+description: Use when 规范项目目录分类、分配或回收临时工作区、清理根目录杂物、对可复算大产物做无损脱水归档、或核验产物完整性与空间账本 (workspace path gate, taxonomy, TempLease1, lossless dehydration, and cold archive).
 ---
 
-# 工作区文件治理与无损归档
+# 工作区文件治理与无损归档（Workspace Governance & Lossless Archival）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，面向普通开发与跨项目维护，协同 [dw-wrapup](../dw-wrapup/SKILL.md)、[dw-collaboration](../dw-collaboration/SKILL.md) 与 [dw-tooling](../dw-tooling/SKILL.md)，作为工作区路径边界、八类目录分类、轻量双层临时区租约（TempLease1）、无损脱水（DehydratedBundle1）与不可变冷归档（ArchiveManifest1）的唯一规范入口；多智能体受管后台进程、子租约配额与资源账本仍由 [resource-lifecycle.md](../dw-collaboration/references/resource-lifecycle.md) 维护。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L4 工作区与环境治理** 子模块，协同 [dw-wrapup](../dw-wrapup/SKILL.md)、[dw-collaboration](../dw-collaboration/SKILL.md) 与 [dw-tooling](../dw-tooling/SKILL.md)，作为工作区路径边界、八类目录分类、轻量双层临时区租约（TempLease1）、无损脱水（DehydratedBundle1）与不可变冷归档（ArchiveManifest1）的唯一规范入口；多智能体受管后台进程、子租约配额与资源账本仍由 [resource-lifecycle.md](../dw-collaboration/references/resource-lifecycle.md) 维护。
 
 ## 触发场景
 
@@ -62,3 +62,4 @@ description: Use when 规范项目目录分类、分配或回收临时工作区�
 - 路径、目录与临时区规范：[temp-and-directory-governance.md](references/temp-and-directory-governance.md)
 - 无损脱水与冷归档协议：[lossless-dehydration-and-archival.md](references/lossless-dehydration-and-archival.md)
 - 确定性治理脚本入口：[workspace_governance.py](scripts/workspace_governance.py)
+- 关联子 Skill：[dw-wrapup](../dw-wrapup/SKILL.md)（收尾清理） · [dw-collaboration](../dw-collaboration/SKILL.md)（受管进程） · [development-workflow](../development-workflow/SKILL.md)（总纲）
