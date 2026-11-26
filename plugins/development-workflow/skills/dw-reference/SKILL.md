@@ -27,6 +27,7 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 进度汇报 | 已知状态、结果依据、实际限制与下一步 | [表述](../dw-writing/SKILL.md#让进度和决定可追溯) |
 | 复杂技术文档与交互流程图 | 阅读框架与正文对应、术语就近可懂、受影响入口的实际阅读检查 | [写作](../dw-writing/SKILL.md)、[交互流程说明](../dw-writing/references/interactive-html.md) |
 | 只读监控台 | 来源与新鲜度、查询无副作用、失败与未知状态、适用的页面和数据检查 | [工具规范](../dw-tooling/references/readonly-dashboard.md)、[验证](../dw-verification/SKILL.md#观测与协作工具的验证) |
+| 文件治理与无损归档 | 审计/干跑结果、6 门控脱水包或冷归档清单及 SHA-256 复核退出码 0 | [文件治理](../dw-file-governance/SKILL.md) |
 
 风险升高时，按受影响的安全、数据、依赖、硬件、生产或恢复需求扩展检查。外部环境未运行的部分保持未运行或未验证；替代检查只支持其实际覆盖范围。
 
@@ -42,7 +43,8 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 三 C、偏差严重度、容差、完成证据 | [dw-verification](../dw-verification/SKILL.md) |
 | 本地基准、热点、实现选型及优化反模式 | [dw-optimization](../dw-optimization/SKILL.md) |
 | 必要文档、提交准备和普通任务收尾 | [dw-wrapup](../dw-wrapup/SKILL.md) |
-| 协作及资源异常处置的所有权、身份与恢复要求 | [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md) |
+| 工作区路径边界、轻量临时目录租约、无损脱水与冷归档 | [dw-file-governance](../dw-file-governance/SKILL.md) |
+| 协作及受管后台资源与子租约的所有权、身份与恢复要求 | [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md) |
 | 团队职责、依赖、消息与普通宿主能力适配 | [ordinary-collaboration](../dw-collaboration/references/ordinary-collaboration.md) |
 | 只读监控台的数据、接口与服务维护 | [readonly-dashboard](../dw-tooling/references/readonly-dashboard.md) |
 | 方案追问、反例测试、增量工作包与外部方法取舍 | [method-integration](../dw-planning/references/method-integration.md) |

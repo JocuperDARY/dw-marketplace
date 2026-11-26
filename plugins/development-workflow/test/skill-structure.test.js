@@ -166,7 +166,7 @@ if (!current.ok) {
   process.exitCode = 1;
 } else {
   assert.strictEqual(current.scripts.length, 28, 'Inventory includes command dispatch, platform clients and todo-plan CLI');
-  assert.strictEqual(current.runtimeSources.length, 31, 'Inventory includes Windows native, POSIX supervisor and todo-plan sources');
+  assert.strictEqual(current.runtimeSources.length, 32, 'Inventory includes Windows native, POSIX supervisor, todo-plan and file-governance sources');
   console.log('ok - current plugin has no missing skills, references, route targets or test registrations');
 }
 if (!process.exitCode) console.log(`${cases.length + 1}/${cases.length + 1} skill structure tests passed`);

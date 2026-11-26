@@ -218,6 +218,13 @@
       "enforcement": "opt-in-runtime",
       "tests": ["test/todo-plan.test.js"],
       "limits": "Read-only terminal, brief, Markdown and self-contained HTML snapshot renderers; rendered views reflect saved JSON state and perform no write actions."
+    },
+    {
+      "path": "skills/dw-file-governance/scripts/workspace_governance.py",
+      "owner": "dw-file-governance",
+      "enforcement": "opt-in-runtime",
+      "tests": ["test/file-governance.test.js"],
+      "limits": "Cross-project Python 3.9+ stdlib CLI for path checks, lightweight temp leases, reparse-safe reclaim, inode-dedup audit, 6-gate lossless dehydration, bundle verification and cold archive sealing; runs only when explicitly invoked and does not intercept host shell commands or replace managed process supervision."
     }
   ]
 }

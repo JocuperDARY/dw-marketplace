@@ -316,6 +316,43 @@ test('design challenge requests route to bounded planning without treating examp
   }
 });
 
+test('file governance requests route narrowly without matching ordinary file tasks or negations', () => {
+  for (const prompt of [
+    '请清理仓库根目录杂物',
+    '帮我分配临时工作区',
+    '回收孤儿临时目录',
+    '对这批重型产物执行无损脱水',
+    '校验脱水包',
+    '为这个批次生成冷归档索引',
+    'reclaim orphan temp directories',
+    'run lossless dehydration on heavy artifacts',
+    'seal an immutable cold archive',
+  ]) {
+    const result = router.routePrompt(prompt);
+    assert(result && result.id === 'file-governance', prompt);
+    assert.deepStrictEqual(result.skills, ['dw-file-governance']);
+  }
+  for (const prompt of ['修复 workspace_governance.py 报错', '排查无损脱水脚本的 bug']) {
+    assert.strictEqual(route(prompt), 'repair', prompt);
+  }
+  assert.strictEqual(route('请回收本任务的子进程'), 'resource-lifecycle');
+  for (const prompt of [
+    '帮我读取这个文件',
+    '创建一个临时变量 tmp',
+    '清理无用 import',
+    '归档旧分支',
+    '我们不要做无损脱水',
+    '先别清理仓库根目录杂物',
+    "don't reclaim orphan temp directories",
+    '什么是无损脱水？',
+    '请解释一下什么是冷归档',
+    '> 执行无损脱水',
+    '翻译“清理仓库根目录杂物”',
+  ]) {
+    assert.strictEqual(router.routePrompt(prompt), null, prompt);
+  }
+});
+
 let failures = 0;
 try {
   for (const { name, fn } of tests) {

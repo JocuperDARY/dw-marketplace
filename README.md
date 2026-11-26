@@ -6,9 +6,11 @@ Development Workflow 工具集 —— AI 编程助手的开发方法、GPT 桥�
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [development-workflow](./plugins/development-workflow/) | 5.12.0 | 按任务风险调整计划、实现、验证与协作，含分层 TODO 计划管理、泛化团队选模、人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、15个 Skill（1个总纲 + 14个子 Skill）、2 个 hooks 和 8 组规则 |
+| [development-workflow](./plugins/development-workflow/) | 5.13.0 | 按任务风险调整计划、实现、验证与协作，含文件治理与无损归档、分层 TODO 计划管理、泛化团队选模、人机配合、方案质询、自动化覆盖清单、Windows 命令资源适配与测试进程回收、16个 Skill（1个总纲 + 15个子 Skill）、2 个 hooks 和 8 组规则 |
 | [gpt-bridge](./plugins/gpt-bridge/) | 3.0.0 | MCP Server：Claude Code 对话中调用 GPT 执行子任务 |
 | [deepseek-harness-bridge](./plugins/deepseek-harness-bridge/) | 4.0.0 | Codex MCP：持续子智能体、持久约束与运行中通信 |
+
+**development-workflow 5.13.0**：新增跨项目[文件治理与无损归档](./plugins/development-workflow/skills/dw-file-governance/SKILL.md)（`dw-file-governance/scripts/workspace_governance.py`），覆盖路径边界与保留设备名门禁、八类目录分类、轻量双层临时区租约（`TempLease1`）及重解析点断路回收、物理 inode 去重空间审计、六道 Fail-Closed 无损脱水（`DehydratedBundle1`）、双格式脱水包校验与不可变冷归档封存（`ArchiveManifest1`）；明确普通开发文件治理与 [dw-collaboration](./plugins/development-workflow/skills/dw-collaboration/references/resource-lifecycle.md) 受管后台进程资源协议的职责分层。治理 CLI 按需显式运行，真实宿主安装与激活验证继续暂缓。
 
 **development-workflow 5.12.0**：新增可选的跨宿主[分层 TODO 与计划管理器](./plugins/development-workflow/skills/dw-planning/references/todo-plan-manager.md)（`dw-planning/scripts/todo-plan.js`），支持阶段与任务两级 5 态追踪（`pending`/`in_progress`/`completed`/`impossible`/`error`）、跨层级 DAG 与动态拆改（`split-task`/`apply`）、终端/简报/Markdown/静态 HTML 派生视图、以及独占 `.lock` 事务、`claim-next` 并发认领与角色隔离防护；同步将 [dw-collaboration](./plugins/development-workflow/skills/dw-collaboration/SKILL.md) 与[普通协作](./plugins/development-workflow/skills/dw-collaboration/references/ordinary-collaboration.md)的团队选模收敛为厂商中立的 ≥3 能力层级、帕累托最优自动选型与 Author/Verifier 隔离规范。`check-complete` 仅核对所声明 TODO 状态，真实宿主与外部 provider 验证继续暂缓。
 
@@ -181,7 +183,7 @@ npm run check:skills
 
 它校验 Skill 元数据、导航与本地引用、显式路由目标、发布清单及全部 `.test.js` 的入口登记。不会修改源码、替用户作授权决定或检查写作风格。`npm run test:package` 另外生成实际 npm 归档，在隔离目录离线安装后运行包内测试，防止清单存在但文件未实际发布。
 
-路由只给出建议，保留两个 advisory hooks。全部 15 个 Skill 支持显式名称；总纲与快速参考主要通过显式调用使用。领域提示资料已归入 [dw-reference](./plugins/development-workflow/skills/dw-reference/references/domains.json)，不再声明为运行中的 Layer 3 自动注入。
+路由只给出建议，保留两个 advisory hooks。全部 16 个 Skill 支持显式名称；总纲与快速参考主要通过显式调用使用。领域提示资料已归入 [dw-reference](./plugins/development-workflow/skills/dw-reference/references/domains.json)，不再声明为运行中的 Layer 3 自动注入。
 
 旧版 `prune-rules.js` 已移除。运行时选择器不会修改用户规则；若需要把活跃语言规则
 移出自动加载目录，必须先审阅只读迁移计划：

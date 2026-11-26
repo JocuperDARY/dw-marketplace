@@ -121,7 +121,7 @@ description: Use when 需要发现、选择或组合当前可用工具，盘点�
 
 ### 子进程与后台资源
 
-选择工具时确认返回的宿主会话、进程句柄或 PID、超时和清理责任。普通前台命令使用宿主的完成结果；自建后台进程按 [资源生命周期](../dw-collaboration/references/resource-lifecycle.md) 回收，只停止确认属于本任务的资源并核实退出。具体身份、异常恢复和临时目录要求集中在该文档维护。
+选择工具时确认返回的宿主会话、进程句柄或 PID、超时和清理责任。普通前台命令使用宿主的完成结果；普通工作区路径边界、轻量临时目录租约、无损脱水与冷归档由 [dw-file-governance](../dw-file-governance/SKILL.md) 维护；自建后台进程与受管子租约按 [资源生命周期](../dw-collaboration/references/resource-lifecycle.md) 回收，只停止确认属于本任务的资源并核实退出。
 
 ## 自带辅助脚本
 
@@ -134,6 +134,7 @@ description: Use when 需要发现、选择或组合当前可用工具，盘点�
 | `hooks/rules-migrate.js --dry-run` | 预览全局规则迁移；`--apply` 按已有明确授权执行并保留恢复档案。检查路径组件链接，不能代替操作系统的原子防竞态能力。 |
 | `skills/dw-tooling/scripts/check-skill-structure.js --json` | 只读检查元数据、导航与本地链接、路由目标、发布清单和全部测试入口；发现不一致时返回非零退出码。也可运行 `npm run check:skills`。 |
 | `skills/dw-planning/scripts/todo-plan.js` | 可选的跨宿主分层 TODO 与计划管理 CLI（支持 `init`/`status`/`check-complete`/`render` 与加锁原子事务，详见 [分层 TODO 与计划管理器](../dw-planning/references/todo-plan-manager.md)）。仅维护所声明的任务状态与本地派生视图，不替代外部运行验证、代码审查或宿主钩子。 |
+| `skills/dw-file-governance/scripts/workspace_governance.py` | 可选的跨项目工作区文件治理 Python 3.9+ 标准库 CLI（支持 `check-path`/`alloc-temp`/`reclaim-temp`/`audit`/`dehydrate`/`verify-bundles`/`archive-index`，详见 [dw-file-governance](../dw-file-governance/SKILL.md)）。仅显式调用生效，不自动拦截宿主命令或替代受管进程监督。 |
 | [check-updates](../check-updates/SKILL.md) | 检查工具版本与可用更新，沿用该 Skill 的网络、报告和子进程管理说明；不会升级工具。 |
 
 结构检查适合维护本插件。它检查确定性引用和清单，不评价文字质量、不增加审批步骤，也不证明真实宿主发现或加载。实际 npm 归档由包测试另行检查。Skill 路由是提示；总纲和快速参考主要通过显式调用使用，其他技能仅在高置信意图下提示。
@@ -186,5 +187,6 @@ description: Use when 需要发现、选择或组合当前可用工具，盘点�
 - [development-workflow](../development-workflow/SKILL.md) — 返回总纲（铁律 A4 完整内容）
 - [check-updates](../check-updates/SKILL.md) — 检查 Claude/Codex/MCP/CodeGraph/OpenSpec 更新状态
 - [dw-collaboration](../dw-collaboration/SKILL.md) — 复杂协作、能力探针、状态/资源账本与证据闭环
+- [dw-file-governance](../dw-file-governance/SKILL.md) — 工作区目录边界、轻量临时区租约、无损脱水与冷归档工具
 - [dw-implementation](../dw-implementation/SKILL.md) — 实现阶段工具选配
 - [dw-reference](../dw-reference/SKILL.md) — 场景化快速参考

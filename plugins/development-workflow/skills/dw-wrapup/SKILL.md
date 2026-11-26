@@ -40,6 +40,7 @@ description: Use when 实现和验证已结束，需要整理变更证据、同�
 
 - 复用 Git 历史、现有备份和发布归档保存可恢复版本（B6）。
 - 保留独有产物、历史失败和关键决策。清理重复文件前确认恢复来源和用户要求。
+- 对可精确或容差复算的重型产物执行无损脱水（`DehydratedBundle1`），或对不再改动的历史批次封存只读冷归档（`ArchiveManifest1`）时，统一遵循 [dw-file-governance](../dw-file-governance/SKILL.md)。
 
 ---
 
@@ -64,9 +65,9 @@ description: Use when 实现和验证已结束，需要整理变更证据、同�
 
 ## 自有资源清理
 
-普通前台命令根据宿主退出结果和本任务资源记录确认结束。对本任务单独启动的后台资源，在完成、失败或中断时正常停止并确认退出；涉及监听端口时确认释放。只处理已确认属于本任务的资源，保留用户产物与诊断证据。
+普通前台命令根据宿主退出结果和本任务资源记录确认结束。对本任务单独启动的后台资源，在完成、失败或中断时正常停止并确认退出；涉及监听端口时确认释放。只处理已确认属于本任务的资源，保留用户产物与诊断证据。普通开发与维护场景的工作区根目录杂物盘点及 `.dw-temp-lease.json`（`TempLease1`）双层临时目录回收遵循 [dw-file-governance](../dw-file-governance/SKILL.md)。
 
-身份或退出证据不足时保留 `HOLD`/`UNVERIFIED`，如实报告资源标识、当前状态和所缺证据。异常残留、强制终止、事故恢复和显式资源管理协议的身份、观测、路径与恢复要求统一见 [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md)；普通完成无需为此额外建立监测基线。
+身份或退出证据不足时保留 `HOLD`/`UNVERIFIED`，如实报告资源标识、当前状态和所缺证据。后台进程/端口异常残留、强制终止、事故恢复和显式受管资源协议的身份、观测、路径与恢复要求统一见 [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md)；普通完成无需为此额外建立监测基线。
 
 ---
 
@@ -116,4 +117,5 @@ description: Use when 实现和验证已结束，需要整理变更证据、同�
 ## 相关子Skill
 
 - [dw-verification](../dw-verification/SKILL.md) — 收尾前确保三C验证已通过
+- [dw-file-governance](../dw-file-governance/SKILL.md) — 目录分类、临时工作区租约回收、无损脱水与冷归档封存
 - [development-workflow](../development-workflow/SKILL.md) — 返回总纲（铁律 + 阶段门控模型）

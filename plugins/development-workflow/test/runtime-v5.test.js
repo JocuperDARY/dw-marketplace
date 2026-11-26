@@ -281,6 +281,20 @@ test('skill router is quiet for ambiguous prompts and routes explicit repair int
   assert.match(routed.additionalContext, /dw-diagnosis/);
   assert.match(routed.additionalContext, /dw-debugging/);
   assert(Buffer.byteLength(routed.additionalContext, 'utf8') < 1024);
+
+  const fileGov = parseHook(runScript('skill-router.js', {
+    hook_event_name: 'UserPromptSubmit',
+    prompt: '请清理仓库根目录杂物并回收孤儿临时目录',
+  }));
+  assert.match(fileGov.additionalContext, /<dw-route id="file-governance">/);
+  assert.match(fileGov.additionalContext, /development-workflow:dw-file-governance/);
+
+  const fileGovNegated = runScript('skill-router.js', {
+    hook_event_name: 'UserPromptSubmit',
+    prompt: '我们不要清理仓库根目录杂物',
+  });
+  assert.strictEqual(fileGovNegated.status, 0, fileGovNegated.stderr);
+  assert.strictEqual(fileGovNegated.stdout, '');
 });
 
 test('skill router corpus has high precision across positive, negative, negated, and quoted intents', () => {
