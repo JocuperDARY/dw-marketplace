@@ -1015,6 +1015,9 @@ test('hub organizes skills into four layers with bilingual policy and concise en
     assert.match(hub, pair);
   }
   assert.match(hub, /Domain-Aligned Bilingual Policy/);
+  assert.match(hub, /形式化契约与系统原语保持英文主叙事[\s\S]*?TempLease1[\s\S]*?TaskResourceManager/);
+  assert.match(hub, /研发流转、沟通与文档表达采用中文加英文标准术语[\s\S]*?Minimal Reproducer[\s\S]*?RED-GREEN-REFACTOR[\s\S]*?Fail-Closed/);
+  assert.match(hub, /面向用户的最终答复[\s\S]*?始终跟随用户当前提问所使用的语言/);
   assert(hub.includes('references/changelog.md'), 'hub must link extracted references/changelog.md');
 
   assert(
