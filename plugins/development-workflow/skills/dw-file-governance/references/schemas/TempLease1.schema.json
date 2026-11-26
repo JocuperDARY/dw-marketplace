@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-workflow.local/schemas/TempLease1.schema.json",
+  "title": "TempLease1",
+  "description": "Atomic temporary workspace lease written to .dw-temp-lease.json by workspace_governance.py alloc-temp.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "repo_root",
+    "project",
+    "tier",
+    "owner",
+    "task",
+    "pid",
+    "process_start_token",
+    "created_at_utc",
+    "ttl_sec",
+    "canonical_path",
+    "lease_sha256"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dw-temp-lease-v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "repo_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["os", "repo"]
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "process_start_token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ttl_sec": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "canonical_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lease_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

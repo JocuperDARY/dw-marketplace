@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-workflow.local/schemas/DehydratedBundle1.schema.json",
+  "title": "DehydratedBundle1",
+  "description": "Lossless dehydration manifest written atomically to dw-dehydrated-bundle.json before unlinking recomputable heavy artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "created_at_utc",
+    "repo_root",
+    "slot_relpath",
+    "reproducibility_tier",
+    "engine",
+    "parameters_ref",
+    "proof_ref",
+    "dehydrated_targets",
+    "preserved_artifacts",
+    "bundle_sha256"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dw-dehydrated-bundle-v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "repo_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slot_relpath": {
+      "type": "string"
+    },
+    "reproducibility_tier": {
+      "type": "string",
+      "enum": ["deterministic_recompute", "verified_tolerance_recompute"]
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "command_template", "seed"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "command_template": { "type": "string", "minLength": 1 },
+        "seed": { "type": ["string", "null"] }
+      }
+    },
+    "parameters_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relpath", "size_bytes", "sha256"],
+      "properties": {
+        "relpath": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "proof_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relpath", "status", "size_bytes", "sha256"],
+      "properties": {
+        "relpath": { "type": "string", "minLength": 1 },
+        "status": { "const": "VERIFIED" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "dehydrated_targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relpath", "slot_relpath", "size_bytes", "sha256", "st_dev", "st_ino"],
+        "properties": {
+          "relpath": { "type": "string", "minLength": 1 },
+          "slot_relpath": { "type": "string", "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "st_dev": { "type": "integer" },
+          "st_ino": { "type": "integer" }
+        }
+      }
+    },
+    "preserved_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relpath", "slot_relpath", "size_bytes", "sha256"],
+        "properties": {
+          "relpath": { "type": "string", "minLength": 1 },
+          "slot_relpath": { "type": "string", "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "bundle_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

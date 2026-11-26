@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-workflow.local/schemas/ArchiveManifest1.schema.json",
+  "title": "ArchiveManifest1",
+  "description": "Immutable cold-archive manifest written to ARCHIVE-MANIFEST.json by workspace_governance.py archive-index --execute.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "batch_id",
+    "reason",
+    "source_ref",
+    "created_at_utc",
+    "archive_relpath",
+    "file_count",
+    "logical_bytes",
+    "physical_bytes",
+    "files",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dw-archive-manifest-v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "batch_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_ref": {
+      "type": "string"
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archive_relpath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "file_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "logical_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "physical_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relpath", "size_bytes", "sha256"],
+        "properties": {
+          "relpath": { "type": "string", "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

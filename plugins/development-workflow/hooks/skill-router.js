@@ -14,7 +14,8 @@ const SKILL_REGISTRY = Object.freeze([
   ['dw-handoff', 'handoff'], ['dw-optimization', 'optimization'],
   ['dw-writing', 'writing'], ['dw-tooling', 'tooling'],
   ['dw-interaction', 'interaction'],
-  ['dw-collaboration', 'collaboration'], ['dw-reference', null],
+  ['dw-collaboration', 'collaboration'], ['dw-file-governance', 'file-governance'],
+  ['dw-reference', null],
 ].map(([name, route]) => Object.freeze({ name, route, manualOnly: route === null })));
 const SKILL_IDS = Object.freeze(SKILL_REGISTRY.map(skill => skill.name));
 
@@ -76,6 +77,12 @@ const ROUTES = [
     context: 'Use `development-workflow:dw-diagnosis` to establish evidence and root cause, then `development-workflow:dw-debugging` when a fix is requested, followed by `development-workflow:dw-verification`.',
   },
   {
+    id: 'file-governance',
+    skills: ['dw-file-governance'],
+    pattern: /(?:请|帮我|需要)?\s*(?:执行|运行|做|进行|开展)?\s*(?:工作区)?文件治理|(?:分配|签发|申请|回收|清理)\s*(?:双层|孤儿|过期|工作区|项目|\.tmp)?\s*(?:临时目录|临时工作区|临时区租约)|(?:清理|治理|盘点|审计)\s*(?:仓库|项目|工作区)?\s*根目录\s*(?:杂物|散落文件|临时文件)|(?:执行|进行|做|对[^\n，。；,;]{1,24})\s*无损脱水|无损脱水\s*(?:归档|清理|减容)|(?:校验|核验|验证)\s*脱水包|(?:生成|建立|执行|封存|核验|校验)\s*(?:只读|不可变)?\s*冷归档(?:\s*(?:索引|清单|目录))?|\b(?:workspace_governance(?:\.py)?|dw-dehydrated-bundle|alloc-temp|reclaim-temp|verify-bundles|archive-index)\b|\b(?:reclaim\s+(?:orphan|expired|leased)\s+temp\s+(?:dirs?|directories|workspaces?)|lossless\s+dehydrat(?:e|ion)|seal\s+(?:an?\s+)?immutable\s+cold\s+archive)\b/i,
+    context: 'Use `development-workflow:dw-file-governance` for workspace path boundaries, directory taxonomy, lightweight temporary directory leases (`TempLease1`), 6-gate lossless dehydration (`DehydratedBundle1`) and immutable cold archival (`ArchiveManifest1`). Preview with dry-run and verify manifests before destructive actions; managed background process lifecycles stay in `dw-collaboration`.',
+  },
+  {
     id: 'planning',
     skills: ['dw-planning'],
     pattern: /(?:制定|编写|给出|需要|请)?\s*(?:技术方案|实现方案|迁移方案|回退方案|操作指引|架构设计|implementation plan|migration plan|rollback plan|technical design)/i,
@@ -116,7 +123,7 @@ function readPrompt(raw) {
   }
 }
 
-const DEFINITION_TERM = String.raw`(?:fix|debug|debugger|repair|diagnose|troubleshoot|review|plan|implement|implementation|implementation\s+plan|optimi[sz]e|optimization|refactor|debugging|\bbug\b|buggy|updates?|check(?:[\s-]?updates?)?|handoff|code\s+review|security\s+review|final\s+verification|technical\s+design|migration\s+plan|rollback\s+plan|performance\s+analysis|技术方案|实现方案|迁移方案|回退方案|操作指引|架构设计|修复|解决|排查|诊断|定位|调试|优化|重构|加速|降低内存|性能分析|代码审查|代码评审|安全审查|最终验证|回归验证|收尾|整理交付|交接)`;
+const DEFINITION_TERM = String.raw`(?:fix|debug|debugger|repair|diagnose|troubleshoot|review|plan|implement|implementation|implementation\s+plan|optimi[sz]e|optimization|refactor|debugging|\bbug\b|buggy|updates?|check(?:[\s-]?updates?)?|handoff|code\s+review|security\s+review|final\s+verification|technical\s+design|migration\s+plan|rollback\s+plan|performance\s+analysis|file\s+governance|lossless\s+dehydration|cold\s+archive|技术方案|实现方案|迁移方案|回退方案|操作指引|架构设计|修复|解决|排查|诊断|定位|调试|优化|重构|加速|降低内存|性能分析|代码审查|代码评审|安全审查|最终验证|回归验证|收尾|整理交付|交接|工作区文件治理|文件治理|无损脱水|冷归档|临时目录租约|临时区租约|脱水包)`;
 const DEFINITION_TRAILING = String.raw`[\s!?！？。！,，:：]*`;
 
 function hasExplicitRepairIntent(prompt) {
@@ -150,13 +157,13 @@ const DISCOURSE_PREFIX_RE = /^(?:所以|因此|而且|并且|另外|同时|此�
 const LEAD_CONSEQUENT_RE = /^(?:就|则|便|那么)\s*/;
 const LEAD_NEGATION_TOKEN_RE = /^(?:请(?!问)|麻烦|我们|咱们|我|你们|你|您|大家|双方|助手|AI|智能体|模型|这里|此处|这儿|(?:今天|现在|当前|目前|眼下|现阶段|本阶段|我们|咱们|我|你|您)(?:的)?|暂且|暂时|先|本来|原本|根本|压根|既|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话|对话|项目|分支|版本)(?:的|里|中)?|还|也|就|都|只)\s*/i;
 const TRAIL_NEGATION_TOKEN_RE = /\s*(?:我们|咱们|我|你们|你|您|大家|(?:这|本|此|该)(?:一)?(?:轮|次|步|阶段|回|任务|会话)|暂且|暂时|目前|当前|今天|现在|眼下|现阶段|本阶段|这里|此处|先|还|也|就|都|只)+$/;
-const CN_ACTION_VERB_SOURCE = '(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动|进行|执行|继续|修复|解决|排查|诊断|定位|调试|润色|改写|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|复盘|总结|设计|规划|制定|编写|给出|分派|委派|派出|安排|管理|回收|停止|监管|补齐|接入|接通|收尾|接手|移交|交接|管|(?<!启)动|碰|搭理|理会|弄|搞)';
+const CN_ACTION_VERB_SOURCE = '(?:写|做|修|改|查|看|跑|建|整理|生成|输出|提交|合并|发布|使用|调用|处理|推进|开展|启动|进行|执行|继续|修复|解决|排查|诊断|定位|调试|润色|改写|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|复盘|总结|设计|规划|制定|编写|给出|分派|委派|派出|安排|管理|回收|停止|监管|补齐|接入|接通|收尾|接手|移交|交接|清理|治理|脱水|封存|签发|审计|核验|校验|分配|申请|管|(?<!启)动|碰|搭理|理会|弄|搞)';
 const CN_NEGATION_RE = new RegExp(
   `(?:不要(?!忘)|(?<![识级类特个区判鉴甄性错派国版告道离分永诀惜阔])别(?![名称号样致字扭针墅离的处人忘])(?:\\s*(?:再|先|去|把|用|对|替|帮|乱|瞎))?\\s*(?:${CN_ACTION_VERB_SOURCE}|[a-z]{2,})|无需|无须|不需要|不必|不用|切?勿|暂不|并非|(?<!是)不是(?!不)|不想(?!不)|不打算|不准备|不考虑|不再|不能(?!不)|(?<!不[得能可会是])不(?!得不|能不|可不|会不|是不|仅|但|只|光|单|止)\\s*${CN_ACTION_VERB_SOURCE})`,
   'i'
 );
-const EN_NEGATION_RE = /^(?:please\s+)?(?:let'?s\s+not\b|no\s+need\s+(?:to|for)\b|(?:(?:we|you|i)\s+)?(?:should\s+not|shouldn't|must\s+not|need\s+not|would\s+rather\s+not)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:need(?:\s+to)?|want\s+to)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:write|create|generate|make|prepare|produce|do|run|use|call|invoke|fix|debug|repair|diagnose|troubleshoot|review|plan|implement|optimi[sz]e|refactor|build|manage|reclaim|supervise|report|summarize|check|wrap\s+up)\b|do\s+not\b|don't\b|dont\b|without\b)/i;
-const LEADING_REQUEST_VERB_RE = /^(?:修复|解决|排查|诊断|定位|调试|制定|编写|给出|设计|规划|整理|总结|复盘|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|给我|润色|改写|简化|准备|分派|委派|派出|安排|使用|调用|启动|管理|回收|停止|监管|补齐|接入|接通|写|生成|输出|\b(?:fix|debug|repair|diagnose|troubleshoot|write|create|give|implement|build|review|check|optimi[sz]e|refactor|report|explain|describe|translate|use|spawn|delegate|manage|reclaim|supervise)\b)/i;
+const EN_NEGATION_RE = /^(?:please\s+)?(?:let'?s\s+not\b|no\s+need\s+(?:to|for)\b|(?:(?:we|you|i)\s+)?(?:should\s+not|shouldn't|must\s+not|need\s+not|would\s+rather\s+not)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:need(?:\s+to)?|want\s+to)\b|(?:(?:we|you|i)\s+)?(?:do\s+not|don't|dont)\s+(?:write|create|generate|make|prepare|produce|do|run|use|call|invoke|fix|debug|repair|diagnose|troubleshoot|review|plan|implement|optimi[sz]e|refactor|build|manage|reclaim|supervise|report|summarize|check|dehydrate|seal|archive|clean|wrap\s+up)\b|do\s+not\b|don't\b|dont\b|without\b)/i;
+const LEADING_REQUEST_VERB_RE = /^(?:修复|解决|排查|诊断|定位|调试|制定|编写|给出|设计|规划|整理|总结|复盘|改进|优化|重构|加速|实现|搭建|构建|创建|修改|审查|评审|检查|验证|盘点|发现|选择|列出|查看|确认|汇报|报告|提供|给我|润色|改写|简化|准备|分派|委派|派出|安排|使用|调用|启动|管理|回收|停止|监管|补齐|接入|接通|清理|治理|脱水|封存|签发|审计|核验|校验|分配|申请|写|生成|输出|\b(?:fix|debug|repair|diagnose|troubleshoot|write|create|give|implement|build|review|check|optimi[sz]e|refactor|report|explain|describe|translate|use|spawn|delegate|manage|reclaim|supervise|dehydrate|seal|archive|clean)\b)/i;
 const BARE_DETERMINER_OBJECT_RE = /^(?:(?:一(?:个|份|套|版|项|条)|这(?:个|份|段|套|项|条)|那(?:个|份|段)|该|此)\s*)?$/;
 const TOPIC_NOUN_PHRASE_RE = /^(?:实现方案|技术方案|迁移方案|回退方案|架构设计|整理交付|检查更新|代码审查|代码评审|安全审查|最终验证|回归验证|性能分析|进度汇报)$/;
 const CONDITIONAL_PREFIX_RE = /^(?:如果|若|要是|假如|倘若|只要|除非|当|万一)\s*|^if\s+/i;

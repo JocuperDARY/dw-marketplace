@@ -1,6 +1,6 @@
 # DW 自动化覆盖与执行边界
 
-本页说明当前脚本实际负责什么，以及哪些判断仍由执行者负责。范围包括全部 15 个 Skill、8 份规则、hooks 与 Skill scripts 下的 28 个生产源码，以及测试入口。逐文件归属、约束类型与测试登记见 [机器可读清单](automation-coverage.json)。清单登记完整不等于行为覆盖完整，也不代表测试已经执行。
+本页说明当前脚本实际负责什么，以及哪些判断仍由执行者负责。范围包括全部 16 个 Skill、8 份规则、hooks 与 Skill scripts 下的 32 个生产源码，以及测试入口。逐文件归属、约束类型与测试登记见 [机器可读清单](automation-coverage.json)。清单登记完整不等于行为覆盖完整，也不代表测试已经执行。
 
 ## 按职责查看
 
@@ -9,7 +9,7 @@
 | development-workflow | 会话 hook 提取上下文；路由 hook 建议入口；规则迁移有预检和回退 | 授权范围、风险和是否需要某阶段；hook 不拦截后续操作 |
 | dw-interaction | 复用显式入口、窄范围意图路由和 Skill 结构检查 | 用户当前决定、纠正的含义、是否应追问及经验能否泛化；不以关键词或消息数量自动授权、验收 |
 | dw-diagnosis | 复用日志、测试结果和有界工具盘点 | 问题定义、因果解释、会话证据是否充分 |
-| dw-planning | 协作契约可检查依赖、写域、预算字段和状态 | 方案取舍、问题依赖的含义、何时足以执行 |
+| dw-planning | 分层 TODO 与计划管理 CLI（`todo-plan`）；协作契约可检查依赖、写域、预算字段和状态 | 方案取舍、问题依赖的含义、何时足以执行 |
 | dw-implementation | 注册测试检查具体行为；必要时调用已有资源后端 | 不强制所有文字修改 TDD，不以测试数量代替正确性 |
 | dw-debugging | 回归样例、失败循环记录及有界等待能力 | 根因与相关性区别；不按固定失败次数断言架构错误 |
 | dw-verification | 测试运行器记录 pass/fail/skip/not-run；Windows 测试命令经私有 Job 回收；证据工具检查结构与关联 | 结果能否支持声明、其他平台的回收证据、真实宿主验收 |
@@ -21,6 +21,7 @@
 | dw-tooling | 结构、路由目标、源码登记、测试登记与打包声明检查 | 已登记不等于已加载、可调用或验证通过 |
 | dw-reference | 结构检查可验证相对引用 | 内容归属和是否过时；参考页不成为新的审批层 |
 | check-updates | 版本/配置读取、报告、Windows 有界命令执行、显式 POSIX 进程组执行 | 不安装升级；未选择 POSIX 后端时外部命令保持 HOLD，原生验证待办 |
+| dw-file-governance | 路径边界与保留设备名检查、双层临时区租约与重解析点安全回收、物理去重审计、6 门控无损脱水、双格式包校验、不可变冷归档封存与核验 | 显式调用 Python CLI 才生效；不自动拦截宿主命令，是否可复算、外部白名单前缀及授权范围由执行者与用户决定 |
 
 规则复用对应职责，不另外实现相同的审批或凭证链。两个已注册 hook 是 SessionStart 和 UserPromptSubmit，均提供提示；没有把提示内容当作不可绕过的执行层约束。
 
@@ -52,4 +53,4 @@
 
 先指出要保护的对象、真正发生副作用的入口、失败时怎样停止/回收，以及能区分正确行为的反例；优先复用已有实现。只有输出可判定、入口可接通且失败语义清楚时才加硬约束。对设计价值、授权语义、因果和写作质量，保留有针对性的审查，不增加固定审批次数、团队人数、全量哈希或重复检查。
 
-本版交付边界见 [Windows 命令 adapter](../../dw-collaboration/references/windows-command-adapter.md)、[命令队列](../../dw-collaboration/references/resource-command-dispatcher.md) 和 [POSIX 进程组后端](../../dw-collaboration/references/posix-command-backend.md)。仍待独立实现或验收：临时目录和重连接适配、POSIX 原生行为、真实宿主接线。不能把当前命令适配扩大为对所有资源、任意 adapter 或全部宿主的保证。
+本版交付边界见 [Windows 命令 adapter](../../dw-collaboration/references/windows-command-adapter.md)、[命令队列](../../dw-collaboration/references/resource-command-dispatcher.md)、[POSIX 进程组后端](../../dw-collaboration/references/posix-command-backend.md) 与 [工作区文件治理](../../dw-file-governance/SKILL.md)。仍待独立实现或验收：受管资源层的子租约配额/重连接适配、POSIX 原生行为、真实宿主接线。不能把当前命令或治理脚本适配扩大为对所有资源、任意 adapter 或全部宿主的自动接管保证。

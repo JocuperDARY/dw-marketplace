@@ -4,7 +4,7 @@ For the opt-in Windows stdio execution backend and host configuration recipe, se
 [process-supervisor.md](process-supervisor.md). Its private Job Object enforces
 ownership at launch; it does not change the full manager contracts below.
 
-Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and the task record; they do not require the optional managed protocol.
+Scope: the detailed identity, incident-response and recovery checks below apply to managed resources or a concrete recovery investigation. Ordinary completed commands use the host's exit result and the task record; they do not require the optional managed protocol. Ordinary cross-project workspace path boundaries, directory taxonomy, lightweight temporary directory leases (`TempLease1`), lossless dehydration (`DehydratedBundle1`), and immutable cold archival (`ArchiveManifest1`) are owned by [dw-file-governance](../../dw-file-governance/SKILL.md).
 
 ## Ordinary task completion
 
@@ -66,6 +66,8 @@ For a process, runtime thread, terminal, command session, or port, preserve this
 `REQUEST_GRACEFUL`, `WAIT_BOUNDED`, and `TERMINATE_EXACT_TREE` are decisions, not execution receipts. `TERMINATE_EXACT_TREE` requires exact generation plus PID/handle, start time, executable hash, argv hash, parent identity hash, launch nonce, native process-manager run ID when available, and the bound cwd, port, or purpose. PID reuse, command drift, parent drift, scope drift, generation drift, an unknown owner, or a duplicate run lock produces `HOLD` or `OBSERVE_ONLY`; it never widens termination authority. An observed exit is not reclaimed until absence is verified.
 
 ## Temporary allocation manifest
+
+> Tier boundary: use this `TemporaryAllocationIdentity2` / `ResourceLedger1` manifest protocol for managed multi-agent background tasks that enforce per-child byte quotas, disk watermarks, and lease generations. For ordinary single-task temporary workspaces and `.dw-temp-lease.json` (`TempLease1`) leases, see [temp-and-directory-governance.md](../../dw-file-governance/references/temp-and-directory-governance.md).
 
 Before a child may write, seal one manifest containing exactly:
 
