@@ -1,9 +1,11 @@
 ---
 name: dw-collaboration
-description: Use when designing or running agent collaboration, defining roles, dependencies, communication and scheduling, selecting model/effort by live capabilities, or managing task-owned resources.
+description: Use when designing or running agent collaboration, defining roles, dependencies, communication and scheduling, selecting model/effort by live capabilities, or managing task-owned resources (多智能体协作、角色写域隔离、分层选模与受管资源生命周期).
 ---
 
 # Multi-agent collaboration
+
+> 隶属 [development-workflow](../development-workflow/SKILL.md) **L3 横切多智能体与受管资源层**：本页的形式化状态机、进程监管与 Schema 契约保持英文规范锚点；普通团队分工与选模参考见中文文档 [ordinary-collaboration.md](references/ordinary-collaboration.md)，轻量工作区目录与临时区租约见 [dw-file-governance](../dw-file-governance/SKILL.md)。
 
 Select intelligence and collaboration topology separately. Classify task type, dependency depth, risk/reversibility, phase, latency/cost, and validation failure cost. Request the least expensive model/effort that can satisfy the acceptance gate; record the actual model or effort only from host-observed execution metadata.
 
@@ -27,7 +29,7 @@ rounds, model names, dashboards or persistent task records for every task.
 
 When assembling a multi-agent team for complex multi-module work, keep the root session as the single coordinator and final acceptance authority, and choose each delegated worker's model and reasoning effort explicitly rather than inheriting the root model across all roles. Because available model pools vary widely (fewer than three, three, four, or more options), prefer user-specified model lineups first after verifying live interface support. When the user is unsure how to assign models, offer an automatic selection flow: inspect the live available model list, ask the user which models are usable and permitted, research current capability/cost/latency tradeoffs to derive a Pareto-optimal lineup, and assign roles by subtask difficulty across at least three general capability tiers—high-assurance decision/audit/escalation, core design/implementation/independent-verification, and low-cost routine execution/retrieval—expanding to more tiers or collapsing conservatively as the frontier allows and tuning effort within a tier when supported. Parallelize writers only on disjoint write domains inside isolated working copies or branches, keep read-only researchers, auditors, and independent verifiers on a shared read-only view without editing business files, stop retrying after two consecutive identical failure signatures to escalate for replanning, and merge plus verify an isolated writer's work before destroying its worker or workspace; see [ordinary collaboration](references/ordinary-collaboration.md).
 
-For incremental work, use the [work-package guidance](../dw-planning/references/method-integration.md#增量工作包): share exact interface decisions and evidence locations, then verify the returned change against its acceptance criteria. Related failures may share a cause; establish independence before splitting them. A narrower fix review checks the original findings and new risks in the fix, with review depth determined by the remaining uncertainty.
+For incremental work, use the [work-package guidance](../dw-reference/references/method-integration.md#增量工作包): share exact interface decisions and evidence locations, then verify the returned change against its acceptance criteria. Related failures may share a cause; establish independence before splitting them. A narrower fix review checks the original findings and new risks in the fix, with review depth determined by the remaining uncertainty.
 
 ## Optional managed resource protocol
 

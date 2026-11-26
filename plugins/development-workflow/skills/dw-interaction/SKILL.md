@@ -1,11 +1,11 @@
 ---
 name: dw-interaction
-description: Use when 需要改善人机协作、纠正反复误解或重复询问、重新对齐目标与授权，或从历史对话提炼可复用的协作经验。
+description: Use when 需要改善人机协作、纠正反复误解或重复询问、重新对齐目标与授权，或从历史对话提炼可复用的协作经验 (human-AI goal alignment, minimal-question escalation, authorization continuity, and retrospective review).
 ---
 
-# 人机协作与沟通
+# 人机协作与沟通（Human-AI Alignment & Continuity）
 
-本 skill 属于 [development-workflow](../development-workflow/SKILL.md)。当用户、执行者和观察者对目标、权限、进度或完成的理解不一致时，用它恢复共同理解并继续工作。简单事项保持直接对话。长任务复用现有任务记录。
+本 skill 属于 [development-workflow](../development-workflow/SKILL.md) **L3 横切沟通层**。当用户、执行者和观察者对目标、权限、进度或完成的理解不一致时，用它恢复共同理解并继续工作。简单事项保持直接对话，长任务复用现有任务记录。
 
 ## 对齐用户要得到的结果
 

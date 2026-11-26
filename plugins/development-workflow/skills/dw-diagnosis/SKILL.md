@@ -1,11 +1,11 @@
 ---
 name: dw-diagnosis
-description: Use when 需要在提出修复方案前收集证据、复现症状、区分根因与表象，或对多个候选根因排序。
+description: Use when 需要在提出修复方案前收集证据、复现症状、区分根因与表象，或对多个候选根因排序 (evidence collection, symptom reproduction, root-cause classification, and fix prioritization).
 ---
 
-# 诊断与根因定位
+# 诊断与根因定位（Root-Cause Diagnosis & Evidence Triage）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **阶段一：诊断与根因定位**。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L1 研发主生命周期** 的子模块，覆盖 **阶段一：诊断与根因定位**；微观信号插桩与链路追踪见 [dw-debugging](../dw-debugging/SKILL.md)。
 
 **核心原则：永久修复前先取得足以区分根因的证据。** 生产事故可先做可逆隔离、回滚或关闭开关来降低影响，但必须把临时 containment 与永久修复分开记录，并继续根因分析。
 
@@ -32,7 +32,7 @@ description: Use when 需要在提出修复方案前收集证据、复现症状�
 - 用多个独立来源的证据交叉验证同一假设
 - 区分"相关"与"因果"——多个根因可能叠加
 
-分析 Agent 会话、重复执行或成本异常时，先确认目标会话与时间范围，区分用户消息、注入指令、工具结果和子任务派单，再关联调用、回执和对应文件。缺失的事件或用量字段保留未知，不能按零补齐；历史记录和当前环境观察分别标注。按具体问题裁剪维度，方法来源见 [逐源映射](../dw-planning/references/method-integration.md#逐源映射)。
+分析 Agent 会话、重复执行或成本异常时，先确认目标会话与时间范围，区分用户消息、注入指令、工具结果和子任务派单，再关联调用、回执和对应文件。缺失的事件或用量字段保留未知，不能按零补齐；历史记录和当前环境观察分别标注。按具体问题裁剪维度，方法来源见 [逐源映射](../dw-reference/references/method-integration.md#逐源映射)。
 
 ### 第 3 步：分开记录影响、原因与置信度
 

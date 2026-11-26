@@ -1,6 +1,6 @@
-# 外部方法整合与按需使用
+# 外部方法整合与按需使用（Method Integration Reference）
 
-本页为 DW 的可选专题参考，不新增 Skill、默认团队或执行阶段。行为要求分别由 [规划](../SKILL.md)、[实现](../../dw-implementation/SKILL.md)、[诊断](../../dw-diagnosis/SKILL.md)、[调试](../../dw-debugging/SKILL.md)、[验证](../../dw-verification/SKILL.md)、[协作](../../dw-collaboration/SKILL.md) 和 [工具](../../dw-tooling/SKILL.md) 维护；已有授权、证据复用与恢复原则仍遵循 [总纲](../../development-workflow/SKILL.md#授权资源与内部前置条件)。
+本页为 DW 的可选专题参考，不新增 Skill、默认团队或执行阶段。行为要求分别由 [规划](../../dw-planning/SKILL.md)、[实现](../../dw-implementation/SKILL.md)、[诊断](../../dw-diagnosis/SKILL.md)、[调试](../../dw-debugging/SKILL.md)、[验证](../../dw-verification/SKILL.md)、[协作](../../dw-collaboration/SKILL.md) 和 [工具](../../dw-tooling/SKILL.md) 维护；已有授权、证据复用与恢复原则仍遵循 [总纲](../../development-workflow/SKILL.md#授权资源与内部前置条件)。
 
 ## 来源与范围
 

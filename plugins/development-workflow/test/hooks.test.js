@@ -999,10 +999,63 @@ test('collaboration guidance defines vendor-neutral model tiers and team isolati
   }
 });
 
+test('hub organizes skills into four layers with bilingual policy and concise entrypoints', () => {
+  const hub = fs.readFileSync(path.join(pluginRoot, 'skills', 'development-workflow', 'SKILL.md'), 'utf8');
+  assert.match(hub, /4-Layer Architecture/);
+  for (const layer of ['L0 ', 'L1 ', 'L2 ', 'L3 ', 'L4 ']) {
+    assert(hub.includes(layer), `hub missing architecture layer ${layer.trim()}`);
+  }
+  assert.match(hub, /相邻 Skill 边界速辨/);
+  for (const pair of [
+    /dw-diagnosis.*dw-debugging/,
+    /dw-wrapup.*dw-handoff/,
+    /dw-interaction.*dw-writing/,
+    /dw-file-governance.*dw-collaboration/,
+  ]) {
+    assert.match(hub, pair);
+  }
+  assert.match(hub, /Domain-Aligned Bilingual Policy/);
+  assert.match(hub, /形式化契约与系统原语保持英文主叙事[\s\S]*?TempLease1[\s\S]*?TaskResourceManager/);
+  assert.match(hub, /研发流转、沟通与文档表达采用中文加英文标准术语[\s\S]*?Minimal Reproducer[\s\S]*?RED-GREEN-REFACTOR[\s\S]*?Fail-Closed/);
+  assert.match(hub, /面向用户的最终答复[\s\S]*?始终跟随用户当前提问所使用的语言/);
+  assert(hub.includes('references/changelog.md'), 'hub must link extracted references/changelog.md');
+
+  assert(
+    fs.existsSync(path.join(pluginRoot, 'skills', 'dw-reference', 'references', 'method-integration.md')),
+    'method-integration.md must live in dw-reference/references/',
+  );
+  assert(
+    !fs.existsSync(path.join(pluginRoot, 'skills', 'dw-planning', 'references', 'method-integration.md')),
+    'stale dw-planning/references/method-integration.md must be removed',
+  );
+  for (const relRef of [
+    'skills/development-workflow/references/changelog.md',
+    'skills/dw-planning/references/operation-guide-example.md',
+    'skills/dw-optimization/references/optimization-patterns-and-examples.md',
+    'skills/dw-debugging/references/signal-and-lifecycle-walkthrough.md',
+  ]) {
+    assert(fs.existsSync(path.join(pluginRoot, relRef)), `missing extracted reference ${relRef}`);
+  }
+
+  const skillDirs = fs.readdirSync(path.join(pluginRoot, 'skills'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  assert.strictEqual(skillDirs.length, 16, 'expected 16 canonical skill directories');
+  for (const dir of skillDirs) {
+    if (dir === 'development-workflow') continue;
+    const lines = fs.readFileSync(path.join(pluginRoot, 'skills', dir, 'SKILL.md'), 'utf8').split(/\r?\n/).length;
+    assert(lines <= 200, `${dir}/SKILL.md exceeds concise entrypoint threshold (${lines} > 200 lines)`);
+    if (dir === 'dw-file-governance') {
+      assert(lines <= 120, `dw-file-governance/SKILL.md exceeds 120 lines (${lines})`);
+    }
+  }
+});
+
 const retainedContractTests = new Set([
   'development-workflow package includes check-updates skill assets',
   'documentation states evidence boundaries and manager entry points',
   'collaboration guidance defines vendor-neutral model tiers and team isolation',
+  'hub organizes skills into four layers with bilingual policy and concise entrypoints',
   'check-updates defaults to remote checking and has explicit local-only opt-out',
   'task-utils does not export an automatic git commit helper',
   'hook self-check covers every JavaScript command in hooks.json',

@@ -1,11 +1,11 @@
 ---
 name: dw-wrapup
-description: Use when 实现和验证已结束，需要整理变更证据、同步必要文档、清理临时资源、准备提交或记录可复用决策。
+description: Use when 实现和验证已结束，需要整理变更证据、同步必要文档、清理临时资源、准备提交或记录可复用决策 (post-verification wrap-up, doc sync, cleanup, and commit preparation).
 ---
 
-# 收尾与知识持久化
+# 收尾与知识持久化（Wrap-Up & Release Preparation）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **证据整理、必要文档同步、资源清理与提交准备**。遵循铁律 A3（按已有授权执行）、B6（重要修改的记录与恢复）。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L1 研发主生命周期** 的子模块，覆盖 **证据整理、必要文档同步、资源清理与提交准备**；未完结或跨会话移交见 [dw-handoff](../dw-handoff/SKILL.md)。遵循铁律 A3（按已有授权执行）、B6（重要修改的记录与恢复）。
 
 ---
 

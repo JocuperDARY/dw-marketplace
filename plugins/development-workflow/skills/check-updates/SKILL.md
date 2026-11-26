@@ -1,11 +1,11 @@
 ---
 name: check-updates
-description: Use when 用户要求检查、比较或排查 Claude Code、Codex、MCP、Plugins、Skills、CodeGraph 或 OpenSpec 的本地版本、注册状态、项目状态或可用更新。
+description: Use when 用户要求检查、比较或排查 Claude Code、Codex、MCP、Plugins、Skills、CodeGraph 或 OpenSpec 的本地版本、注册状态、项目状态或可用更新 (read-only CLI, MCP, skill, and index health/update audit).
 ---
 
-# Check Updates - 全局环境更新检查
+# Check Updates - 全局环境更新检查（Environment & Registry Audit）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **AI 编程环境的工具更新、注册状态和健康检查**。它替代旧版只检查 Claude Code 插件/MCP/技能的三段式脚本，新增对 CodeGraph、OpenSpec 和 Codex 的适配。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L4 工作区与环境治理** 子模块，覆盖 **AI 编程环境的工具更新、注册状态和健康检查**。它替代旧版只检查 Claude Code 插件/MCP/技能的三段式脚本，新增对 CodeGraph、OpenSpec 和 Codex 的适配。
 
 ---
 

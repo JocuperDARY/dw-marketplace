@@ -1,11 +1,11 @@
 ---
 name: dw-reference
-description: Use when 需要快速查阅开发流程的场景裁剪、规范入口、合成测试数据原则或 GPU 开发注意事项。
+description: Use when 需要快速查阅开发流程的场景裁剪、规范入口、合成测试数据原则或 GPU 开发注意事项 (quick evidence matrix, canonical spec index, synthetic test oracle principles, and GPU notes).
 ---
 
-# 快速参考与附录
+# 快速参考与附录（Quick Reference & Appendices）
 
-可按需查阅 [静态领域参考](references/domains.json)。该资料提供领域提示与规则入口，不参与 hook 的自动评分或注入；其中 `Read rules/...` 路径相对于插件根目录。
+> 隶属 [development-workflow](../development-workflow/SKILL.md) **L0 总控与速查索引层**。可按需查阅 [静态领域参考](references/domains.json) 与 [外部方法整合说明](references/method-integration.md)。该资料提供领域提示与规则入口，不参与 hook 的自动评分或注入；其中 `Read rules/...` 路径相对于插件根目录。
 
 本 skill 提供场景入口与简短摘要。详细执行规则由链接指向的 Skill 维护；当前用户目标、授权和任务范围决定哪些步骤适用。
 
@@ -47,7 +47,7 @@ description: Use when 需要快速查阅开发流程的场景裁剪、规范入�
 | 协作及受管后台资源与子租约的所有权、身份与恢复要求 | [resource-lifecycle](../dw-collaboration/references/resource-lifecycle.md) |
 | 团队职责、依赖、消息与普通宿主能力适配 | [ordinary-collaboration](../dw-collaboration/references/ordinary-collaboration.md) |
 | 只读监控台的数据、接口与服务维护 | [readonly-dashboard](../dw-tooling/references/readonly-dashboard.md) |
-| 方案追问、反例测试、增量工作包与外部方法取舍 | [method-integration](../dw-planning/references/method-integration.md) |
+| 方案追问、反例测试、增量工作包与外部方法取舍 | [method-integration](references/method-integration.md) |
 | 用户说明、进度与决定、任务名称和代号 | [dw-writing](../dw-writing/SKILL.md) |
 
 ## 完成前简查

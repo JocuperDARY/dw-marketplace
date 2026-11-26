@@ -1,11 +1,11 @@
 ---
 name: dw-verification
-description: Use when 准备声称变更完成、修复有效、行为等价或性能提升，或需要按一致性、完整性和正确性评估证据。
+description: Use when 准备声称变更完成、修复有效、行为等价或性能提升，或需要按一致性、完整性和正确性评估证据 (3C verification: Consistency, Completeness, Correctness, functional equivalence, and evidence audit).
 ---
 
-# 系统性验证与偏差修复
+# 系统性验证与偏差修复（3C Verification & Evidence Audit）
 
-> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) 的子模块，覆盖 **系统性验证与偏差修复**。遵循铁律 B3（进展检查与偏差处理）。
+> 本 skill 是 [development-workflow](../development-workflow/SKILL.md) **L1 研发主生命周期** 的子模块，覆盖 **系统性验证与偏差修复**。遵循铁律 B3（进展检查与偏差处理）。
 
 **核心原则：完成声明必须由与风险匹配、可复现且新鲜的证据支持；能量化时量化，不能量化时给出明确判据。**
 
@@ -111,7 +111,7 @@ FOR EACH 偏差:
 
 先把意见还原为具体触发条件、预期行为与可能影响，再核对当前实现、调用方、兼容性要求和证据。评审者的身份、语气与严重度标签不能替代技术判断；计划遗漏的正常输入也要按实际后果评估。逐项记录已证实、已反证或尚不能验证，以及采纳、拒绝或暂缓的理由。
 
-已证实的问题按现有修复授权处理，用能重现该问题的检查验证修复，再复核受影响路径。意见不清楚时先查可得事实，只向有决定权的人澄清仍影响实现的部分；不关联的工作继续。复核围绕原发现和修复新增风险展开，已有同版本证据仍可复用。审查范围、证据缺口和工作包衔接见 [评审与恢复](../dw-planning/references/method-integration.md#评审与恢复)。
+已证实的问题按现有修复授权处理，用能重现该问题的检查验证修复，再复核受影响路径。意见不清楚时先查可得事实，只向有决定权的人澄清仍影响实现的部分；不关联的工作继续。复核围绕原发现和修复新增风险展开，已有同版本证据仍可复用。审查范围、证据缺口和工作包衔接见 [评审与恢复](../dw-reference/references/method-integration.md#评审与恢复)。
 
 ---
 
